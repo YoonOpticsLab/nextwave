@@ -22,6 +22,9 @@ project(
 
 # You should usually split this into folders, but this is a simple example
 
+include_directories(common/include)
+include_directories(common/include/boost_1_83_0)
+
 # This is a "default" library, and will match the *** variable setting.
 # Other common choices are STATIC, SHARED, and MODULE
 # Including header files here helps IDEs but is not required.

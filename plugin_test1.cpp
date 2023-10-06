@@ -1,12 +1,5 @@
 #include <iostream>
 #include "nextwave_plugin.hpp"
-
-#if _WIN64
-#include <windows.h>
-#define DECL extern "C"  __declspec(dllexport) int
-#else
-#define DECL extern "C" int
-#endif
 	
 DECL init(void)
 {
