@@ -1,3 +1,5 @@
+import numpy as np
+
 numbytes={
     'uint8_t':1,
     'uint16_t':2,
@@ -14,8 +16,22 @@ struct_codes={
     'uint64_t':'Q' # longlong
 } 
 
+def pytpe(str_type):
+    return str_type[:-2]
+
 # https://docs.python.org/3.9/library/struct.html
-  
+
+def get_array_item(layout,bytes,which_item, which_index):
+    entry = layout[1][which_item]
+    array_start=entry['bytenum_current']
+
+    itemsize=numbytes[ entry['type'] ]
+    first=array_start+itemsize*which_index
+    data = np.frombuffer(bytes[first:first+itemsize], pytpe(entry['type']), count=1)[0]
+    if 'int' in pytpe(entry['type']):
+        data=int(data) # Make an untyped int size (in case we are in something like a multiply
+    return data
+    
 def get_header_format(filname):
     with open(filname) as f:
         lines=f.readlines()

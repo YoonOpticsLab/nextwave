@@ -15,14 +15,18 @@
     4: Each image captured - print dimensions and value of the first pixel
 */
 
-#include <iostream>
-#include <memory.h>
-#if defined (_WIN32)
+
+
+#if defined (_WIN32) || defined(_WIN64)
+//#include "stdafx.h"
 #include <xiApi.h>       // Windows
 #include <Windows.h>
 #else
 #include <m3api/xiApi.h> // Linux, OSX
 #endif
+
+#include <iostream>
+#include <memory.h>
 
 // For NextWave Plugin
 #include "nextwave_plugin.hpp"
@@ -70,9 +74,6 @@ DECL init(void)
 
 	pShmHeader->current_frame = (uint8_t)nCurrRing;
 	pShmHeader->timestamps[nCurrRing] = (uint8_t)0;
-
-
-
 			
 	HANDLE xiH = NULL;
 	try {	
@@ -94,6 +95,8 @@ DECL init(void)
 		//memset(&image, 0, sizeof(image));
 		image.size = sizeof(XI_IMG);
 
+		uint8_t first=1;
+		
 		while (1) //((GetKeyState('Q') !=  0) )
 		{
 			int height, width;
@@ -103,19 +106,25 @@ DECL init(void)
 
 			height=(int)image.height; (int)width=image.width;	// TODO: needn't do this every time
 			
-
+			if (first) {
+				//std::cout << "Height: " << height << " width: " << width << "\n"; // TODO: Get std:cout working !!!!
+				char* mess[256];
+				sprintf((char * const)mess, (const char*)"Height: %d, width: %d\n", height, width);
+				printf((const char *)mess);
+				first=0;
+			}
+				
 			// Current frame:
 			pShmHeader->current_frame = (uint8_t)nCurrRing;
 			pShmHeader->statuses[nCurrRing] = (uint8_t)NW_STATUS_READ;
 			pShmHeader->timestamps[nCurrRing] = (uint64_t)image.tsUSec;
 			
-
-#if 1
+			pShmHeader->dimensions[0] = (uint16_t)height; // Needn't do this every time
+			pShmHeader->dimensions[1] = (uint16_t)width;			
+			
 			memcpy( ((uint8_t *)(pShmBuffer)+height*width*nCurrRing),
 				(void*)image.bp,
-				height*width);
-#endif //0
-				
+				height*width);		
 
             pShmHeader->lock = (uint8_t)0; // Keep out until we are done!
 

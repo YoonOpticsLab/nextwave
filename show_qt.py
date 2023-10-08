@@ -7,8 +7,10 @@ import mmap
 
 from numba import jit
 
-HEIGHT=2048
-WIDTH=2048
+import extract_memory
+
+QIMAGE_HEIGHT=2048
+QIMAGE_WIDTH=2048
 
 HEIGHT_WIN=1500
 WIDTH_WIN=768
@@ -16,8 +18,8 @@ WIDTH_WIN=768
 MEM_LEN=512
 MEM_LEN_DATA=2048*2048*32
 
-x=np.arange( WIDTH )
-y=np.arange( HEIGHT )
+x=np.arange( QIMAGE_WIDTH )
+y=np.arange( QIMAGE_HEIGHT )
 X,Y=np.meshgrid(x,y)
 
 
@@ -62,36 +64,43 @@ class Test(QMainWindow):
     self.initUI() 
 
     MEM_LEN=512
-    self.shmem_hdr=mmap.mmap(-1,MEM_LEN,"DC_SRC0_HDR")
+    self.shmem_hdr=mmap.mmap(-1,MEM_LEN,"NW_SRC0_HDR")
     MEM_LEN_DATA=2048*2048*32
-    self.shmem_data=mmap.mmap(-1,MEM_LEN_DATA,"DC_SRC0_DATA")
+    self.shmem_data=mmap.mmap(-1,MEM_LEN_DATA,"NW_SRC0_BUFFER")
 
     self.setFixedSize(1024,800)
     self.move( 100,100 )
+    
+    self.layout=extract_memory.get_header_format('common/include/memory_layout.h')    
 
  def doit(self):
-    buf=self.shmem_hdr.seek(0)
-    buf=self.shmem_hdr.read(MEM_LEN)
-#    print ('%02x'%buf[88],end=' ', flush=True);
+    # TODO: Wait until it's safe (unlocked)
+    mem_header=self.shmem_hdr.seek(0)
+    mem_header=self.shmem_hdr.read(MEM_LEN)
+    height=extract_memory.get_array_item(self.layout,mem_header,'dimensions',0)
+    width=extract_memory.get_array_item(self.layout,mem_header,'dimensions',1)    
+    print ('%dx%d'%(height,width),end=' ', flush=True);
+    #print( type(height) )
 
     self.shmem_data.seek(0)
-    im_buf=self.shmem_data.read(2048*2048)
-    bytez =np.frombuffer(im_buf, dtype='uint8', count=2048*2048 )
-    bytes2=np.reshape(bytez,( 2048,2048)).copy()
+    im_buf=self.shmem_data.read(width*height)
+    bytez =np.frombuffer(im_buf, dtype='uint8', count=width*height )
+    bytes2=np.reshape(bytez,( height,width)).copy()
 
     bytesf = bytes2 / np.max(bytes2)
 
-    weighted_x = X*np.array(bytesf,dtype='float')
-    weighted_y = Y*np.array(bytesf,dtype='float')
-    cen=find_centroids(boxes,bytesf,weighted_x,weighted_y,nboxes)
-    print( cen )
+    if False:
+        weighted_x = X*np.array(bytesf,dtype='float')
+        weighted_y = Y*np.array(bytesf,dtype='float')
+        cen=find_centroids(boxes,bytesf,weighted_x,weighted_y,nboxes)
+        print( cen )
 
-    cx=int(cen[0][0])
-    cy=int(cen[0][1])
-    bytes2[(cx-10):(cx+10),(cx-12):(cx-10)] = 255
-    bytes2[(cx-10):(cx+10),(cx+10):(cx+12)] = 255
-    bytes2[(cx-12):(cx-10),(cx-10):(cx+10)] = 255
-    bytes2[(cx+10):(cx+12),(cx-10):(cx+10)] = 255
+        cx=int(cen[0][0])
+        cy=int(cen[0][1])
+        bytes2[(cx-10):(cx+10),(cx-12):(cx-10)] = 255
+        bytes2[(cx-10):(cx+10),(cx+10):(cx+12)] = 255
+        bytes2[(cx-12):(cx-10),(cx-10):(cx+10)] = 255
+        bytes2[(cx+10):(cx+12),(cx-10):(cx+10)] = 255
 
     qimage = QImage(bytes2, bytes2.shape[1], bytes2.shape[0],
                  QImage.Format_Grayscale8)
@@ -110,7 +119,7 @@ class Test(QMainWindow):
      pixmap_label.setAlignment(Qt.AlignCenter)
      self.pixmap_label=pixmap_label
 
-     im_np = np.ones((HEIGHT,WIDTH),dtype='uint8')
+     im_np = np.ones((QIMAGE_HEIGHT,QIMAGE_WIDTH),dtype='uint8')
      #im_np = np.transpose(im_np, (1,0,2))
      qimage = QImage(im_np, im_np.shape[1], im_np.shape[0],
                      QImage.Format_Mono)
