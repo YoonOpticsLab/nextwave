@@ -22,8 +22,8 @@ project(
 
 # You should usually split this into folders, but this is a simple example
 
-include_directories(common/include)
-include_directories(common/include/boost_1_83_0)
+#include_directories(common/include)
+include_directories(d:/code/boost_1_83_0)
 
 # This is a "default" library, and will match the *** variable setting.
 # Other common choices are STATIC, SHARED, and MODULE
@@ -48,3 +48,4 @@ add_executable(engine engine.cpp)
 #enable_testing()
 #add_test(NAME MyExample COMMAND MyExample)
 
+add_subdirectory(plugin_ximea)

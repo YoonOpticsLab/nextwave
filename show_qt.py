@@ -71,7 +71,7 @@ class Test(QMainWindow):
     self.setFixedSize(1024,800)
     self.move( 100,100 )
     
-    self.layout=extract_memory.get_header_format('common/include/memory_layout.h')    
+    self.layout=extract_memory.get_header_format('memory_layout.h')    
 
  def doit(self):
     # TODO: Wait until it's safe (unlocked)
