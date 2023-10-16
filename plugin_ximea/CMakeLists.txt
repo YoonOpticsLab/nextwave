@@ -17,6 +17,5 @@ include_directories(../common/include/boost_1_83_0)
 include(add_xiapi.cmake)
 #include(add_executable.cmake)
 
-
 add_library(plugin_ximea SHARED plugin_ximea.cpp ../nextwave_plugin.hpp)
-set_target_properties(plugin_ximea PROPERTIES LIBRARY_OUTPUT_DIRECTORY "../debug"  )
+set_target_properties(plugin_ximea PROPERTIES LIBRARY_OUTPUT_DIRECTORY ".."  )

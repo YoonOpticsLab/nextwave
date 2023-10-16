@@ -37,9 +37,11 @@
 #if _WIN64
 // Add this directory (right-click on project in solution explorer, etc.)
 #include "boost/interprocess/windows_shared_memory.hpp"
-#include "boost/interprocess/mapped_region.hpp"
 #else
+#include "boost/interprocess/shared_memory_object.hpp"
 #endif
+#include "boost/interprocess/mapped_region.hpp"
+
 using namespace boost::interprocess;
 
 // Check error macro. It executes function. Print and throw error if result is not OK.
@@ -47,15 +49,21 @@ using namespace boost::interprocess;
 
 DECL init(void)
 {
+  using namespace boost::interprocess;
 #if _WIN64
-    windows_shared_memory shmem(open_or_create, SHMEM_HEADER_NAME, read_write, (size_t)SHMEM_HEADER_SIZE);
-    mapped_region shmem_region{ shmem, read_write };
-	
-    windows_shared_memory shmem2(open_or_create, SHMEM_BUFFER_NAME, read_write, (size_t)SHMEM_BUFFER_SIZE);
-    mapped_region shmem_region2{ shmem2, read_write };	
+  windows_shared_memory shmem(open_or_create, SHMEM_HEADER_NAME, read_write, (size_t)SHMEM_HEADER_SIZE);
+  windows_shared_memory shmem2(open_or_create, SHMEM_BUFFER_NAME, read_write, (size_t)SHMEM_BUFFER_SIZE);
 #else
-	// TODO: Linux version
+  shared_memory_object shmem(open_or_create, SHMEM_HEADER_NAME, read_write);
+  shmem.truncate((size_t)SHMEM_HEADER_SIZE);
+  shared_memory_object shmem2(open_or_create, SHMEM_BUFFER_NAME, read_write);
+  shmem.truncate((size_t)SHMEM_BUFFER_SIZE);
 #endif
+
+  // Common to both OSes:
+  mapped_region shmem_region{ shmem, read_write };
+  mapped_region shmem_region2{ shmem2, read_write };
+
 	struct shmem_header* pShmHeader = (struct shmem_header*) shmem_region.get_address();
 	struct shmem_header* pShmBuffer = (struct shmem_header*) shmem_region2.get_address();
 
@@ -104,7 +112,7 @@ DECL init(void)
 					
             pShmHeader->lock = (uint8_t)1; // Keep out until we are done!
 
-			height=(int)image.height; (int)width=image.width;	// TODO: needn't do this every time
+            height=(int)image.height; width=(int)image.width;	// TODO: needn't do this every time
 			
 			if (first) {
 				//std::cout << "Height: " << height << " width: " << width << "\n"; // TODO: Get std:cout working !!!!
