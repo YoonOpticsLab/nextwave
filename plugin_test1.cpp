@@ -1,25 +1,25 @@
 #include <iostream>
 #include "nextwave_plugin.hpp"
 	
-DECL init(void)
+DECL init(char *param)
 {
-  std::cout <<"P1 init";
+  std::cout <<"P1 init" <<"\n";
   return 42;
 };
 
-DECL do_process(void)
+DECL do_process(char *params)
 {
   std::cout <<"P1 do_process\n" ;
   return 0;
 };
 
-DECL set_params(const char* settings_as_json)
+DECL set_params(char* settings_as_json)
 {
   std::cout <<"P1 set_params " << settings_as_json << "\n";
   return 0;
 };
  
-DECL get_info(const char* which_info)
+DECL get_info(char* which_info)
 {
   std::cout <<"P1 get_info";
   return 0;

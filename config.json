@@ -1,0 +1,8 @@
+{
+    "./libplugin_fileplayer.so":
+    {"type": "generator",
+     "filename": "../spots_X.bmp"},
+
+    "./libplugin_test1.so":
+    {"inplace": "there"}
+}

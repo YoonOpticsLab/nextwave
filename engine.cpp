@@ -109,20 +109,18 @@ public:
   std::string name;
   // TODO: port # for pipe comm
   void *handle; // Does this work for Windows also?
-  int (*fp_init)();
-  int (*fp_do_process)();
+  int (*fp_init)(const char*);
+  int (*fp_do_process)(const char*);
   int (*fp_set_params)(const char*);
-  const char * (*fp_get_params)(const char*);
+  int (*fp_get_params)(const char*);
 };
 
-int load_module(std::string name, std::list<struct module> listModules)
+int load_module(std::string name, std::string params, std::list<struct module> listModules)
 {
 #if _WIN64
   HMODULE handle=0;
-  int (*fptr)();
 #else
   void *handle=0;
-  int (*fptr)();
 #endif
 
   struct module aModule;
@@ -143,30 +141,70 @@ int load_module(std::string name, std::list<struct module> listModules)
   chkerr();
   //std::cout << handle << " Ok1\n" << std::flush;;
 
+  int (*fptr)(const char*);
 #if _WIN64
-  *(void **)(&fptr)=GetProcAddress(handle,"init");
+  *(int **)(&fptr)=GetProcAddress(handle,"init");
 #else
-  *(void **)(&fptr) = dlsym(handle,"do_process");
+  *(int **)(&fptr) = (int *)dlsym(handle,"init");
 #endif
+  aModule.fp_init=fptr;
 
 chkerr();
 //std::cout <<" Ok2\n" << std::flush;;
 
  spdlog::info("Loaded {} {}", name, handle);
+ int result=(*fptr)(params.c_str());
+ spdlog::info("Inited {} {}", name, handle);
 
  aModule.handle=handle;
  listModules.push_back(aModule);
  return 0; // OK
 }
 
-int main()
+using std::to_string;
+
+int main(int argc, char** argv)
 {
+  if (argc<2) {
+    std::cout << "Please specify a config file." << "\n";
+    exit(-1);
+  };
+  std::string filename_config = argv[1];
+
+  spdlog::info("Main");
+
+  std::list<struct module> listModules;
+
+  std::ifstream fil(filename_config);
+  json jdata = json::parse(fil);
+
+  // iterate the array
+  for (json::iterator it = jdata.begin(); it != jdata.end(); ++it) {
+    //json jd2 = it.value(); // How to recurse
+    //std::cout << jd2["data"] << "\n";
+
+    std::string name=it.key();
+    std::string value=to_string(it.value());
+
+    //spdlog::info("Once {}", value);
+    //std::cout << name << ':' << value << "\n";
+
+    int err=load_module(name, value, listModules);
+  }
+
   using namespace boost::interprocess;
 #if _WIN64
     windows_shared_memory shmem(open_or_create, SHMEM_HEADER_NAME, read_write, (size_t)SHMEM_HEADER_SIZE);
     windows_shared_memory shmem2(open_or_create, SHMEM_BUFFER_NAME, read_write, (size_t)SHMEM_BUFFER_SIZE);
 #else
-    shared_memory_object shmem(open_or_create, SHMEM_HEADER_NAME, read_write);
+
+    struct shm_remove
+    {
+      shm_remove() { shared_memory_object::remove(SHMEM_HEADER_NAME); }
+      ~shm_remove(){ shared_memory_object::remove(SHMEM_BUFFER_NAME); spdlog::info("Removed"); }
+    } remover;
+
+ shared_memory_object shmem(open_or_create, SHMEM_HEADER_NAME, read_write);
     shmem.truncate((size_t)SHMEM_HEADER_SIZE);
     shared_memory_object shmem2(open_or_create, SHMEM_BUFFER_NAME, read_write);
     shmem2.truncate((size_t)SHMEM_BUFFER_SIZE);
@@ -175,23 +213,6 @@ int main()
     // Common to both OSes:
     mapped_region shmem_region{ shmem, read_write };
     mapped_region shmem_region2{ shmem2, read_write };
-
-  spdlog::info("Main");
-
-  std::list<struct module> listModules;
-
-  std::ifstream fil("example.json");
-  json jdata = json::parse(fil);
-  // iterate the array
-  for (json::iterator it = jdata.begin(); it != jdata.end(); ++it) {
-    //std::cout << it.key() << ':' << it.value() << "\n";
-    json jd2 = it.value(); // How to recurse
-    std::string name=it.key();
-    //std::cout << jd2["data"] << "\n";
-
-    int err=load_module(name, listModules);
-}
-
   //spdlog::info("Main {}", jdata["pi"]);
 
   // range-based for

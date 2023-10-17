@@ -51,3 +51,4 @@ add_executable(engine engine.cpp)
 #add_test(NAME MyExample COMMAND MyExample)
 
 add_subdirectory(plugin_ximea)
+add_subdirectory(plugin_fileplayer)
