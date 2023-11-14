@@ -1,1 +1,1 @@
-build\debug\engine.exe
+build\debug\engine.exe config.json

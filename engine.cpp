@@ -118,7 +118,7 @@ public:
 int load_module(std::string name, std::string params, std::list<struct module> listModules)
 {
 #if _WIN64
-  HMODULE handle=0;
+  void *handle=0;
 #else
   void *handle=0;
 #endif
@@ -143,7 +143,7 @@ int load_module(std::string name, std::string params, std::list<struct module> l
 
   int (*fptr)(const char*);
 #if _WIN64
-  *(int **)(&fptr)=GetProcAddress(handle,"init");
+  *(int **)(&fptr)=(int *)GetProcAddress((HMODULE)handle,"init");
 #else
   *(int **)(&fptr) = (int *)dlsym(handle,"init");
 #endif

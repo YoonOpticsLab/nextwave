@@ -24,7 +24,7 @@ project(
 
 #include_directories(common/include)
 #include_directories(d:/code/boost_1_83_0)
-include_directories(/home/dcoates/code/boost_1_81_0)
+include_directories(include/boost_1_83_0)
 include_directories(include)
 
 # This is a "default" library, and will match the *** variable setting.
@@ -50,5 +50,7 @@ add_executable(engine engine.cpp)
 #enable_testing()
 #add_test(NAME MyExample COMMAND MyExample)
 
-add_subdirectory(plugin_ximea)
-add_subdirectory(plugin_fileplayer)
+#add_subdirectory(plugin_ximea)
+# add_subdirectory(plugin_fileplayer)
+
+add_subdirectory(plugin_flir)
