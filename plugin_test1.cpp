@@ -7,9 +7,15 @@ DECL init(char *param)
   return 42;
 };
 
-DECL do_process(char *params)
+DECL process(char *params)
 {
-  std::cout <<"P1 do_process\n" ;
+//  std::cout <<"P1 do_process\n" ;
+  return 0;
+};
+
+DECL close(char *params)
+{
+  std::cout <<"P1 close\n" ;
   return 0;
 };
 

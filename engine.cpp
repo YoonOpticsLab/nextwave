@@ -110,12 +110,13 @@ public:
   // TODO: port # for pipe comm
   void *handle; // Does this work for Windows also?
   int (*fp_init)(const char*);
+  int (*fp_close)(const char*);
   int (*fp_do_process)(const char*);
   int (*fp_set_params)(const char*);
   int (*fp_get_params)(const char*);
 };
 
-int load_module(std::string name, std::string params, std::list<struct module> listModules)
+int load_module(std::string name, std::string params, std::list<struct module> &listModules)
 {
 #if _WIN64
   void *handle=0;
@@ -125,7 +126,9 @@ int load_module(std::string name, std::string params, std::list<struct module> l
 
   struct module aModule;
 
+  
 #if _WIN64
+  name += std::string(".dll");
   handle=LoadLibrary(name.c_str());
 #else
   handle=dlopen(name.c_str(), RTLD_NOW|RTLD_LOCAL);
@@ -141,19 +144,26 @@ int load_module(std::string name, std::string params, std::list<struct module> l
   chkerr();
   //std::cout << handle << " Ok1\n" << std::flush;;
 
-  int (*fptr)(const char*);
+  int (*fptr )(const char*);
+  int (*fptr2)(const char*);
+  int (*fptr3)(const char*);
 #if _WIN64
   *(int **)(&fptr)=(int *)GetProcAddress((HMODULE)handle,"init");
+  *(int **)(&fptr2)=(int *)GetProcAddress((HMODULE)handle,"process");
+  *(int **)(&fptr3)=(int *)GetProcAddress((HMODULE)handle,"close");
 #else
   *(int **)(&fptr) = (int *)dlsym(handle,"init");
 #endif
+  aModule.name = name;
   aModule.fp_init=fptr;
+  aModule.fp_do_process=fptr2;
+  aModule.fp_close=fptr3;
 
 chkerr();
 //std::cout <<" Ok2\n" << std::flush;;
 
  spdlog::info("Loaded {} {}", name, handle);
- int result=(*fptr)(params.c_str());
+ int result=(**aModule.fp_init)(params.c_str());
  spdlog::info("Inited {} {}", name, handle);
 
  aModule.handle=handle;
@@ -196,15 +206,16 @@ int main(int argc, char** argv)
 #if _WIN64
     windows_shared_memory shmem(open_or_create, SHMEM_HEADER_NAME, read_write, (size_t)SHMEM_HEADER_SIZE);
     windows_shared_memory shmem2(open_or_create, SHMEM_BUFFER_NAME, read_write, (size_t)SHMEM_BUFFER_SIZE);
+    windows_shared_memory shmem3(open_or_create, SHMEM_BUFFER_NAME2, read_write, (size_t)SHMEM_BUFFER_SIZE2);
 #else
 
     struct shm_remove
     {
-      shm_remove() { shared_memory_object::remove(SHMEM_HEADER_NAME); }
-      ~shm_remove(){ shared_memory_object::remove(SHMEM_BUFFER_NAME); spdlog::info("Removed"); }
+      shm_remove() { shared_memory_object::remove(SHMEM_HEADER_NAME); shared_memory_object::remove(SHMEM_BUFFER_NAME); shared_memory_object::remove(SHMEM_BUFFER_NAME2); }
+      ~shm_remove(){ shared_memory_object::remove(SHMEM_HEADER_NAME); shared_memory_object::remove(SHMEM_BUFFER_NAME); shared_memory_object::remove(SHMEM_BUFFER_NAME2); spdlog::info("Removed"); }
     } remover;
 
- shared_memory_object shmem(open_or_create, SHMEM_HEADER_NAME, read_write);
+	shared_memory_object shmem(open_or_create, SHMEM_HEADER_NAME, read_write);
     shmem.truncate((size_t)SHMEM_HEADER_SIZE);
     shared_memory_object shmem2(open_or_create, SHMEM_BUFFER_NAME, read_write);
     shmem2.truncate((size_t)SHMEM_BUFFER_SIZE);
@@ -213,6 +224,7 @@ int main(int argc, char** argv)
     // Common to both OSes:
     mapped_region shmem_region{ shmem, read_write };
     mapped_region shmem_region2{ shmem2, read_write };
+    mapped_region shmem_region3{ shmem3, read_write };
   //spdlog::info("Main {}", jdata["pi"]);
 
   // range-based for
@@ -235,6 +247,38 @@ int main(int argc, char** argv)
   //#else
   //dlclose(handle);
   //#endif
+  
+	spdlog::info("Before Q");
+	char ps_nothing[64] = "test"; //.c_str();
+	while ( (GetKeyState('Q') & 0x8000) == 0)
+	{
+		for (struct module it: listModules) {
+			int result=(*it.fp_do_process)(ps_nothing);
+		}
+			
+		if ( (GetKeyState('P') & 0x8000) != 0 )
+		{
+			spdlog::info("paused");
+
+			while ( (GetKeyState('C') & 0x8000) == 0)
+			{
+				Sleep(250); // sleep for X ms
+			};
+
+			spdlog::info("continue");
+		}
+
+	};
+	
+  //std::list<struct module> listModules;
+
+	std::cout << listModules.size();
+
+  // iterate the array
+  for (struct module it: listModules) {
+	std::cout << listModules.size();
+	spdlog::info(it.name.c_str());
+	}
 
   chkerr();
 }

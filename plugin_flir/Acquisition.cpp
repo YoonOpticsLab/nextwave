@@ -44,9 +44,21 @@
 #include <iostream>
 #include <sstream>
 
-#include <iostream>
-#include <iomanip>
-#include <ctime>
+#include <Windows.h>
+
+// For NextWave Plugin
+#include "nextwave_plugin.hpp"
+#pragma pack(push,1)
+#include "memory_layout.h"
+#pragma pack(pop) // restore previous setting
+
+// Add this directory (right-click on project in solution explorer, etc.)
+//#include "C:\Users\drcoates\Documents\code\nextwave\boost_1_83_0"
+#include "boost/interprocess/windows_shared_memory.hpp"
+#include "boost/interprocess/mapped_region.hpp"
+using namespace boost::interprocess;
+
+#define NUM_IMAGES 10
 
 using namespace Spinnaker;
 using namespace Spinnaker::GenApi;
@@ -136,115 +148,37 @@ int DisableGVCPHeartbeat(CameraPtr pCam)
     return ConfigureGVCPHeartbeat(pCam, false);
 }
 
+
+
+	
+// Global variable:
+CameraPtr pCam = nullptr;
+CameraList camList;
+unsigned int numCameras;
+SystemPtr mySystem;
+ImageProcessor processor;
+
+uint16_t nCurrRing = 0; //persist across calls
+		
 // This function acquires and saves 10 images from a device.
-int AcquireImages(CameraPtr pCam, INodeMap& nodeMap, INodeMap& nodeMapTLDevice)
+int AcquireImages(CameraPtr pCam) //, INodeMap& nodeMap, INodeMap& nodeMapTLDevice)
 {
     int result = 0;
 
-    cout << endl << endl << "*** IMAGE ACQUISITION ***" << endl << endl;
+#if 1
+    windows_shared_memory shmem(open_or_create, SHMEM_HEADER_NAME, read_write, (size_t)SHMEM_HEADER_SIZE);
+    mapped_region shmem_region{ shmem, read_write };
 
-    try
-    {
-        //
-        // Set acquisition mode to continuous
-        //
-        // *** NOTES ***
-        // Because the example acquires and saves 10 images, setting acquisition
-        // mode to continuous lets the example finish. If set to single frame
-        // or multiframe (at a lower number of images), the example would just
-        // hang. This would happen because the example has been written to
-        // acquire 10 images while the camera would have been programmed to
-        // retrieve less than that.
-        //
-        // Setting the value of an enumeration node is slightly more complicated
-        // than other node types. Two nodes must be retrieved: first, the
-        // enumeration node is retrieved from the nodemap; and second, the entry
-        // node is retrieved from the enumeration node. The integer value of the
-        // entry node is then set as the new value of the enumeration node.
-        //
-        // Notice that both the enumeration and the entry nodes are checked for
-        // availability and readability/writability. Enumeration nodes are
-        // generally readable and writable whereas their entry nodes are only
-        // ever readable.
-        //
-        // Retrieve enumeration node from nodemap
-        CEnumerationPtr ptrAcquisitionMode = nodeMap.GetNode("AcquisitionMode");
-        if (!IsReadable(ptrAcquisitionMode) ||
-            !IsWritable(ptrAcquisitionMode))
-        {
-            cout << "Unable to set acquisition mode to continuous (enum retrieval). Aborting..." << endl << endl;
-            return -1;
-        }
+    windows_shared_memory shmem2(open_or_create, SHMEM_BUFFER_NAME, read_write, (size_t)SHMEM_BUFFER_SIZE);
+    mapped_region shmem_region2{ shmem2, read_write };
+#endif //0
 
-        // Retrieve entry node from enumeration node
-        CEnumEntryPtr ptrAcquisitionModeContinuous = ptrAcquisitionMode->GetEntryByName("Continuous");
-        if (!IsReadable(ptrAcquisitionModeContinuous))
-        {
-            cout << "Unable to get or set acquisition mode to continuous (entry retrieval). Aborting..." << endl << endl;
-            return -1;
-        }
+//cout << endl << endl << "*** IMAGE ACQUISITION ***" << endl << endl;
+	// Retrieve, convert, and save images
+	const unsigned int k_numImages = 1;
+	try {
 
-        // Retrieve integer value from entry node
-        const int64_t acquisitionModeContinuous = ptrAcquisitionModeContinuous->GetValue();
-
-        // Set integer value from entry node as new value of enumeration node
-        ptrAcquisitionMode->SetIntValue(acquisitionModeContinuous);
-
-        cout << "Acquisition mode set to continuous..." << endl;
-
-        //
-        // Begin acquiring images
-        //
-        // *** NOTES ***
-        // What happens when the camera begins acquiring images depends on the
-        // acquisition mode. Single frame captures only a single image, multi
-        // frame captures a set number of images, and continuous captures a
-        // continuous stream of images. Because the example calls for the
-        // retrieval of 10 images, continuous mode has been set.
-        //
-        // *** LATER ***
-        // Image acquisition must be ended when no more images are needed.
-        //
-        pCam->BeginAcquisition();
-
-        cout << "Acquiring images..." << endl;
-
-        //
-        // Retrieve device serial number for filename
-        //
-        // *** NOTES ***
-        // The device serial number is retrieved in order to keep cameras from
-        // overwriting one another. Grabbing image IDs could also accomplish
-        // this.
-        //
-        gcstring deviceSerialNumber("");
-        CStringPtr ptrStringSerial = nodeMapTLDevice.GetNode("DeviceSerialNumber");
-        if (IsReadable(ptrStringSerial))
-        {
-            deviceSerialNumber = ptrStringSerial->GetValue();
-
-            cout << "Device serial number retrieved as " << deviceSerialNumber << "..." << endl;
-        }
-        cout << endl;
-
-        // Retrieve, convert, and save images
-        const unsigned int k_numImages = 1;
-
-        //
-        // Create ImageProcessor instance for post processing images
-        //
-        ImageProcessor processor;
-
-        //
-        // Set default image processor color processing method
-        //
-        // *** NOTES ***
-        // By default, if no specific color processing algorithm is set, the image
-        // processor will default to NEAREST_NEIGHBOR method.
-        //
-        processor.SetColorProcessing(SPINNAKER_COLOR_PROCESSING_ALGORITHM_HQ_LINEAR);
-
-        for (unsigned int imageCnt = 0; imageCnt < k_numImages; imageCnt++)
+        for (unsigned int imageCnt = 0; (imageCnt < k_numImages) && (GetKeyState('Q') == 0); imageCnt++)
         {
             try
             {
@@ -289,10 +223,9 @@ int AcquireImages(CameraPtr pCam, INodeMap& nodeMap, INodeMap& nodeMapTLDevice)
                     // name a few.
                     //
                     const size_t width = pResultImage->GetWidth();
-
                     const size_t height = pResultImage->GetHeight();
 
-                    cout << "Grabbed image " << imageCnt << ", width = " << width << ", height = " << height << endl;
+                    //cout << "Grabbed image " << imageCnt << ", width = " << width << ", height = " << height << nCurrRing << endl;
 
                     //
                     // Convert image to mono 8
@@ -308,34 +241,58 @@ int AcquireImages(CameraPtr pCam, INodeMap& nodeMap, INodeMap& nodeMapTLDevice)
                     //
                     ImagePtr convertedImage = processor.Convert(pResultImage, PixelFormat_Mono8);
 
-                    // Create a unique filename
-                    ostringstream filename;
-
-                    filename << "Acquisition-";
-                    if (!deviceSerialNumber.empty())
-                    {
-                        filename << deviceSerialNumber.c_str() << "-";
-                    }
-
-
-                    {
-                        auto t = std::time(nullptr);
-                        auto tm = *std::localtime(&t);
-                        //std::cout << std::put_time(&tm, "%H%M%S") << std::endl;
-
-                        filename << std::put_time(&tm, "%H%M%S") << ".png";
-                    }
-                    //
-                    // Save image
+                    // Save first image
                     //
                     // *** NOTES ***
                     // The standard practice of the examples is to use device
                     // serial numbers to keep images of one device from
                     // overwriting those of another.
                     //
-                    convertedImage->Save(filename.str().c_str());
+#if 0
+                    if (imageCnt == 99) {  // i.e., comment this out. Never do it. DRC
 
-                    cout << "Image saved at " << filename.str() << endl;
+                        // Create a unique filename
+                        ostringstream filename;
+
+                        filename << "Acquisition-";
+                        if (!deviceSerialNumber.empty())
+                        {
+                            filename << deviceSerialNumber.c_str() << "-";
+                        }
+                        filename << imageCnt << ".png";
+
+                        convertedImage->Save(filename.str().c_str());
+
+                        cout << "Image saved at " << filename.str() << endl;
+                    }
+#endif //0
+                    // DC NEW
+                    struct shmem_header* pShmem = (struct shmem_header*) shmem_region.get_address();
+
+                    pShmem->lock = (uint8_t)1; // Everyone keep out until we are done!
+
+                    // Don't need to write these each time:
+                    pShmem->header_version = (uint8_t)NW_HEADER_VERSION;
+                    pShmem->dimensions[0] = (uint16_t)height;
+                    pShmem->dimensions[1] = (uint16_t)width;
+                    pShmem->dimensions[2] = (uint16_t)0;
+                    pShmem->dimensions[3] = (uint16_t)0;
+                    pShmem->datatype_code = (uint8_t)7;
+                    pShmem->max_frames = (uint8_t)NW_MAX_FRAMES;
+
+                    // For current frame:
+                    pShmem->current_frame = (uint8_t)nCurrRing;
+                    pShmem->timestamps[nCurrRing] = (uint8_t)NW_STATUS_READ;
+                    pShmem->timestamps[nCurrRing] = convertedImage->GetTimeStamp();
+
+                    memcpy( ((uint8_t *)(shmem_region2.get_address())+height*width*nCurrRing),
+                        (void*)convertedImage->GetData(),
+                        height*width);
+
+                    pShmem->lock = (uint8_t)0; // Keep out until we are done!
+
+                    nCurrRing += 1;
+                    if (nCurrRing >= 32) nCurrRing = 0;
                 }
 
                 //
@@ -348,7 +305,7 @@ int AcquireImages(CameraPtr pCam, INodeMap& nodeMap, INodeMap& nodeMapTLDevice)
                 //
                 pResultImage->Release();
 
-                cout << endl;
+                //cout << endl;
             }
             catch (Spinnaker::Exception& e)
             {
@@ -365,7 +322,7 @@ int AcquireImages(CameraPtr pCam, INodeMap& nodeMap, INodeMap& nodeMapTLDevice)
         // properly and do not need to be power-cycled to maintain integrity.
         //
 
-        pCam->EndAcquisition();
+
     }
     catch (Spinnaker::Exception& e)
     {
@@ -440,30 +397,100 @@ int RunSingleCamera(CameraPtr pCam)
 #else
         result = result | ResetGVCPHeartbeat(pCam);
 #endif
-
-        // Acquire images
-        result = result | AcquireImages(pCam, nodeMap, nodeMapTLDevice);
-
-#ifdef _DEBUG
-        // Reset heartbeat for GEV camera
-        result = result | ResetGVCPHeartbeat(pCam);
-#endif
-
-        // Deinitialize camera
-        pCam->DeInit();
+	}
+	catch (Spinnaker::Exception& e)
+    {
+        cout << "Error: " << e.what() << endl;
+        result = -1;
+	}
+	return result;
+}
+// This function configures a custom exposure time. Automatic exposure is turned
+// off in order to allow for the customization, and then the custom setting is
+// applied.
+int ConfigureExposure(INodeMap& nodeMap, double exposureTimeToSet)
+{
+    int result = 0;
+    cout << endl << endl << "*** CONFIGURING EXPOSURE ***" << endl << endl;
+    try
+    {
+        //
+        // Turn off automatic exposure mode
+        //
+        // *** NOTES ***
+        // Automatic exposure prevents the manual configuration of exposure
+        // time and needs to be turned off. Some models have auto-exposure
+        // turned off by default
+        //
+        // *** LATER ***
+        // Exposure time can be set automatically or manually as needed. This
+        // example turns automatic exposure off to set it manually and back
+        // on in order to return the camera to its default state.
+        //
+        CEnumerationPtr ptrExposureAuto = nodeMap.GetNode("ExposureAuto");
+        if (IsReadable(ptrExposureAuto) &&
+            IsWritable(ptrExposureAuto))
+        {
+            CEnumEntryPtr ptrExposureAutoOff = ptrExposureAuto->GetEntryByName("Off");
+            if (IsReadable(ptrExposureAutoOff))
+            {
+                ptrExposureAuto->SetIntValue(ptrExposureAutoOff->GetValue());
+                cout << "Automatic exposure disabled..." << endl;
+            }
+        }
+        else 
+        {
+            CEnumerationPtr ptrAutoBright = nodeMap.GetNode("autoBrightnessMode");
+            if (!IsReadable(ptrAutoBright) ||
+                !IsWritable(ptrAutoBright))
+            {
+                cout << "Unable to get or set exposure time. Aborting..." << endl << endl;
+                return -1;
+            }
+            cout << "Unable to disable automatic exposure. Expected for some models... " << endl;
+            cout << "Proceeding..." << endl;
+            result = 1;
+        }
+        //
+        // Set exposure time manually; exposure time recorded in microseconds
+        //
+        // *** NOTES ***
+        // The node is checked for availability and writability prior to the
+        // setting of the node. Further, it is ensured that the desired exposure
+        // time does not exceed the maximum. Exposure time is counted in
+        // microseconds. This information can be found out either by
+        // retrieving the unit with the GetUnit() method or by checking SpinView.
+        //
+        CFloatPtr ptrExposureTime = nodeMap.GetNode("ExposureTime");
+        if (!IsReadable(ptrExposureTime) ||
+            !IsWritable(ptrExposureTime))
+        {
+            cout << "Unable to get or set exposure time. Aborting..." << endl << endl;
+            return -1;
+        }
+        // Ensure desired exposure time does not exceed the maximum
+        const double exposureTimeMax = ptrExposureTime->GetMax();
+        
+        if (exposureTimeToSet > exposureTimeMax)
+        {
+            exposureTimeToSet = exposureTimeMax;
+        }
+        ptrExposureTime->SetValue(exposureTimeToSet);
+        cout << std::fixed << "Exposure time set to " << exposureTimeToSet << " us..." << endl << endl;
     }
     catch (Spinnaker::Exception& e)
     {
         cout << "Error: " << e.what() << endl;
         result = -1;
     }
-
     return result;
 }
 
+		
 // Example entry point; please see Enumeration example for more in-depth
 // comments on preparing and cleaning up the system.
-int main(int /*argc*/, char** /*argv*/)
+DECL init(void)
+//int main(int /*argc*/, char** /*argv*/)
 {
     // Since this application saves images in the current folder
     // we must ensure that we have permission to write to this folder.
@@ -485,18 +512,18 @@ int main(int /*argc*/, char** /*argv*/)
     cout << "Application build date: " << __DATE__ << " " << __TIME__ << endl << endl;
 
     // Retrieve singleton reference to system object
-    SystemPtr system = System::GetInstance();
+    mySystem = System::GetInstance();
 
     // Print out current library version
-    const LibraryVersion spinnakerLibraryVersion = system->GetLibraryVersion();
+    const LibraryVersion spinnakerLibraryVersion = mySystem->GetLibraryVersion();
     cout << "Spinnaker library version: " << spinnakerLibraryVersion.major << "." << spinnakerLibraryVersion.minor
         << "." << spinnakerLibraryVersion.type << "." << spinnakerLibraryVersion.build << endl
         << endl;
 
     // Retrieve list of cameras from the system
-    CameraList camList = system->GetCameras();
+    camList = mySystem->GetCameras();
 
-    const unsigned int numCameras = camList.GetSize();
+    numCameras = camList.GetSize();
 
     cout << "Number of cameras detected: " << numCameras << endl << endl;
 
@@ -507,15 +534,16 @@ int main(int /*argc*/, char** /*argv*/)
         camList.Clear();
 
         // Release system
-        system->ReleaseInstance();
+        mySystem->ReleaseInstance();
 
         cout << "Not enough cameras!" << endl;
-        cout << "Done! Press Enter to exit..." << endl;
-        getchar();
+        //cout << "Done! Press Enter to exit..." << endl;
+        //getchar();
 
         return -1;
     }
 
+	int result=0;
     //
     // Create shared pointer to camera
     //
@@ -529,8 +557,120 @@ int main(int /*argc*/, char** /*argv*/)
     // Shared pointers can be terminated manually by assigning them to nullptr.
     // This keeps releasing the system from throwing an exception.
     //
-    CameraPtr pCam = nullptr;
+    try
+    {
+		pCam = camList[0];
+		RunSingleCamera( pCam );
 
+		// Retrieve TL device nodemap
+		INodeMap& nodeMapTLDevice = pCam->GetTLDeviceNodeMap();
+
+		// Retrieve GenICam nodemap
+		INodeMap& nodeMap = pCam->GetNodeMap();
+
+        //
+        // Set acquisition mode to continuous
+        //
+        // *** NOTES ***
+        // Because the example acquires and saves 10 images, setting acquisition
+        // mode to continuous lets the example finish. If set to single frame
+        // or multiframe (at a lower number of images), the example would just
+        // hang. This would happen because the example has been written to
+        // acquire 10 images while the camera would have been programmed to
+        // retrieve less than that.
+        //
+        // Setting the value of an enumeration node is slightly more complicated
+        // than other node types. Two nodes must be retrieved: first, the
+        // enumeration node is retrieved from the nodemap; and second, the entry
+        // node is retrieved from the enumeration node. The integer value of the
+        // entry node is then set as the new value of the enumeration node.
+        //
+        // Notice that both the enumeration and the entry nodes are checked for
+        // availability and readability/writability. Enumeration nodes are
+        // generally readable and writable whereas their entry nodes are only
+        // ever readable.
+        //
+        // Retrieve enumeration node from nodemap
+        CEnumerationPtr ptrAcquisitionMode = nodeMap.GetNode("AcquisitionMode");
+        if (!IsReadable(ptrAcquisitionMode) ||
+            !IsWritable(ptrAcquisitionMode))
+        {
+            cout << "Unable to set acquisition mode to continuous (enum retrieval). Aborting..." << endl << endl;
+            return -1;
+        }
+
+        // Retrieve entry node from enumeration node
+        CEnumEntryPtr ptrAcquisitionModeContinuous = ptrAcquisitionMode->GetEntryByName("Continuous");
+        if (!IsReadable(ptrAcquisitionModeContinuous))
+        {
+            cout << "Unable to get or set acquisition mode to continuous (entry retrieval). Aborting..." << endl << endl;
+            return -1;
+        }
+
+        // Retrieve integer value from entry node
+        const int64_t acquisitionModeContinuous = ptrAcquisitionModeContinuous->GetValue();
+
+        // Set integer value from entry node as new value of enumeration node
+        ptrAcquisitionMode->SetIntValue(acquisitionModeContinuous);
+
+        //cout << "Acquisition mode set to continuous..." << endl;
+
+		ConfigureExposure(nodeMap, 50);
+
+        //
+        // Begin acquiring images
+        //
+        // *** NOTES ***
+        // What happens when the camera begins acquiring images depends on the
+        // acquisition mode. Single frame captures only a single image, multi
+        // frame captures a set number of images, and continuous captures a
+        // continuous stream of images. Because the example calls for the
+        // retrieval of 10 images, continuous mode has been set.
+        //
+        // *** LATER ***
+        // Image acquisition must be ended when no more images are needed.
+        //
+        pCam->BeginAcquisition();
+
+        //cout << "Acquiring images..." << endl;
+
+        //
+        // Retrieve device serial number for filename
+        //
+        // *** NOTES ***
+        // The device serial number is retrieved in order to keep cameras from
+        // overwriting one another. Grabbing image IDs could also accomplish
+        // this.
+        //
+        gcstring deviceSerialNumber("");
+        CStringPtr ptrStringSerial = nodeMapTLDevice.GetNode("DeviceSerialNumber");
+        if (IsReadable(ptrStringSerial))
+        {
+            deviceSerialNumber = ptrStringSerial->GetValue();
+
+            cout << "Device serial number retrieved as " << deviceSerialNumber << "..." << endl;
+        }
+        cout << endl;
+
+        //
+        // Set default image processor color processing method
+        //
+        // *** NOTES ***
+        // By default, if no specific color processing algorithm is set, the image
+        // processor will default to NEAREST_NEIGHBOR method.
+        //
+        processor.SetColorProcessing(SPINNAKER_COLOR_PROCESSING_ALGORITHM_HQ_LINEAR);
+	}
+    catch (Spinnaker::Exception& e)
+    {
+        cout << "Error: " << e.what() << endl;
+        result = -1;
+    }
+	
+	return 0;
+}
+
+DECL process(void) {
     int result = 0;
 
     // Run example on each camera
@@ -539,14 +679,33 @@ int main(int /*argc*/, char** /*argv*/)
         // Select camera
         pCam = camList.GetByIndex(i);
 
-        cout << endl << "Running example for camera " << i << "..." << endl;
+        //cout << endl << "Running example for camera " << i << "..." << endl;
 
-        // Run example
-        result = result | RunSingleCamera(pCam);
-
-        cout << "Camera " << i << " example complete..." << endl << endl;
+        result = result | AcquireImages(pCam);
     }
+	return 0;
+}
 
+DECL close(void)
+{
+	int result=0;
+	try {
+#ifdef _DEBUG
+        // Reset heartbeat for GEV camera
+        result = result | ResetGVCPHeartbeat(pCam);
+#endif
+
+        // Deinitialize camera
+        pCam->DeInit();
+    }
+    catch (Spinnaker::Exception& e)
+    {
+        cout << "Error: " << e.what() << endl;
+        result = -1;
+    }
+	
+	pCam->EndAcquisition();
+			
     //
     // Release reference to the camera
     //
@@ -561,10 +720,10 @@ int main(int /*argc*/, char** /*argv*/)
     camList.Clear();
 
     // Release system
-    system->ReleaseInstance();
+    mySystem->ReleaseInstance();
 
     //cout << endl << "Done! Press Enter to exit..." << endl;
     //getchar();
 
-    return result;
+    return 0;
 }

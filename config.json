@@ -1,8 +1,8 @@
 {
-    "./plugin_test1.dll":
+    "plugin_rawplayer":
     {"type": "generator",
-     "filename": "../spots_X.bmp"},
+     "filename": "spots.bin"},
 
-    "./plugin_test1.dll":
+    "plugin_test1":
     {"inplace": "there"}
 }

@@ -52,5 +52,8 @@ add_executable(engine engine.cpp)
 
 #add_subdirectory(plugin_ximea)
 # add_subdirectory(plugin_fileplayer)
+add_subdirectory(plugin_rawplayer)
 
 add_subdirectory(plugin_flir)
+
+add_subdirectory(plugin_centroiding)
