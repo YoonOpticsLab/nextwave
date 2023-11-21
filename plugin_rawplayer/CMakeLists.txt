@@ -13,5 +13,11 @@ include_directories(include/boost_1_83_0)
 include_directories(include)
 
 add_library(plugin_rawplayer SHARED plugin_rawplayer.cpp ../nextwave_plugin.hpp)
-set_target_properties(plugin_rawplayer PROPERTIES LIBRARY_OUTPUT_DIRECTORY "c:/nextwave/build"  )
-set_target_properties(plugin_rawplayer PROPERTIES RUNTIME_OUTPUT_DIRECTORY "c:/nextwave/build"  )
+if (WIN32)
+  set_target_properties(plugin_rawplayer PROPERTIES LIBRARY_OUTPUT_DIRECTORY "c:/nextwave/build"  )
+  set_target_properties(plugin_rawplayer PROPERTIES RUNTIME_OUTPUT_DIRECTORY "c:/nextwave/build"  )
+else()
+  set_target_properties(plugin_rawplayer PROPERTIES
+    LIBRARY_OUTPUT_DIRECTORY "../../build"
+    RUNTIME_OUTPUT_DIRECTORY "../../build"  )
+endif()

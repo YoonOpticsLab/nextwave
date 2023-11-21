@@ -15,47 +15,39 @@ project(
   VERSION 1.0
   LANGUAGES CXX)
 
+# https://stackoverflow.com/questions/29657195/how-to-test-if-cmake-found-a-library-with-find-library
+if (UNIX) # For Dan
+  SET(GCC_OPT "")
+  SET(CMAKE_CXX_FLAGS  ${CMAKE_CXX_FLAGS} ${GCC_OPT} )
+  SET(CMAKE_EXE_LINKER_FLAGS  ${CMAKE_EXE_LINKER_FLAG} ${GCC_OPT} )
+endif()
+
 # If you set any CMAKE_ variables, that can go here.
 # (But usually don't do this, except maybe for C++ standard)
 
-# Find packages go here.
-
-# You should usually split this into folders, but this is a simple example
 
 #include_directories(common/include)
 #include_directories(d:/code/boost_1_83_0)
 include_directories(include/boost_1_83_0)
 include_directories(include)
 
-# This is a "default" library, and will match the *** variable setting.
-# Other common choices are STATIC, SHARED, and MODULE
-# Including header files here helps IDEs but is not required.
-# Output libname matches target name, with the usual extensions on your system
 add_library(plugin_test1 SHARED plugin_test1.cpp nextwave_plugin.hpp)
 add_library(plugin_test2 SHARED plugin_test2.cpp nextwave_plugin.hpp)
 
-# Link each target with other targets or add options, etc.
-
-# Adding something we can run - Output name matches target name
-add_executable(engine engine.cpp)
-
-target_link_libraries(engine plugin_centroiding.lib)
-
-# Make sure you link your targets with this command. It can also link libraries and
-# even flags, so linking a target that does not exist will not give a configure-time error.
-#target_link_libraries(MyExample PRIVATE MyLibExample)
-
 ## [main]
 
-# This part is so the Modern CMake book can verify this example builds. For your code,
-# you'll probably want tests too
-#enable_testing()
-#add_test(NAME MyExample COMMAND MyExample)
-
-#add_subdirectory(plugin_ximea)
+add_subdirectory(plugin_ximea)
 # add_subdirectory(plugin_fileplayer)
 add_subdirectory(plugin_rawplayer)
 
-add_subdirectory(plugin_flir)
-
+#add_subdirectory(plugin_flir)
 add_subdirectory(plugin_centroiding)
+
+add_executable(engine engine.cpp)
+
+if (WIN32)
+  target_link_libraries(engine plugin_centroiding.lib) # TODO: need .lib?
+else()
+  target_link_libraries(engine plugin_rawplayer)
+  target_link_libraries(engine plugin_centroiding)
+endif()

@@ -41,10 +41,10 @@ std::thread(thread_entry).detach();
   // On unix, for dl* functions:
   #include <dlfcn.h>
 #endif
+#include <boost/interprocess/mapped_region.hpp>
 
 #include "spdlog/spdlog.h"
 
-#include <boost/interprocess/mapped_region.hpp>
 
 // Hints: https://stackoverflow.com/questions/11741580/dlopen-loadlibrary-on-same-application
 
@@ -126,16 +126,16 @@ int load_module(std::string name, std::string params, std::list<struct module> &
 
   struct module aModule;
 
-  
 #if _WIN64
   name += std::string(".dll");
   handle=LoadLibrary(name.c_str());
 #else
+  name = std::string("./lib") + name + std::string(".so");
   handle=dlopen(name.c_str(), RTLD_NOW|RTLD_LOCAL);
 #endif
 
   if (handle==0) {
-    printf("Couldn't load: Handle==0");
+    spdlog::error("Couldn't load '{}'\n",name);
     chkerr();
     return -1;
   };
@@ -153,6 +153,8 @@ int load_module(std::string name, std::string params, std::list<struct module> &
   *(int **)(&fptr3)=(int *)GetProcAddress((HMODULE)handle,"plugin_close");
 #else
   *(int **)(&fptr) = (int *)dlsym(handle,"init");
+  *(int **)(&fptr2) = (int *)dlsym(handle,"process");
+  *(int **)(&fptr3) = (int *)dlsym(handle,"plugin_close");
 #endif
  
   aModule.handle=handle;
@@ -199,10 +201,10 @@ int main(int argc, char** argv)
     std::string name=it.key();
     std::string value=to_string(it.value());
 
-    spdlog::info("About to {}", name);
-    //std::cout << name << ':' << value << "\n";
+    spdlog::info("{} About to load", name);
 
     int err=load_module(name, value, listModules);
+    spdlog::info("{} Loaded OK", name);
   }
 
   using namespace boost::interprocess;
@@ -214,57 +216,36 @@ int main(int argc, char** argv)
 
     struct shm_remove
     {
-      shm_remove() { shared_memory_object::remove(SHMEM_HEADER_NAME); shared_memory_object::remove(SHMEM_BUFFER_NAME); shared_memory_object::remove(SHMEM_BUFFER_NAME2); }
+      shm_remove() { shared_memory_object::remove(SHMEM_HEADER_NAME); shared_memory_object::remove(SHMEM_BUFFER_NAME); shared_memory_object::remove(SHMEM_BUFFER_NAME2); spdlog::info("Ok. removed"); }
       ~shm_remove(){ shared_memory_object::remove(SHMEM_HEADER_NAME); shared_memory_object::remove(SHMEM_BUFFER_NAME); shared_memory_object::remove(SHMEM_BUFFER_NAME2); spdlog::info("Removed"); }
     } remover;
 
-	shared_memory_object shmem(open_or_create, SHMEM_HEADER_NAME, read_write);
+    shared_memory_object shmem(open_or_create, SHMEM_HEADER_NAME, read_write);
     shmem.truncate((size_t)SHMEM_HEADER_SIZE);
     shared_memory_object shmem2(open_or_create, SHMEM_BUFFER_NAME, read_write);
     shmem2.truncate((size_t)SHMEM_BUFFER_SIZE);
+    shared_memory_object shmem3(open_or_create, SHMEM_BUFFER_NAME2, read_write);
+    shmem3.truncate((size_t)SHMEM_BUFFER_SIZE2);
 #endif
 
     // Common to both OSes:
     mapped_region shmem_region{ shmem, read_write };
     mapped_region shmem_region2{ shmem2, read_write };
     mapped_region shmem_region3{ shmem3, read_write };
-  //spdlog::info("Main {}", jdata["pi"]);
 
-  // range-based for
-  //for (auto& element : jdata) {
-  //std::cout << element << '\n';
-    //std::cout << element.key() << ':' << element.value();
-  //}
-
-//const char *text="Hello";
-  //#if _WIN64
-  //val=(*fptr)();
-  ////#else
-  //val=(*fptr)();
-  //#endif
-
-  //std::cout <<" Ok3\n" << std::flush;;
-  //std::cout << val;
-
-  //#if _WIN64
-  //#else
-  //dlclose(handle);
-  //#endif
-  
 	spdlog::info("Before Q");
 	spdlog::info("{}", listModules.size());
-	
 	char ps_nothing[64] = "test"; //.c_str();
-	
+
 //	while ( (GetKeyState('Q') & 0x8000) == 0)
 	for (int count=0; count<2; count++)
 	{
 		for (struct module it: listModules) {
 			//int result=(*it.fp_init)(ps_nothing);
-			spdlog::info("{}",it.name);
+			spdlog::info("About to run {}",it.name);
 			int result=(*it.fp_do_process)(ps_nothing);
 		}
-			
+#if 0
 		if ( (GetKeyState('P') & 0x8000) != 0 )
 		{
 			spdlog::info("paused");
@@ -276,25 +257,24 @@ int main(int argc, char** argv)
 
 			spdlog::info("continue");
 		}
+#endif //0
 
 	};
-	
-	spdlog::info("After OK");
-	
-  //std::list<struct module> listModules;
 
+	spdlog::info("After OK");
 
   // iterate the array
   for (struct module it: listModules) {
 	char ps_nothing[64] = "test"; //.c_str();
 	int result=(*it.fp_close)(ps_nothing);
 	#if _WIN64
-		std::string name = it.name;
 		FreeLibrary( (HMODULE)it.handle);
-		spdlog::info("Freed {}", name);
 	#else
-		//handle=dlopen(name.c_str(), RTLD_NOW|RTLD_LOCAL);
+		dlclose(it.handle);
 	#endif
+
+		std::string name = it.name;
+		spdlog::info("Freed {}", name);
 	}
 
   chkerr();

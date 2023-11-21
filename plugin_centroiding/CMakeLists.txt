@@ -29,7 +29,12 @@ endif()
 #https://discourse.cmake.org/t/windows-libraries-find-modules-and-target-runtime-dlls-re-re-revisited/4286
 add_library(plugin_centroiding SHARED plugin_centroiding.cpp ../nextwave_plugin.hpp)
 target_link_libraries(plugin_centroiding ${ArrayFire_Unified_LIBRARIES} )
-set_target_properties(plugin_centroiding PROPERTIES
-	LIBRARY_OUTPUT_DIRECTORY "c:/nextwave/build" 
-	RUNTIME_OUTPUT_DIRECTORY "c:/nextwave/build"  )
+if (WIN32)
+  set_target_properties(plugin_rawplayer PROPERTIES LIBRARY_OUTPUT_DIRECTORY "c:/nextwave/build"  )
+  set_target_properties(plugin_rawplayer PROPERTIES RUNTIME_OUTPUT_DIRECTORY "c:/nextwave/build"  )
+else()
+  set_target_properties(plugin_centroiding PROPERTIES
+    LIBRARY_OUTPUT_DIRECTORY "../../build"
+    RUNTIME_OUTPUT_DIRECTORY "../../build"  )
+endif()
 #target_link_libraries(vectorize_cuda ArrayFire::afcuda)

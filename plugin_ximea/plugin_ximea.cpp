@@ -82,9 +82,9 @@ DECL init(void)
 
 	pShmHeader->current_frame = (uint8_t)nCurrRing;
 	pShmHeader->timestamps[nCurrRing] = (uint8_t)0;
-			
+
 	HANDLE xiH = NULL;
-	try {	
+	try {
 		printf("Opening first camera...\n");
 		CE(xiOpenDevice(0, &xiH));
 
@@ -104,37 +104,36 @@ DECL init(void)
 		image.size = sizeof(XI_IMG);
 
 		uint8_t first=1;
-		
+
 		while (1) //((GetKeyState('Q') !=  0) )
 		{
 			int height, width;
 			CE(xiGetImage(xiH, 5000, &image)); // getting next image from the camera opened
-					
-            pShmHeader->lock = (uint8_t)1; // Keep out until we are done!
 
-            height=(int)image.height; width=(int)image.width;	// TODO: needn't do this every time
-			
+      pShmHeader->lock = (uint8_t)1; // Keep out until we are done!
+
+      height=(int)image.height; width=(int)image.width;	// TODO: needn't do this every time
+
 			if (first) {
 				//std::cout << "Height: " << height << " width: " << width << "\n"; // TODO: Get std:cout working !!!!
 				char* mess[256];
-				sprintf((char * const)mess, (const char*)"Height: %d, width: %d\n", height, width);
-				printf((const char *)mess);
+				printf("Height: %d, width: %d\n", height, width);
 				first=0;
 			}
-				
+
 			// Current frame:
 			pShmHeader->current_frame = (uint8_t)nCurrRing;
 			pShmHeader->statuses[nCurrRing] = (uint8_t)NW_STATUS_READ;
 			pShmHeader->timestamps[nCurrRing] = (uint64_t)image.tsUSec;
-			
+
 			pShmHeader->dimensions[0] = (uint16_t)height; // Needn't do this every time
-			pShmHeader->dimensions[1] = (uint16_t)width;			
-			
+			pShmHeader->dimensions[1] = (uint16_t)width;
+
 			memcpy( ((uint8_t *)(pShmBuffer)+height*width*nCurrRing),
 				(void*)image.bp,
-				height*width);		
+				height*width);
 
-            pShmHeader->lock = (uint8_t)0; // Keep out until we are done!
+      pShmHeader->lock = (uint8_t)0; // Keep out until we are done!
 
 			nCurrRing += 1;
 			if (nCurrRing >= NW_MAX_FRAMES)
