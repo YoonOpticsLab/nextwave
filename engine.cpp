@@ -100,7 +100,7 @@ void chkerr(void)
 }
 
 #include <json.hpp>
-using json=nlohmann::json;
+using json=nlohmann::ordered_json;
 
 #include "memory_layout.h"
 
@@ -150,10 +150,12 @@ int load_module(std::string name, std::string params, std::list<struct module> &
 #if _WIN64
   *(int **)(&fptr)=(int *)GetProcAddress((HMODULE)handle,"init");
   *(int **)(&fptr2)=(int *)GetProcAddress((HMODULE)handle,"process");
-  *(int **)(&fptr3)=(int *)GetProcAddress((HMODULE)handle,"close");
+  *(int **)(&fptr3)=(int *)GetProcAddress((HMODULE)handle,"plugin_close");
 #else
   *(int **)(&fptr) = (int *)dlsym(handle,"init");
 #endif
+ 
+  aModule.handle=handle;
   aModule.name = name;
   aModule.fp_init=fptr;
   aModule.fp_do_process=fptr2;
@@ -166,7 +168,6 @@ chkerr();
  int result=(**aModule.fp_init)(params.c_str());
  spdlog::info("Inited {} {}", name, handle);
 
- aModule.handle=handle;
  listModules.push_back(aModule);
  return 0; // OK
 }
@@ -187,6 +188,8 @@ int main(int argc, char** argv)
 
   std::ifstream fil(filename_config);
   json jdata = json::parse(fil);
+	//std::cout << jdata.dump(2) << std::endl;
+   //return 0;
 
   // iterate the array
   for (json::iterator it = jdata.begin(); it != jdata.end(); ++it) {
@@ -196,7 +199,7 @@ int main(int argc, char** argv)
     std::string name=it.key();
     std::string value=to_string(it.value());
 
-    //spdlog::info("Once {}", value);
+    spdlog::info("About to {}", name);
     //std::cout << name << ':' << value << "\n";
 
     int err=load_module(name, value, listModules);
@@ -249,10 +252,16 @@ int main(int argc, char** argv)
   //#endif
   
 	spdlog::info("Before Q");
+	spdlog::info("{}", listModules.size());
+	
 	char ps_nothing[64] = "test"; //.c_str();
-	while ( (GetKeyState('Q') & 0x8000) == 0)
+	
+//	while ( (GetKeyState('Q') & 0x8000) == 0)
+	for (int count=0; count<2; count++)
 	{
 		for (struct module it: listModules) {
+			//int result=(*it.fp_init)(ps_nothing);
+			spdlog::info("{}",it.name);
 			int result=(*it.fp_do_process)(ps_nothing);
 		}
 			
@@ -270,14 +279,22 @@ int main(int argc, char** argv)
 
 	};
 	
+	spdlog::info("After OK");
+	
   //std::list<struct module> listModules;
 
-	std::cout << listModules.size();
 
   // iterate the array
   for (struct module it: listModules) {
-	std::cout << listModules.size();
-	spdlog::info(it.name.c_str());
+	char ps_nothing[64] = "test"; //.c_str();
+	int result=(*it.fp_close)(ps_nothing);
+	#if _WIN64
+		std::string name = it.name;
+		FreeLibrary( (HMODULE)it.handle);
+		spdlog::info("Freed {}", name);
+	#else
+		//handle=dlopen(name.c_str(), RTLD_NOW|RTLD_LOCAL);
+	#endif
 	}
 
   chkerr();

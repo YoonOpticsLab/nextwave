@@ -2,7 +2,8 @@
     "plugin_rawplayer":
     {"type": "generator",
      "filename": "spots.bin"},
-
-    "plugin_test1":
+	 
+	 
+    "plugin_centroiding":
     {"inplace": "there"}
 }

@@ -39,6 +39,8 @@ add_library(plugin_test2 SHARED plugin_test2.cpp nextwave_plugin.hpp)
 # Adding something we can run - Output name matches target name
 add_executable(engine engine.cpp)
 
+target_link_libraries(engine plugin_centroiding.lib)
+
 # Make sure you link your targets with this command. It can also link libraries and
 # even flags, so linking a target that does not exist will not give a configure-time error.
 #target_link_libraries(MyExample PRIVATE MyLibExample)

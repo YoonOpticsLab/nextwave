@@ -8,6 +8,10 @@ using namespace std;
 #include <json.hpp>
 using json=nlohmann::json;
 
+
+#include "../spdlog/spdlog.h"
+
+
 // For NextWave Plugin
 #include "nextwave_plugin.hpp"
 #pragma pack(push,1)
@@ -63,38 +67,41 @@ DECL process(char *params)
   const size_t width = 2048;
   const size_t height = 2048;
   
-                    // DC NEW
-                    struct shmem_header* pShmem = (struct shmem_header*) shmem_region.get_address();
+	// DC NEW
+	struct shmem_header* pShmem = (struct shmem_header*) shmem_region.get_address();
 
-                    pShmem->lock = (uint8_t)1; // Everyone keep out until we are done!
+	pShmem->lock = (uint8_t)1; // Everyone keep out until we are done!
 
-                    // Don't need to write these each time:
-                    pShmem->header_version = (uint8_t)NW_HEADER_VERSION;
-                    pShmem->dimensions[0] = (uint16_t)height;
-                    pShmem->dimensions[1] = (uint16_t)width;
-                    pShmem->dimensions[2] = (uint16_t)0;
-                    pShmem->dimensions[3] = (uint16_t)0;
-                    pShmem->datatype_code = (uint8_t)7;
-                    pShmem->max_frames = (uint8_t)NW_MAX_FRAMES;
+	// Don't need to write these each time:
+	pShmem->header_version = (uint8_t)NW_HEADER_VERSION;
+	pShmem->dimensions[0] = (uint16_t)height;
+	pShmem->dimensions[1] = (uint16_t)width;
+	pShmem->dimensions[2] = (uint16_t)0;
+	pShmem->dimensions[3] = (uint16_t)0;
+	pShmem->datatype_code = (uint8_t)7;
+	pShmem->max_frames = (uint8_t)NW_MAX_FRAMES;
 
-                    // For current frame:
-                    pShmem->current_frame = (uint8_t)nCurrRing;
-                    pShmem->timestamps[nCurrRing] = (uint8_t)NW_STATUS_READ;
-                    pShmem->timestamps[nCurrRing] = time_highres();
+	// For current frame:
+	pShmem->current_frame = (uint8_t)nCurrRing;
+	pShmem->timestamps[nCurrRing] = (uint8_t)NW_STATUS_READ;
+	pShmem->timestamps[nCurrRing] = time_highres();
 
-                    memcpy( ((uint8_t *)(shmem_region2.get_address())+height*width*nCurrRing),
-                        (void*)buffer,
-                        height*width);
+#if 1
+	memcpy( ((uint8_t *)(shmem_region2.get_address())+height*width*nCurrRing),
+		(void*)buffer,
+		height*width);
+#endif //0
 
-                    pShmem->lock = (uint8_t)0; // Keep out until we are done!
-					
-                    nCurrRing += 1;
-                    if (nCurrRing >= 32) nCurrRing = 0;
+	pShmem->lock = (uint8_t)0; // Keep out until we are done!
+	
+	nCurrRing += 1;
+	if (nCurrRing >= 1) nCurrRing = 0;
   
+    spdlog::info("Ok FP");
 	return 0;
 };
 
-DECL close(char *params)
+DECL plugin_close(char *params)
 {
   std::cout <<"P1 close\n" ;
   return 0;
