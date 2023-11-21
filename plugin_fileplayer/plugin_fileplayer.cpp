@@ -17,11 +17,15 @@ DECL init(char *params)
 
   image = imread( filename, IMREAD_COLOR );
 
+
   if ( !image.data )
   {
     printf("No image data \n");
     return -1;
   }
+
+  size_t sizeInBytes = image.step[0] * image.rows;
+  printf("%d",(int)sizeInBytes);
 
   namedWindow(filename, WINDOW_AUTOSIZE );
   imshow(filename, image);
