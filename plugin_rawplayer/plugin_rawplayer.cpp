@@ -35,6 +35,8 @@ using namespace boost::interprocess;
 
 unsigned char buffer[BUF_SIZE];
 unsigned int nCurrRing=0;
+unsigned int width=0; // TODO: force square images for raw files
+unsigned int height=0; // TODO: force square images for raw files
 
 inline uint64_t time_highres() {
 #if _WIN64
@@ -59,8 +61,14 @@ DECL init(char *params)
   if (fp==NULL) {
     spdlog::error("Couldn't read file.");
   } else {
-    fread(buffer,sizeof(buffer),1,fp);
-    spdlog::info("Read {}",filename);
+
+    fseek(fp, 0L, SEEK_END);
+    width = sqrt(ftell(fp)); // TODO: only square allowed
+    height=width;
+    rewind(fp);
+
+    fread(buffer,1,height*width,fp); // only bytes
+    spdlog::info("Read {} {} {}",filename,height, width);
   }
   fclose(fp);
 
@@ -74,12 +82,6 @@ DECL process(char *params)
     windows_shared_memory shmem2(open_or_create, SHMEM_BUFFER_NAME, read_write, (size_t)SHMEM_BUFFER_SIZE);
     windows_shared_memory shmem3(open_or_create, SHMEM_BUFFER_NAME2, read_write, (size_t)SHMEM_BUFFER_SIZE2);
 #else
-    //struct shm_remove
-    //{
-    //shm_remove() { shared_memory_object::remove(SHMEM_HEADER_NAME); shared_memory_object::remove(SHMEM_BUFFER_NAME); shared_memory_object::remove(SHMEM_BUFFER_NAME2); }
-    //~shm_remove(){ shared_memory_object::remove(SHMEM_HEADER_NAME); shared_memory_object::remove(SHMEM_BUFFER_NAME); shared_memory_object::remove(SHMEM_BUFFER_NAME2); spdlog::info("Removed"); }
-    //} remover;
-
     shared_memory_object shmem(open_or_create, SHMEM_HEADER_NAME, read_write);
     shmem.truncate((size_t)SHMEM_HEADER_SIZE);
     shared_memory_object shmem2(open_or_create, SHMEM_BUFFER_NAME, read_write);
@@ -93,8 +95,8 @@ DECL process(char *params)
   mapped_region shmem_region2{ shmem2, read_write };
   mapped_region shmem_region3{ shmem3, read_write };
 
-  const size_t width = 2048;
-  const size_t height = 2048;
+  //const size_t width = 2048;
+  //const size_t height = 2048;
 
 	// DC NEW
 	struct shmem_header* pShmem = (struct shmem_header*) shmem_region.get_address();

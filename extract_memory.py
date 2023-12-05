@@ -31,11 +31,11 @@ def get_array_item(layout,bytes,which_item, which_index):
     if 'int' in pytpe(entry['type']):
         data=int(data) # Make an untyped int size (in case we are in something like a multiply
     return data
-    
+
 def get_header_format(filname):
     with open(filname) as f:
         lines=f.readlines()
-    
+
     defs={}    # in structure
     fields={}  # in structure
     nfield=0

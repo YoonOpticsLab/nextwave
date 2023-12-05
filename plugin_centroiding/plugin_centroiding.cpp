@@ -31,6 +31,8 @@ using json=nlohmann::json;
 #endif
 #include <boost/interprocess/mapped_region.hpp>
 
+#define VERBOSE 0
+
 // Globals
 #define BUF_SIZE (2048*2048)
 
@@ -52,16 +54,22 @@ inline double time_highres() {
 #endif
 }
 
-DECL init(char *params)
-{
-  try {
-    af::setBackend(AF_BACKEND_CPU);
-    spdlog::info("Set AF_BACKEND_CPU");
-  } catch (...){
-    spdlog::error("Couldn't load AF BACKEND");
-  }
-  return 0;
-}
+af::array im_xcoor;
+af::array im_ycoor;
+
+af::array box_x;
+af::array box_y;
+af::array box_idx1;
+
+af::array im;
+af::array cen_x;
+af::array cen_y;
+
+af::array weighted_x;
+af::array weighted_y;
+
+af::array sums_x;
+af::array sums_y;
 
 //#define WIDTH 2048
 //#define HEIGHT 2048
@@ -70,16 +78,20 @@ DECL init(char *params)
 float fbuffer[BUF_SIZE];
 int nbuffer[BUF_SIZE];
 
-// https://stackoverflow.com/questions/49692531/transfer-data-from-arrayfire-arrays-to-armadillo-structures
-// https://github.com/arrayfire/arrayfire/issues/1405;
-int find_cendroids_af(unsigned char *buffer, int width, int height) {
-	af::array im;
+DECL init(char *params)
+{
+  try {
+    af::setBackend(AF_BACKEND_CPU);
+    spdlog::info("Set AF_BACKEND_CPU");
+  } catch (...){
+    spdlog::error("Couldn't load AF BACKEND");
+  }
+
+  int width=1000; // TODO: fixme
+  int height=1000;
+
 	int WIDTH=width;
 	int HEIGHT = height;
-
-	af::array im_xcoor;
-	af::array im_ycoor;
-
 	for (int x=0; x<WIDTH; x++) {
 		for (int y=0; y<HEIGHT; y++) {
 			fbuffer[y*WIDTH+x]=(float)x;
@@ -91,27 +103,14 @@ int find_cendroids_af(unsigned char *buffer, int width, int height) {
 			fbuffer[y*WIDTH+x]=(float)y;
 		}
 	}
+
 	im_ycoor=af::array(WIDTH, HEIGHT, fbuffer);
-
-	af::array box_x;
-	af::array box_y;
-	af::array box_idx1;
-
-	af::array cen_x;
-	af::array cen_y;
-
-	af::array weighted_x;
-	af::array weighted_y;
-
-	af::array sums_x;
-	af::array sums_y;
 
 	for (int ibox=0; ibox<NBOXES; ibox++) {
 		for (int y=0; y<BOX_SIZE; y++) {
 			nbuffer[ibox*BOX_SIZE+y]=ibox*BOX_SIZE+y; //0+940-80*5;
 		}
 	}
-	//#endif //0
 	box_x = af::array(BOX_SIZE,NBOXES,nbuffer);
 
 	for (int ibox=0; ibox<NBOXES; ibox++) {
@@ -119,9 +118,9 @@ int find_cendroids_af(unsigned char *buffer, int width, int height) {
 			nbuffer[ibox*BOX_SIZE+y]=ibox*BOX_SIZE+y; //+940-80*4;
 		}
 	}
-	//#endif //0
 	box_y = af::array(BOX_SIZE,NBOXES,nbuffer);
 
+  // Build bogus boxes:
 	for (int ibox=0; ibox<NBOXES; ibox++) {
 		int ibox_x = ibox % 20;
 		int ibox_y = int(float(ibox) / 20);
@@ -133,11 +132,13 @@ int find_cendroids_af(unsigned char *buffer, int width, int height) {
 			}
 		}
 	}
-
-	// "Real" processing loop
-	//QueryPerformanceCounter(&t1); // TODO
-
 	box_idx1 = af::array(BOX_SIZE*BOX_SIZE, NBOXES, nbuffer );
+
+  return 0;
+}
+// https://stackoverflow.com/questions/49692531/transfer-data-from-arrayfire-arrays-to-armadillo-structures
+// https://github.com/arrayfire/arrayfire/issues/1405;
+int find_cendroids_af(unsigned char *buffer, int width, int height) {
 
 	for (int x=0; x<width; x++) {
 		for (int y=0; y<height; y++) {
@@ -145,7 +146,10 @@ int find_cendroids_af(unsigned char *buffer, int width, int height) {
 		}
 	}
 	im=af::array(width, height, fbuffer);
+
+#if VERBOSE
   printf("%f\n",(float)af::max<float>(im) );
+#endif
 	im /= 255.0;
 
 	af::dim4 new_dims(BOX_SIZE*BOX_SIZE,NBOXES); // AF stacks the boxes, so do this to reshape for easier sum reduction
@@ -195,8 +199,10 @@ int find_cendroids_af(unsigned char *buffer, int width, int height) {
 
 	//QueryPerformanceCounter(&t2); // TODO
 
+#if VERBOSE
 	spdlog::info("Maxx: {}", (float)af::max<float>(sums_x));
 	spdlog::info("Maxy: {}", (float)af::max<float>(sums_y));
+#endif
 
 	//spdlog::info("Time: {}", float(t2.QuadPart-t1.QuadPart)/freq.QuadPart) ; // TODO
   return 0;
@@ -211,13 +217,6 @@ DECL process(char *params)
     windows_shared_memory shmem2(open_or_create, SHMEM_BUFFER_NAME, read_write, (size_t)SHMEM_BUFFER_SIZE);
     windows_shared_memory shmem3(open_or_create, SHMEM_BUFFER_NAME2, read_write, (size_t)SHMEM_BUFFER_SIZE2);
 #else
-
-    //struct shm_remove
-    //{
-    //shm_remove() { shared_memory_object::remove(SHMEM_HEADER_NAME); shared_memory_object::remove(SHMEM_BUFFER_NAME); shared_memory_object::remove(SHMEM_BUFFER_NAME2); }
-    //~shm_remove(){ shared_memory_object::remove(SHMEM_HEADER_NAME); shared_memory_object::remove(SHMEM_BUFFER_NAME); shared_memory_object::remove(SHMEM_BUFFER_NAME2); spdlog::info("Removed"); }
-    //} remover;
-
     shared_memory_object shmem(open_or_create, SHMEM_HEADER_NAME, read_write);
     shmem.truncate((size_t)SHMEM_HEADER_SIZE);
     shared_memory_object shmem2(open_or_create, SHMEM_BUFFER_NAME, read_write);
@@ -239,7 +238,9 @@ DECL process(char *params)
 	memcpy((void*)buffer,
          ((const void *)(shmem_region2.get_address()))+height*width*nCurrRing, height*width);
 
+#if VERBOSE
 	spdlog::info("Dims: {} {} {}", width, height, int(buffer[0])) ;
+#endif
 
   find_cendroids_af(buffer, width, height);
 	return 0;

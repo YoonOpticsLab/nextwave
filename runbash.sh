@@ -1,2 +1,2 @@
 export PATH=$PATH:"/d/ximea/api/xiapi/"
-build/debug/engine.exe
+build/engine.exe config.json

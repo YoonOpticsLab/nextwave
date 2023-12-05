@@ -43,8 +43,11 @@ std::thread(thread_entry).detach();
 #endif
 #include <boost/interprocess/mapped_region.hpp>
 
-#include "spdlog/spdlog.h"
+// For timing stuff:
+#include "boost/chrono.hpp"
+using namespace std::chrono;
 
+#include "spdlog/spdlog.h"
 
 // Hints: https://stackoverflow.com/questions/11741580/dlopen-loadlibrary-on-same-application
 
@@ -237,13 +240,25 @@ int main(int argc, char** argv)
 	spdlog::info("{}", listModules.size());
 	char ps_nothing[64] = "test"; //.c_str();
 
+#define REPS 10
+
+  double ns[REPS*2]; //TODO
+
 //	while ( (GetKeyState('Q') & 0x8000) == 0)
-	for (int count=0; count<2; count++)
+	for (int pipeline_count=0; pipeline_count<REPS; pipeline_count++)
 	{
+    int modnum=0;
 		for (struct module it: listModules) {
 			//int result=(*it.fp_init)(ps_nothing);
-			spdlog::info("About to run {}",it.name);
+			//spdlog::info("About to run {}",it.name);
+      high_resolution_clock::time_point time_before = high_resolution_clock::now();
 			int result=(*it.fp_do_process)(ps_nothing);
+      high_resolution_clock::time_point time_after = high_resolution_clock::now();
+
+      duration<double> time_span = duration_cast<duration<double>>(time_after-time_before);
+      ns[pipeline_count*2+modnum] = time_span.count();
+
+      modnum++;
 		}
 #if 0
 		if ( (GetKeyState('P') & 0x8000) != 0 )
@@ -262,6 +277,14 @@ int main(int argc, char** argv)
 	};
 
 	spdlog::info("After OK");
+	for (int pipeline_count=0; pipeline_count<REPS; pipeline_count++)
+    {
+      int modnum=0;
+      for (struct module it: listModules) {
+        spdlog::info(ns[pipeline_count*2+modnum]);
+        modnum++;
+      }
+    }
 
   // iterate the array
   for (struct module it: listModules) {

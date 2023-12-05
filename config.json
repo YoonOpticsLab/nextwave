@@ -1,7 +1,7 @@
 {
     "plugin_rawplayer":
     {"type": "generator",
-     "filename": "spots.bin"},
+     "filename": "spots_matlab.bin"},
 
     "plugin_centroiding":
     {"inplace": "there"}
