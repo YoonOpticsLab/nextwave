@@ -189,27 +189,6 @@ int main(int argc, char** argv)
 
   spdlog::info("Main");
 
-  std::list<struct module> listModules;
-
-  std::ifstream fil(filename_config);
-  json jdata = json::parse(fil);
-	//std::cout << jdata.dump(2) << std::endl;
-   //return 0;
-
-  // iterate the array
-  for (json::iterator it = jdata.begin(); it != jdata.end(); ++it) {
-    //json jd2 = it.value(); // How to recurse
-    //std::cout << jd2["data"] << "\n";
-
-    std::string name=it.key();
-    std::string value=to_string(it.value());
-
-    spdlog::info("{} About to load", name);
-
-    int err=load_module(name, value, listModules);
-    spdlog::info("{} Loaded OK", name);
-  }
-
   using namespace boost::interprocess;
 #if _WIN64
     windows_shared_memory shmem(open_or_create, SHMEM_HEADER_NAME, read_write, (size_t)SHMEM_HEADER_SIZE);
@@ -236,14 +215,31 @@ int main(int argc, char** argv)
     mapped_region shmem_region2{ shmem2, read_write };
     mapped_region shmem_region3{ shmem3, read_write };
 
+  // Read config file with modules
+  std::list<struct module> listModules;
+  std::ifstream fil(filename_config);
+  json jdata = json::parse(fil);
+  for (json::iterator it = jdata.begin(); it != jdata.end(); ++it) {
+    //json jd2 = it.value(); // How to recurse
+    //std::cout << jd2["data"] << "\n";
+
+    std::string name=it.key();
+    std::string value=to_string(it.value());
+
+    spdlog::info("{} About to load", name);
+
+    int err=load_module(name, value, listModules);
+    spdlog::info("{} Loaded OK", name);
+  }
 	spdlog::info("Before Q");
-	spdlog::info("{}", listModules.size());
-	char ps_nothing[64] = "test"; //.c_str();
+	spdlog::info("{} modules", listModules.size());
 
 #define REPS 10
+	spdlog::info("Press a key to continue to process {}", REPS);
+  getchar();
 
   double ns[REPS*2]; //TODO
-
+	char ps_nothing[64] = "NULL"; //.c_str();
 //	while ( (GetKeyState('Q') & 0x8000) == 0)
 	for (int pipeline_count=0; pipeline_count<REPS; pipeline_count++)
 	{
@@ -274,7 +270,14 @@ int main(int argc, char** argv)
 		}
 #endif //0
 
+    if (pipeline_count==0) {
+      spdlog::info("After it0. Press a key to continue to continue processing");
+      getchar();
+    }
 	};
+
+	spdlog::info("Finished. Press any key to cleanup.");
+  getchar();
 
 	spdlog::info("After OK");
 	for (int pipeline_count=0; pipeline_count<REPS; pipeline_count++)
@@ -288,7 +291,7 @@ int main(int argc, char** argv)
 
   // iterate the array
   for (struct module it: listModules) {
-	char ps_nothing[64] = "test"; //.c_str();
+	char ps_nothing[64] = "NULL"; //.c_str();
 	int result=(*it.fp_close)(ps_nothing);
 	#if _WIN64
 		FreeLibrary( (HMODULE)it.handle);

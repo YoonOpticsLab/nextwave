@@ -97,7 +97,7 @@ class Test(QMainWindow):
     self.updater.start(50)
     #self.updater.start(1000);
 
-    self.initUI() 
+    self.initUI()
 
     MEM_LEN=512
     self.shmem_hdr=mmap.mmap(-1,MEM_LEN,"NW_SRC0_HDR")
@@ -106,9 +106,7 @@ class Test(QMainWindow):
 
     self.setFixedSize(1024,800)
     self.move( 100,100 )
-    
-    self.layout=extract_memory.get_header_format('memory_layout.h')    
-    
+    self.layout=extract_memory.get_header_format('memory_layout.h')
     self.x = 2048/2
     self.y = 2048/2
 
@@ -122,7 +120,7 @@ class Test(QMainWindow):
 
     self.center_pixel_coord=[self.cx, self.cy];
     #center_offset=[imsize_x/2,imsize_y/2]-center_pixel_coord;
-    
+
     # Offset the references by the chosen center
     self.references_pixel_coord[:,0]=  (references[:,0]*im_ratio ) + self.cx;
     self.references_pixel_coord[:,1]= -(references[:,1]*im_ratio ) + self.cy;
@@ -133,7 +131,7 @@ class Test(QMainWindow):
     mem_header=self.shmem_hdr.seek(0)
     mem_header=self.shmem_hdr.read(MEM_LEN)
     height=extract_memory.get_array_item(self.layout,mem_header,'dimensions',0)
-    width=extract_memory.get_array_item(self.layout,mem_header,'dimensions',1)    
+    width=extract_memory.get_array_item(self.layout,mem_header,'dimensions',1)
     #print ('%dx%d'%(height,width),end=' ', flush=True);
     #print( type(height) )
 
@@ -181,7 +179,7 @@ class Test(QMainWindow):
      pixmap = QPixmap(qimage)
      pixmap = pixmap.scaled(WIDTH_WIN,HEIGHT_WIN, Qt.KeepAspectRatio)
      pixmap_label.setPixmap(pixmap)
-     
+
      pixmap_label.mousePressEvent = self.butt
 
      #pixmap_label.setMouseTracking(True)
@@ -191,11 +189,11 @@ class Test(QMainWindow):
      print('HI')
      self.show()
      print('there')
-     
+
 
  def butt(self, event):
     print("clicked")
-    print(event.pos().x() )   
+    print(event.pos().x() )
     self.x = event.pos.x()
     self.y = event.pos.y()
 

@@ -4,6 +4,7 @@ numbytes={
     'uint8_t':1,
     'uint16_t':2,
     'double':8,
+    'float':4,
     'int64_t':8, # longlong
     'uint64_t':8 # longlong    
 }
@@ -12,6 +13,7 @@ struct_codes={
     'uint8_t':'B',
     'uint16_t':'H',
     'double':'d',
+    'float':'f',
     'int64_t':'q', # longlong
     'uint64_t':'Q' # longlong
 } 
@@ -82,4 +84,4 @@ def get_header_format(filname):
 
         #print( var_name )
     header_size=bytenum_current
-    return (header_size,fields)
+    return (header_size,fields,defs)

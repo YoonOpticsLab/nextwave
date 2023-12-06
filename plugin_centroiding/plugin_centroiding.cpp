@@ -18,6 +18,7 @@ using json=nlohmann::json;
 #include "nextwave_plugin.hpp"
 #pragma pack(push,1)
 #include "memory_layout.h"
+#include "layout_boxes.h"
 #pragma pack(pop) // restore previous setting
 
 #if _WIN64
@@ -59,7 +60,6 @@ af::array im_ycoor;
 
 af::array box_x;
 af::array box_y;
-af::array box_idx1;
 
 af::array im;
 af::array cen_x;
@@ -71,12 +71,126 @@ af::array weighted_y;
 af::array sums_x;
 af::array sums_y;
 
+af::array seq1;
+
 //#define WIDTH 2048
 //#define HEIGHT 2048
-#define BOX_SIZE 80
-#define NBOXES 25*25
+#define BOX_SIZE 40 // TODO
+#define NBOXES 437 // TODO
 float fbuffer[BUF_SIZE];
 int nbuffer[BUF_SIZE];
+
+uint16_t num_boxes;
+double box_size;
+double pupil_radius_pixels;
+
+af::dim4 new_dims;//(BOX_SIZE*BOX_SIZE,NBOXES); // AF stacks the boxes, so do this to reshape for easier sum reduction
+
+using namespace boost::interprocess;
+
+#if _WIN64
+windows_shared_memory shmem1;// (open_or_create, SHMEM_HEADER_NAME, read_write, (size_t)SHMEM_HEADER_SIZE);
+windows_shared_memory shmem2;// (open_or_create, SHMEM_BUFFER_NAME, read_write, (size_t)SHMEM_BUFFER_SIZE);
+windows_shared_memory shmem3;// (open_or_create, SHMEM_BUFFER_NAME2, read_write, (size_t)SHMEM_BUFFER_SIZE2);
+#else
+shared_memory_object shmem1;// (open_or_create, SHMEM_HEADER_NAME, read_write);
+shared_memory_object shmem2;// (open_or_create, SHMEM_BUFFER_NAME, read_write);
+shared_memory_object shmem3;// (open_or_create, SHMEM_BUFFER_NAME2, read_write);
+#endif
+
+// Common to both OSes:
+mapped_region shmem_region1; //{ shmem, read_write };
+mapped_region shmem_region2; //{ shmem2, read_write };
+mapped_region shmem_region3; //{ shmem3, read_write };
+
+void read_boxes(int width) {
+  // TODO: is dynamically changing the size allowed?
+  struct shmem_boxes_header* pShmemBoxes = (struct shmem_boxes_header*) shmem_region3.get_address();
+  num_boxes = pShmemBoxes->num_boxes;
+  box_size = pShmemBoxes->box_size;
+  int box_size_int = pShmemBoxes->box_size;
+  pupil_radius_pixels = pShmemBoxes->pupil_radius_pixels;
+
+  float x_ref0 = pShmemBoxes->reference_x[0];
+  float y_ref0 = pShmemBoxes->reference_y[0];
+
+	box_x = af::array(box_size,num_boxes,pShmemBoxes->reference_x);
+	box_y = af::array(box_size,num_boxes,pShmemBoxes->reference_y);
+
+  // Each box will have a set of 1D indices into its members
+	for (int ibox=0; ibox<num_boxes; ibox++) {
+		int ibox_x = pShmemBoxes->reference_x[ibox]-box_size/2;
+		int ibox_y = pShmemBoxes->reference_y[ibox]-box_size/2;
+		for (int y=0; y<box_size; y++)  {
+			for (int x=0; x<box_size; x++) {
+        int posx=ibox_x+x;
+        int posy=ibox_y+y;
+        int idx_1d=posx*width+posy; // Column major // TODO: height
+        //if (ibox==0) {
+        //printf("%d ",idx_1d);
+        //}
+				//nbuffer[ibox*box_size_int*box_size_int+x*box_size_int+y]=idx_1d;
+				nbuffer[ibox*box_size_int*box_size_int+x*box_size_int+y]=idx_1d;
+			}
+		}
+	}
+	seq1 = af::array(box_size*box_size, num_boxes, nbuffer );
+
+  spdlog::info("boxes: #={} size={} pupil={}", num_boxes, box_size, pupil_radius_pixels );
+  spdlog::info("x0={} y0={}", x_ref0, y_ref0 );
+
+#if VERBOSE
+  printf("%f\n",(float)af::max<float>(seq1) );
+  printf("mn1: %f\n",(float)af::min<float>(seq1(af::span,1)) );
+  printf("mn2: %f\n",(float)af::min<float>(seq1(af::span,2)) );
+  printf("mx1: %f\n",(float)af::max<float>(seq1(af::span,1)) );
+  printf("mx2: %f\n",(float)af::max<float>(seq1(af::span,2)) );
+  printf("count1: %f\n",(float)af::count<float>(seq1(af::span,1)) );
+#endif
+}
+
+#if 0
+void read_boxes_old() {
+  int width=1000;
+	int width=width;
+
+  // x locations of boxes
+	for (int ibox=0; ibox<nboxes; ibox++) {
+		for (int y=0; y<box_size; y++) {
+			nbuffer[ibox*box_size+y]=ibox*box_size+y; //0+940-80*5;
+		}
+	}
+	box_x = af::array(box_size,nboxes,nbuffer);
+
+	for (int ibox=0; ibox<nboxes; ibox++) {
+		for (int y=0; y<box_size; y++) {
+			nbuffer[ibox*box_size+y]=ibox*box_size+y; //+940-80*4;
+		}
+	}
+	box_y = af::array(box_size,nboxes,nbuffer);
+
+  // each box will have a set of 1d indices into its members
+	for (int ibox=0; ibox<nboxes; ibox++) {
+		int ibox_x = ibox % 20;
+		int ibox_y = int(float(ibox) / 20);
+		for (int y=0; y<box_size; y++)  {
+			for (int x=0; x<box_size; x++) {
+				int posx=ibox_x*box_size+x+25 + rand() % 20;        ; // +25 just to approx. center spots in test img. todo!!
+				int posy=ibox_y*box_size+y+25 + rand() % 20;
+				nbuffer[ibox*box_size*box_size+y*box_size+x]=posy*width+posx; //+940-80*4;
+			}
+		}
+	}
+	box_idx1 = af::array(box_size*box_size, nboxes, nbuffer );
+
+  seqx=(box_x);
+  seqy=(box_y);
+  seq1=box_idx1;
+
+  return;
+}
+#endif //0
+
 
 DECL init(char *params)
 {
@@ -87,9 +201,27 @@ DECL init(char *params)
     spdlog::error("Couldn't load AF BACKEND");
   }
 
+#if _WIN64
+  shmem1=windows_shared_memory(open_or_create, SHMEM_HEADER_NAME, read_write, (size_t)SHMEM_HEADER_SIZE);
+  shmem2=windows_shared_memory(open_or_create, SHMEM_BUFFER_NAME, read_write, (size_t)SHMEM_BUFFER_SIZE);
+  shmem3=windows_shared_memory(open_or_create, SHMEM_BUFFER_NAME2, read_write, (size_t)SHMEM_BUFFER_SIZE2);
+#else
+  shmem1=shared_memory_object(open_or_create, SHMEM_HEADER_NAME, read_write);
+  shmem2=shared_memory_object(open_or_create, SHMEM_BUFFER_NAME, read_write);
+  shmem3=shared_memory_object(open_or_create, SHMEM_BUFFER_NAME2, read_write);
+#endif
+
+  shmem_region1=mapped_region(shmem1, read_write);
+  shmem_region2=mapped_region(shmem2, read_write);
+  shmem_region3=mapped_region(shmem3, read_write);
+  shmem1.truncate((size_t)SHMEM_HEADER_SIZE);
+  shmem2.truncate((size_t)SHMEM_BUFFER_SIZE);
+  shmem3.truncate((size_t)SHMEM_BUFFER_SIZE2);
+
   int width=1000; // TODO: fixme
   int height=1000;
 
+  // Precompute indexing arrays for weighted average
 	int WIDTH=width;
 	int HEIGHT = height;
 	for (int x=0; x<WIDTH; x++) {
@@ -97,42 +229,18 @@ DECL init(char *params)
 			fbuffer[y*WIDTH+x]=(float)x;
 		}
 	}
-	im_xcoor=af::array(WIDTH, HEIGHT, fbuffer);
+	im_xcoor=af::array(WIDTH, HEIGHT, fbuffer); // wedth and hight sietched? TODO
+
 	for (int x=0; x<WIDTH; x++) {
 		for (int y=0; y<HEIGHT; y++) {
 			fbuffer[y*WIDTH+x]=(float)y;
 		}
 	}
-
 	im_ycoor=af::array(WIDTH, HEIGHT, fbuffer);
 
-	for (int ibox=0; ibox<NBOXES; ibox++) {
-		for (int y=0; y<BOX_SIZE; y++) {
-			nbuffer[ibox*BOX_SIZE+y]=ibox*BOX_SIZE+y; //0+940-80*5;
-		}
-	}
-	box_x = af::array(BOX_SIZE,NBOXES,nbuffer);
+  new_dims=af::dim4(BOX_SIZE*BOX_SIZE,NBOXES); // AF stacks the boxes, so do this to reshape for easier sum reduction
 
-	for (int ibox=0; ibox<NBOXES; ibox++) {
-		for (int y=0; y<BOX_SIZE; y++) {
-			nbuffer[ibox*BOX_SIZE+y]=ibox*BOX_SIZE+y; //+940-80*4;
-		}
-	}
-	box_y = af::array(BOX_SIZE,NBOXES,nbuffer);
-
-  // Build bogus boxes:
-	for (int ibox=0; ibox<NBOXES; ibox++) {
-		int ibox_x = ibox % 20;
-		int ibox_y = int(float(ibox) / 20);
-		for (int y=0; y<BOX_SIZE; y++)  {
-			for (int x=0; x<BOX_SIZE; x++) {
-				int posx=ibox_x*BOX_SIZE+x+25 + rand() % 20;        ; // +25 just to approx. center spots in test img. TODO!!
-				int posy=ibox_y*BOX_SIZE+y+25 + rand() % 20;
-				nbuffer[ibox*BOX_SIZE*BOX_SIZE+y*BOX_SIZE+x]=posy*WIDTH+posx; //+940-80*4;
-			}
-		}
-	}
-	box_idx1 = af::array(BOX_SIZE*BOX_SIZE, NBOXES, nbuffer );
+  //read_boxes();
 
   return 0;
 }
@@ -140,97 +248,91 @@ DECL init(char *params)
 // https://github.com/arrayfire/arrayfire/issues/1405;
 int find_cendroids_af(unsigned char *buffer, int width, int height) {
 
-	for (int x=0; x<width; x++) {
-		for (int y=0; y<height; y++) {
-			fbuffer[y*width+x]=(float)buffer[y*width+x];
-		}
-	}
-	im=af::array(width, height, fbuffer);
+	im=af::array(width, height, buffer).as(f32);
 
-#if VERBOSE
-  printf("%f\n",(float)af::max<float>(im) );
-#endif
 	im /= 255.0;
 
-	af::dim4 new_dims(BOX_SIZE*BOX_SIZE,NBOXES); // AF stacks the boxes, so do this to reshape for easier sum reduction
+#if VERBOSE
+  spdlog::info("mean={} min={} max={}",(float)af::mean<float>(im),
+         (float)af::min<float>(im),
+               (float)af::max<float>(im) );
+#endif
 
-	weighted_x = (im) * im_xcoor;
-	weighted_y = (im) * im_ycoor;
+	weighted_x = im * im_xcoor;
+	weighted_y = im * im_ycoor;
 
-	af::array seqX=(box_x);
-	af::array seqY=(box_y);
-	af::array seq1=box_idx1;
+
+#if VERBOSE
+  spdlog::info("mean={} min={} max={}",(float)af::mean<float>(weighted_x),
+               (float)af::min<float>(weighted_x),
+               (float)af::max<float>(weighted_x) );
+#endif
 
 	int doprint=0;
-	if (doprint*0)
+	if (doprint)
 		af_print(seq1);
 
-	af::array cool = weighted_x(seq1); //weighted_x or im_xcoor for debug
-	if (doprint*0)
-		af_print(cool );
-	af::array xbetter = moddims( cool, new_dims );
+	af::array atemp = weighted_x(seq1); //weighted_x or im_xcoor for debug
+
+#if VERBOSE
+  spdlog::info("mean={} min={} max={}",(float)af::mean<float>(atemp),
+               (float)af::min<float>(atemp),
+               (float)af::max<float>(atemp) );
+#endif
 
 	if (doprint*0)
-		af_print(xbetter );
+		af_print(atemp );
+	af::array x_reshape = moddims( atemp, new_dims );
 
-	cool = weighted_y(seq1);
-	//af_print(cool );
-	af::array ybetter = af::moddims( cool, new_dims );
-	//af_print( ybetter );
 	if (doprint*0)
-		af_print(ybetter );
+		af_print(x_reshape );
+
+	atemp = weighted_y(seq1);
+	af::array y_reshape = af::moddims( atemp, new_dims );
+	if (doprint*0)
+		af_print(y_reshape );
 
 	af::array im2 = im(seq1);
-	af::array im_better = af::moddims( im2, new_dims );
+	af::array im_reshape = af::moddims( im2, new_dims );
 
-	af::array sums = af::sum( im_better, 0);
-	//sums = af::sum( sums, 1);
-	//sums /= sums;
-	sums_x = af::sum( xbetter, 0) / sums;
-	sums_y = af::sum( ybetter, 0) / sums;
-	//sums1 = af::mean( sums1, 1);
+	af::array sums = af::sum( im_reshape, 0);
+	sums_x = af::sum( x_reshape, 0) / sums;
+	sums_y = af::sum( y_reshape, 0) / sums;
+
+  float *host_x = sums_x.host<float>();
+  float *host_y = sums_y.host<float>();
+
+  struct shmem_boxes_header* pShmemBoxes = (struct shmem_boxes_header*) shmem_region3.get_address();
+  memcpy(pShmemBoxes->centroid_x, host_x, sizeof(float)*num_boxes);
+  memcpy(pShmemBoxes->centroid_y, host_y, sizeof(float)*num_boxes);
+
+#if VERBOSE
+  spdlog::info("Val0 x,y: {},{}",host_x[0],host_y[0]);
+	spdlog::info("Count: {}", (float)af::count<float>(sums_x));
+#endif
+
+  af::freeHost(host_x);
+  af::freeHost(host_y);
 
 	if (0) {
 		af_print( sums_x );
 		af_print( sums_y );
 	}
-#if 0
-#endif //0
-
-	//QueryPerformanceCounter(&t2); // TODO
 
 #if VERBOSE
+	spdlog::info("Minsum: {}", (float)af::min<float>(sums));
+	spdlog::info("Maxsum: {}", (float)af::max<float>(sums));
 	spdlog::info("Maxx: {}", (float)af::max<float>(sums_x));
 	spdlog::info("Maxy: {}", (float)af::max<float>(sums_y));
 #endif
 
-	//spdlog::info("Time: {}", float(t2.QuadPart-t1.QuadPart)/freq.QuadPart) ; // TODO
   return 0;
 }
 
 DECL process(char *params)
 {
-
-  using namespace boost::interprocess;
-#if _WIN64
-    windows_shared_memory shmem(open_or_create, SHMEM_HEADER_NAME, read_write, (size_t)SHMEM_HEADER_SIZE);
-    windows_shared_memory shmem2(open_or_create, SHMEM_BUFFER_NAME, read_write, (size_t)SHMEM_BUFFER_SIZE);
-    windows_shared_memory shmem3(open_or_create, SHMEM_BUFFER_NAME2, read_write, (size_t)SHMEM_BUFFER_SIZE2);
-#else
-    shared_memory_object shmem(open_or_create, SHMEM_HEADER_NAME, read_write);
-    shmem.truncate((size_t)SHMEM_HEADER_SIZE);
-    shared_memory_object shmem2(open_or_create, SHMEM_BUFFER_NAME, read_write);
-    shmem2.truncate((size_t)SHMEM_BUFFER_SIZE);
-    shared_memory_object shmem3(open_or_create, SHMEM_BUFFER_NAME2, read_write);
-    shmem3.truncate((size_t)SHMEM_BUFFER_SIZE2);
-#endif
-
-  // Common to both OSes:
-  mapped_region shmem_region{ shmem, read_write };
-  mapped_region shmem_region2{ shmem2, read_write };
-  mapped_region shmem_region3{ shmem3, read_write };
-
-	struct shmem_header* pShmem = (struct shmem_header*) shmem_region.get_address();
+  // TODO: is dynamically changing the size allowed?
+	struct shmem_header* pShmem = (struct shmem_header*) shmem_region1.get_address();
 	uint16_t nCurrRing = pShmem->current_frame;
 	uint16_t height = pShmem->dimensions[0];
 	uint16_t width = pShmem->dimensions[1];
@@ -241,6 +343,9 @@ DECL process(char *params)
 #if VERBOSE
 	spdlog::info("Dims: {} {} {}", width, height, int(buffer[0])) ;
 #endif
+
+  // If we need to...
+  read_boxes(width);
 
   find_cendroids_af(buffer, width, height);
 	return 0;
