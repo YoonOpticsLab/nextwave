@@ -32,6 +32,9 @@ std::thread(thread_entry).detach();
 #include <fstream>
 #include <list>
 
+#include <chrono>
+#include <thread>
+
 #if _WIN64
   #include <windows.h>
   #include <strsafe.h>
@@ -106,6 +109,7 @@ void chkerr(void)
 using json=nlohmann::ordered_json;
 
 #include "memory_layout.h"
+#include "layout_boxes.h"
 
 struct module {
 public:
@@ -234,11 +238,19 @@ int main(int argc, char** argv)
 	spdlog::info("Before Q");
 	spdlog::info("{} modules", listModules.size());
 
-#define REPS 10
-	spdlog::info("Press a key to continue to process {}", REPS);
-  getchar();
+  struct shmem_boxes_header* pShmemBoxes = (struct shmem_boxes_header*) shmem_region3.get_address();
+  pShmemBoxes->num_boxes=0;
 
-  double ns[REPS*2]; //TODO
+#define REPS 9999999
+#define REP_LOG 10
+	//spdlog::info("Press a key to continue to process {}", REPS);
+  //getchar();
+
+  while ( pShmemBoxes->num_boxes==0 ) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  }
+
+  double ns[REP_LOG*4]; //TODO
 	char ps_nothing[64] = "NULL"; //.c_str();
 //	while ( (GetKeyState('Q') & 0x8000) == 0)
 	for (int pipeline_count=0; pipeline_count<REPS; pipeline_count++)
@@ -252,10 +264,17 @@ int main(int argc, char** argv)
       high_resolution_clock::time_point time_after = high_resolution_clock::now();
 
       duration<double> time_span = duration_cast<duration<double>>(time_after-time_before);
-      ns[pipeline_count*2+modnum] = time_span.count();
+
+      int logidx=pipeline_count % REP_LOG;
+      ns[logidx*2+modnum] = time_span.count();
 
       modnum++;
-		}
+      }
+
+      if ( pShmemBoxes->lock==2 ) {
+        break;
+      };
+
 #if 0
 		if ( (GetKeyState('P') & 0x8000) != 0 )
 		{
@@ -270,17 +289,17 @@ int main(int argc, char** argv)
 		}
 #endif //0
 
-    if (pipeline_count==0) {
-      spdlog::info("After it0. Press a key to continue to continue processing");
-      getchar();
-    }
+    //if (pipeline_count==0) {
+    //spdlog::info("After it0. Press a key to continue to continue processing");
+    //getchar();
+    //}
 	};
 
-	spdlog::info("Finished. Press any key to cleanup.");
-  getchar();
+	//spdlog::info("Finished. Press any key to cleanup.");
+  //getchar();
 
 	spdlog::info("After OK");
-	for (int pipeline_count=0; pipeline_count<REPS; pipeline_count++)
+	for (int pipeline_count=0; pipeline_count<REP_LOG; pipeline_count++)
     {
       int modnum=0;
       for (struct module it: listModules) {

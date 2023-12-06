@@ -1,8 +1,8 @@
 {
     "plugin_rawplayer":
     {"type": "generator",
-     "filename": "spots_matlab.bin"},
+     "filename": "/tmp/test.bin"},
 
     "plugin_centroiding":
-    {"inplace": "there"}
+    {"method": "single_pass"}
 }

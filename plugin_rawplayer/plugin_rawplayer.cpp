@@ -3,6 +3,8 @@
 #include <fstream>
 #include <iostream>
 
+#include <sys/stat.h>
+
 using namespace std;
 
 #include <json.hpp>
@@ -16,6 +18,8 @@ using json=nlohmann::json;
 #include "memory_layout.h"
 #pragma pack(pop) // restore previous setting
 
+#include <chrono>
+#include <thread>
 
 #if _WIN64
 #include <windows.h>
@@ -49,12 +53,22 @@ inline uint64_t time_highres() {
 #endif
 }
 
-DECL init(char *params)
-{
-  json jdata = json::parse(params);
-  std::string filename=jdata["filename"];
+std::string gfilename;
 
+void read_file(std::string filename)
+{
 	FILE *fp;
+  struct stat st;
+
+  stat(filename.c_str(), &st);
+  int file_size = st.st_size;
+
+  // TODO: Temp wait until file all populated
+  while (file_size != 1000000) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    stat(filename.c_str(), &st);
+    file_size = st.st_size;
+  };
 
 	fp = fopen(filename.c_str(),"rb");  // r for read, b for binary
 
@@ -68,10 +82,19 @@ DECL init(char *params)
     rewind(fp);
 
     fread(buffer,1,height*width,fp); // only bytes
-    spdlog::info("Read {} {} {}",filename,height, width);
+    spdlog::info("Read {} {} {} {}",filename,height, width, file_size);
   }
   fclose(fp);
 
+  return; 
+}
+
+
+DECL init(char *params)
+{
+  json jdata = json::parse(params);
+  gfilename=jdata["filename"];
+  read_file(gfilename);
   return 0;
 }
 
@@ -94,6 +117,8 @@ DECL process(char *params)
   mapped_region shmem_region{ shmem, read_write };
   mapped_region shmem_region2{ shmem2, read_write };
   mapped_region shmem_region3{ shmem3, read_write };
+
+  read_file(gfilename);
 
   //const size_t width = 2048;
   //const size_t height = 2048;
