@@ -55,23 +55,37 @@ inline double time_highres() {
 #endif
 }
 
-af::array im_xcoor;
-af::array im_ycoor;
+class af_instance {
+public: 
 
-af::array box_x;
-af::array box_y;
+  af_instance() {
+  };
 
-af::array im;
-af::array cen_x;
-af::array cen_y;
+  ~af_instance() {
+  };
 
-af::array weighted_x;
-af::array weighted_y;
+  af::array im_xcoor;
+  af::array im_ycoor;
 
-af::array sums_x;
-af::array sums_y;
+  af::array box_x;
+  af::array box_y;
 
-af::array seq1;
+  af::array im;
+  af::array cen_x;
+  af::array cen_y;
+
+  af::array weighted_x;
+  af::array weighted_y;
+
+  af::array sums_x;
+  af::array sums_y;
+
+  af::array seq1;
+
+  af::dim4 new_dims;//(BOX_SIZE*BOX_SIZE,NBOXES); // AF stacks the boxes, so do this to reshape for easier sum reduction
+};
+
+class af_instance *gaf;
 
 //#define WIDTH 2048
 //#define HEIGHT 2048
@@ -84,7 +98,6 @@ uint16_t num_boxes;
 double box_size;
 double pupil_radius_pixels;
 
-af::dim4 new_dims;//(BOX_SIZE*BOX_SIZE,NBOXES); // AF stacks the boxes, so do this to reshape for easier sum reduction
 
 using namespace boost::interprocess;
 
@@ -114,8 +127,8 @@ void read_boxes(int width) {
   float x_ref0 = pShmemBoxes->reference_x[0];
   float y_ref0 = pShmemBoxes->reference_y[0];
 
-	box_x = af::array(box_size,num_boxes,pShmemBoxes->reference_x);
-	box_y = af::array(box_size,num_boxes,pShmemBoxes->reference_y);
+	gaf->box_x = af::array(box_size,num_boxes,pShmemBoxes->reference_x);
+	gaf->box_y = af::array(box_size,num_boxes,pShmemBoxes->reference_y);
 
   // Each box will have a set of 1D indices into its members
 	for (int ibox=0; ibox<num_boxes; ibox++) {
@@ -134,18 +147,18 @@ void read_boxes(int width) {
 			}
 		}
 	}
-	seq1 = af::array(box_size*box_size, num_boxes, nbuffer );
+	gaf->seq1 = af::array(box_size*box_size, num_boxes, nbuffer );
 
   spdlog::info("boxes: #={} size={} pupil={}", num_boxes, box_size, pupil_radius_pixels );
   spdlog::info("x0={} y0={}", x_ref0, y_ref0 );
 
 #if VERBOSE
-  printf("%f\n",(float)af::max<float>(seq1) );
-  printf("mn1: %f\n",(float)af::min<float>(seq1(af::span,1)) );
-  printf("mn2: %f\n",(float)af::min<float>(seq1(af::span,2)) );
-  printf("mx1: %f\n",(float)af::max<float>(seq1(af::span,1)) );
-  printf("mx2: %f\n",(float)af::max<float>(seq1(af::span,2)) );
-  printf("count1: %f\n",(float)af::count<float>(seq1(af::span,1)) );
+  printf("%f\n",(float)af::max<float>(gaf->seq1) );
+  printf("mn1: %f\n",(float)af::min<float>(gaf->seq1(af::span,1)) );
+  printf("mn2: %f\n",(float)af::min<float>(gaf->seq1(af::span,2)) );
+  printf("mx1: %f\n",(float)af::max<float>(gaf->seq1(af::span,1)) );
+  printf("mx2: %f\n",(float)af::max<float>(gaf->seq1(af::span,2)) );
+  printf("count1: %f\n",(float)af::count<float>(gaf->seq1(af::span,1)) );
 #endif
 }
 
@@ -160,14 +173,14 @@ void read_boxes_old() {
 			nbuffer[ibox*box_size+y]=ibox*box_size+y; //0+940-80*5;
 		}
 	}
-	box_x = af::array(box_size,nboxes,nbuffer);
+	gaf->box_x = af::array(box_size,nboxes,nbuffer);
 
 	for (int ibox=0; ibox<nboxes; ibox++) {
 		for (int y=0; y<box_size; y++) {
 			nbuffer[ibox*box_size+y]=ibox*box_size+y; //+940-80*4;
 		}
 	}
-	box_y = af::array(box_size,nboxes,nbuffer);
+	gaf->box_y = af::array(box_size,nboxes,nbuffer);
 
   // each box will have a set of 1d indices into its members
 	for (int ibox=0; ibox<nboxes; ibox++) {
@@ -185,7 +198,7 @@ void read_boxes_old() {
 
   seqx=(box_x);
   seqy=(box_y);
-  seq1=box_idx1;
+  gaf->seq1=box_idx1;
 
   return;
 }
@@ -218,6 +231,8 @@ DECL init(char *params)
   shmem2.truncate((size_t)SHMEM_BUFFER_SIZE);
   shmem3.truncate((size_t)SHMEM_BUFFER_SIZE2);
 
+  gaf=new af_instance();
+
   int width=1000; // TODO: fixme
   int height=1000;
 
@@ -229,16 +244,16 @@ DECL init(char *params)
 			fbuffer[y*WIDTH+x]=(float)x;
 		}
 	}
-	im_xcoor=af::array(WIDTH, HEIGHT, fbuffer); // wedth and hight sietched? TODO
+	gaf->im_xcoor=af::array(WIDTH, HEIGHT, fbuffer); // wedth and hight sietched? TODO
 
 	for (int x=0; x<WIDTH; x++) {
 		for (int y=0; y<HEIGHT; y++) {
 			fbuffer[y*WIDTH+x]=(float)y;
 		}
 	}
-	im_ycoor=af::array(WIDTH, HEIGHT, fbuffer);
+	gaf->im_ycoor=af::array(WIDTH, HEIGHT, fbuffer);
 
-  new_dims=af::dim4(BOX_SIZE*BOX_SIZE,NBOXES); // AF stacks the boxes, so do this to reshape for easier sum reduction
+  gaf->new_dims=af::dim4(BOX_SIZE*BOX_SIZE,NBOXES); // AF stacks the boxes, so do this to reshape for easier sum reduction
 
   //read_boxes();
 
@@ -248,9 +263,9 @@ DECL init(char *params)
 // https://github.com/arrayfire/arrayfire/issues/1405;
 int find_cendroids_af(unsigned char *buffer, int width, int height) {
 
-	im=af::array(width, height, buffer).as(f32);
+	gaf->im=af::array(width, height, buffer).as(f32);
 
-	im /= 255.0;
+	gaf->im /= 255.0;
 
 #if VERBOSE
   spdlog::info("mean={} min={} max={}",(float)af::mean<float>(im),
@@ -258,8 +273,8 @@ int find_cendroids_af(unsigned char *buffer, int width, int height) {
                (float)af::max<float>(im) );
 #endif
 
-	weighted_x = im * im_xcoor;
-	weighted_y = im * im_ycoor;
+	gaf->weighted_x = gaf->im * gaf->im_xcoor;
+	gaf->weighted_y = gaf->im * gaf->im_ycoor;
 
 
 #if VERBOSE
@@ -270,9 +285,9 @@ int find_cendroids_af(unsigned char *buffer, int width, int height) {
 
 	int doprint=0;
 	if (doprint)
-		af_print(seq1);
+		af_print(gaf->seq1);
 
-	af::array atemp = weighted_x(seq1); //weighted_x or im_xcoor for debug
+	af::array atemp = gaf->weighted_x(gaf->seq1); //weighted_x or im_xcoor for debug
 
 #if VERBOSE
   spdlog::info("mean={} min={} max={}",(float)af::mean<float>(atemp),
@@ -282,25 +297,25 @@ int find_cendroids_af(unsigned char *buffer, int width, int height) {
 
 	if (doprint*0)
 		af_print(atemp );
-	af::array x_reshape = moddims( atemp, new_dims );
+	af::array x_reshape = moddims( atemp, gaf->new_dims );
 
 	if (doprint*0)
 		af_print(x_reshape );
 
-	atemp = weighted_y(seq1);
-	af::array y_reshape = af::moddims( atemp, new_dims );
+	atemp = gaf->weighted_y(gaf->seq1);
+	af::array y_reshape = af::moddims( atemp, gaf->new_dims );
 	if (doprint*0)
 		af_print(y_reshape );
 
-	af::array im2 = im(seq1);
-	af::array im_reshape = af::moddims( im2, new_dims );
+	af::array im2 = gaf->im(gaf->seq1);
+	af::array im_reshape = af::moddims( im2, gaf->new_dims );
 
 	af::array sums = af::sum( im_reshape, 0);
-	sums_x = af::sum( x_reshape, 0) / sums;
-	sums_y = af::sum( y_reshape, 0) / sums;
+	gaf->sums_x = af::sum( x_reshape, 0) / sums;
+	gaf->sums_y = af::sum( y_reshape, 0) / sums;
 
-  float *host_x = sums_x.host<float>();
-  float *host_y = sums_y.host<float>();
+  float *host_x = gaf->sums_x.host<float>();
+  float *host_y = gaf->sums_y.host<float>();
 
   struct shmem_boxes_header* pShmemBoxes = (struct shmem_boxes_header*) shmem_region3.get_address();
   memcpy(pShmemBoxes->centroid_x, host_x, sizeof(float)*num_boxes);
@@ -315,8 +330,8 @@ int find_cendroids_af(unsigned char *buffer, int width, int height) {
   af::freeHost(host_y);
 
 	if (0) {
-		af_print( sums_x );
-		af_print( sums_y );
+		af_print( gaf->sums_x );
+		af_print( gaf->sums_y );
 	}
 
 #if VERBOSE
@@ -338,7 +353,7 @@ DECL process(char *params)
 	uint16_t width = pShmem->dimensions[1];
 
 	memcpy((void*)buffer,
-         ((const void *)(shmem_region2.get_address()))+height*width*nCurrRing, height*width);
+         ((const char *)(shmem_region2.get_address()))+height*width*nCurrRing, height*width);
 
 #if VERBOSE
 	spdlog::info("Dims: {} {} {}", width, height, int(buffer[0])) ;

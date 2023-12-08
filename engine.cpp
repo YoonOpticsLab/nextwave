@@ -251,16 +251,16 @@ int main(int argc, char** argv)
   }
 
   double ns[REP_LOG*4]; //TODO
-	char ps_nothing[64] = "NULL"; //.c_str();
+	char str_nothing[64] = ""; //.c_str();
 //	while ( (GetKeyState('Q') & 0x8000) == 0)
 	for (int pipeline_count=0; pipeline_count<REPS; pipeline_count++)
 	{
     int modnum=0;
 		for (struct module it: listModules) {
-			//int result=(*it.fp_init)(ps_nothing);
+			//int result=(*it.fp_init)(str_nothing);
 			//spdlog::info("About to run {}",it.name);
       high_resolution_clock::time_point time_before = high_resolution_clock::now();
-			int result=(*it.fp_do_process)(ps_nothing);
+			int result=(*it.fp_do_process)(str_nothing);
       high_resolution_clock::time_point time_after = high_resolution_clock::now();
 
       duration<double> time_span = duration_cast<duration<double>>(time_after-time_before);
@@ -310,8 +310,8 @@ int main(int argc, char** argv)
 
   // iterate the array
   for (struct module it: listModules) {
-	char ps_nothing[64] = "NULL"; //.c_str();
-	int result=(*it.fp_close)(ps_nothing);
+	char str_nothing[64] = ""; //.c_str();
+	int result=(*it.fp_close)(str_nothing);
 	#if _WIN64
 		FreeLibrary( (HMODULE)it.handle);
 	#else
