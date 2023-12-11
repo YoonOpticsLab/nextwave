@@ -22,6 +22,14 @@ using json=nlohmann::json;
 #pragma pack(pop) // restore previous setting
 
 #if _WIN64
+// Windows: statically link module into .EXE
+#define PLUGIN_API(prefix,which,params) int prefix##which(params)
+#else
+// Linux: Put in .DLL/.SO
+#define PLUGIN_API(prefix,which,params) extern "C" int which(params)
+#endif
+
+#if _WIN64
 #include <windows.h>
 #include <strsafe.h>
 #include "boost/interprocess/windows_shared_memory.hpp"
@@ -97,7 +105,6 @@ int nbuffer[BUF_SIZE];
 uint16_t num_boxes;
 double box_size;
 double pupil_radius_pixels;
-
 
 using namespace boost::interprocess;
 
@@ -205,7 +212,7 @@ void read_boxes_old() {
 #endif //0
 
 
-DECL init(char *params)
+PLUGIN_API(centroiding,init,char *params)
 {
   try {
     af::setBackend(AF_BACKEND_CPU);
@@ -366,19 +373,19 @@ DECL process(char *params)
 	return 0;
 };
 
-DECL plugin_close(char *params)
+PLUGIN_API(centroiding,plugin_close,char *params)
 {
   std::cout <<"CEN close\n" ;
   return 0;
 };
 
-DECL set_params(char* settings_as_json)
+PLUGIN_API(centroiding,set_params,char *settings)
 {
-  std::cout <<"P1 set_params " << settings_as_json << "\n";
+  std::cout <<"P1 set_params " << settings<< "\n";
   return 0;
 };
- 
-DECL get_info(char* which_info)
+
+PLUGIN_API(centroiding,get_info,char *which)
 {
   std::cout <<"P1 get_info";
   return 0;

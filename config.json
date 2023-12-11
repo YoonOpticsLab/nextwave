@@ -1,6 +1,7 @@
 {
     "plugin_rawplayer":
-    {"type": "generator",
+    {"mode": "inline",
+     "type": "generator",
      "filename": "/tmp/test.bin"},
 
     "plugin_centroiding":

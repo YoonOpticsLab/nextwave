@@ -105,6 +105,9 @@ void chkerr(void)
 #endif
 }
 
+#define PLUGIN_API(prefix,which,params) int prefix##which(params)
+PLUGIN_API(centroiding,init,char *params);
+
 #include <json.hpp>
 using json=nlohmann::ordered_json;
 
@@ -136,6 +139,13 @@ int load_module(std::string name, std::string params, std::list<struct module> &
 #if _WIN64
   name += std::string(".dll");
   handle=LoadLibrary(name.c_str());
+  if (name=="centroiding") {
+    spdlog::info("Local exe override");
+    // Centroiding need to live in the EXE (I think linking with the AF DLL problematic)
+    handle=GetModuleHandle(NULL);
+  } else {
+    handle=LoadLibrary(name.c_str());
+  }
 #else
   name = std::string("./lib") + name + std::string(".so");
   handle=dlopen(name.c_str(), RTLD_NOW|RTLD_LOCAL);
@@ -151,22 +161,30 @@ int load_module(std::string name, std::string params, std::list<struct module> &
   chkerr();
   //std::cout << handle << " Ok1\n" << std::flush;;
 
-  int (*fptr )(const char*);
+  int (*fptr1)(const char*);
   int (*fptr2)(const char*);
   int (*fptr3)(const char*);
+
 #if _WIN64
-  *(int **)(&fptr)=(int *)GetProcAddress((HMODULE)handle,"init");
-  *(int **)(&fptr2)=(int *)GetProcAddress((HMODULE)handle,"process");
-  *(int **)(&fptr3)=(int *)GetProcAddress((HMODULE)handle,"plugin_close");
+  const char prefix="";
+  if (name=="centroiding") {
+    const char prefix=name+"_";
+  }
+  name1=prefix+"init";
+  *(int **)(&fptr1)=(int *)GetProcAddress((HMODULE)handle,name1);
+  name2=prefix+"process";
+  *(int **)(&fptr2)=(int *)GetProcAddress((HMODULE)handle,name2);
+  name3=prefix+"plugin_close";
+  *(int **)(&fptr3)=(int *)GetProcAddress((HMODULE)handle,name3);
 #else
-  *(int **)(&fptr) = (int *)dlsym(handle,"init");
+  *(int **)(&fptr1) = (int *)dlsym(handle,"init");
   *(int **)(&fptr2) = (int *)dlsym(handle,"process");
   *(int **)(&fptr3) = (int *)dlsym(handle,"plugin_close");
 #endif
  
   aModule.handle=handle;
   aModule.name = name;
-  aModule.fp_init=fptr;
+  aModule.fp_init=fptr1;
   aModule.fp_do_process=fptr2;
   aModule.fp_close=fptr3;
 
