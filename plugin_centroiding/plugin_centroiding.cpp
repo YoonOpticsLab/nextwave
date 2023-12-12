@@ -1,3 +1,4 @@
+
 #include <arrayfire.h>
 
 #include <stdio.h>
@@ -23,7 +24,9 @@ using json=nlohmann::json;
 
 #if _WIN64
 // Windows: statically link module into .EXE
-#define PLUGIN_API(prefix,which,params) int prefix##which(params)
+#include <windows.h>
+#define PLUGIN_API(prefix,which,params) extern "C"  __declspec(dllexport) int prefix##_##which(params)
+//#define PLUGIN_API(prefix,which,params) extern "C"  __declspec(dllexport) int which(params)
 #else
 // Linux: Put in .DLL/.SO
 #define PLUGIN_API(prefix,which,params) extern "C" int which(params)
@@ -39,6 +42,7 @@ using json=nlohmann::json;
 #include <dlfcn.h>
 #endif
 #include <boost/interprocess/mapped_region.hpp>
+
 
 #define VERBOSE 0
 
@@ -91,6 +95,14 @@ public:
   af::array seq1;
 
   af::dim4 new_dims;//(BOX_SIZE*BOX_SIZE,NBOXES); // AF stacks the boxes, so do this to reshape for easier sum reduction
+  
+  // These are "temp" & overwritten each time in the loop, but put here to avoid GC, etc. :
+  af::array im2;
+  af::array sums;
+  
+  af::array atemp;
+  af::array x_reshape;
+  af::array y_reshape;
 };
 
 class af_instance *gaf;
@@ -123,9 +135,12 @@ mapped_region shmem_region1; //{ shmem, read_write };
 mapped_region shmem_region2; //{ shmem2, read_write };
 mapped_region shmem_region3; //{ shmem3, read_write };
 
+float local_refs[MAX_BOXES];
+
 void read_boxes(int width) {
   // TODO: is dynamically changing the size allowed?
   struct shmem_boxes_header* pShmemBoxes = (struct shmem_boxes_header*) shmem_region3.get_address();
+
   num_boxes = pShmemBoxes->num_boxes;
   box_size = pShmemBoxes->box_size;
   int box_size_int = pShmemBoxes->box_size;
@@ -133,9 +148,22 @@ void read_boxes(int width) {
 
   float x_ref0 = pShmemBoxes->reference_x[0];
   float y_ref0 = pShmemBoxes->reference_y[0];
+ 
+#if 0
+	//spdlog::info("RB0 {} {}", x_ref0, y_ref0);
 
-	gaf->box_x = af::array(box_size,num_boxes,pShmemBoxes->reference_x);
-	gaf->box_y = af::array(box_size,num_boxes,pShmemBoxes->reference_y);
+	//af_print_mem_info("message", -1);
+
+	//spdlog::info("RBf {} {} {}", box_size,num_boxes,pShmemBoxes->reference_x[0]);
+	try {
+		memcpy(local_refs, pShmemBoxes->reference_x, sizeof(float) * MAX_BOXES);
+		//af::array box_x = af::array(box_size, num_boxes, local_refs); // pShmemBoxes->reference_x);
+    } catch (af::exception &e) { fprintf(stderr, "%s\n", e.what()); }
+		
+	spdlog::info("RBf {} {} {}", box_size,num_boxes,pShmemBoxes->reference_x[0]);
+	//gaf->box_y = af::array(box_size,num_boxes,pShmemBoxes->reference_y);
+	spdlog::info("RB1");
+#endif //0
 
   // Each box will have a set of 1D indices into its members
 	for (int ibox=0; ibox<num_boxes; ibox++) {
@@ -156,8 +184,8 @@ void read_boxes(int width) {
 	}
 	gaf->seq1 = af::array(box_size*box_size, num_boxes, nbuffer );
 
-  spdlog::info("boxes: #={} size={} pupil={}", num_boxes, box_size, pupil_radius_pixels );
-  spdlog::info("x0={} y0={}", x_ref0, y_ref0 );
+  //spdlog::info("boxes: #={} size={} pupil={}", num_boxes, box_size, pupil_radius_pixels );
+  //spdlog::info("x0={} y0={}", x_ref0, y_ref0 );
 
 #if VERBOSE
   printf("%f\n",(float)af::max<float>(gaf->seq1) );
@@ -169,57 +197,20 @@ void read_boxes(int width) {
 #endif
 }
 
-#if 0
-void read_boxes_old() {
-  int width=1000;
-	int width=width;
-
-  // x locations of boxes
-	for (int ibox=0; ibox<nboxes; ibox++) {
-		for (int y=0; y<box_size; y++) {
-			nbuffer[ibox*box_size+y]=ibox*box_size+y; //0+940-80*5;
-		}
-	}
-	gaf->box_x = af::array(box_size,nboxes,nbuffer);
-
-	for (int ibox=0; ibox<nboxes; ibox++) {
-		for (int y=0; y<box_size; y++) {
-			nbuffer[ibox*box_size+y]=ibox*box_size+y; //+940-80*4;
-		}
-	}
-	gaf->box_y = af::array(box_size,nboxes,nbuffer);
-
-  // each box will have a set of 1d indices into its members
-	for (int ibox=0; ibox<nboxes; ibox++) {
-		int ibox_x = ibox % 20;
-		int ibox_y = int(float(ibox) / 20);
-		for (int y=0; y<box_size; y++)  {
-			for (int x=0; x<box_size; x++) {
-				int posx=ibox_x*box_size+x+25 + rand() % 20;        ; // +25 just to approx. center spots in test img. todo!!
-				int posy=ibox_y*box_size+y+25 + rand() % 20;
-				nbuffer[ibox*box_size*box_size+y*box_size+x]=posy*width+posx; //+940-80*4;
-			}
-		}
-	}
-	box_idx1 = af::array(box_size*box_size, nboxes, nbuffer );
-
-  seqx=(box_x);
-  seqy=(box_y);
-  gaf->seq1=box_idx1;
-
-  return;
-}
-#endif //0
-
-
 PLUGIN_API(centroiding,init,char *params)
 {
   try {
+    af::setBackend(AF_BACKEND_CUDA);
+    spdlog::info("Set AF_BACKEND_CUDA");
+  } catch (...){
+	  try {
     af::setBackend(AF_BACKEND_CPU);
     spdlog::info("Set AF_BACKEND_CPU");
   } catch (...){
     spdlog::error("Couldn't load AF BACKEND");
   }
+  }
+
 
 #if _WIN64
   shmem1=windows_shared_memory(open_or_create, SHMEM_HEADER_NAME, read_write, (size_t)SHMEM_HEADER_SIZE);
@@ -234,9 +225,13 @@ PLUGIN_API(centroiding,init,char *params)
   shmem_region1=mapped_region(shmem1, read_write);
   shmem_region2=mapped_region(shmem2, read_write);
   shmem_region3=mapped_region(shmem3, read_write);
+  
+#if _WIN64
+#else
   shmem1.truncate((size_t)SHMEM_HEADER_SIZE);
   shmem2.truncate((size_t)SHMEM_BUFFER_SIZE);
   shmem3.truncate((size_t)SHMEM_BUFFER_SIZE2);
+#endif
 
   gaf=new af_instance();
 
@@ -294,7 +289,7 @@ int find_cendroids_af(unsigned char *buffer, int width, int height) {
 	if (doprint)
 		af_print(gaf->seq1);
 
-	af::array atemp = gaf->weighted_x(gaf->seq1); //weighted_x or im_xcoor for debug
+	gaf->atemp = gaf->weighted_x(gaf->seq1); //weighted_x or im_xcoor for debug
 
 #if VERBOSE
   spdlog::info("mean={} min={} max={}",(float)af::mean<float>(atemp),
@@ -303,23 +298,23 @@ int find_cendroids_af(unsigned char *buffer, int width, int height) {
 #endif
 
 	if (doprint*0)
-		af_print(atemp );
-	af::array x_reshape = moddims( atemp, gaf->new_dims );
+		af_print(gaf->atemp );
+	gaf->x_reshape = moddims( gaf->atemp, gaf->new_dims );
 
 	if (doprint*0)
-		af_print(x_reshape );
+		af_print(gaf->x_reshape );
 
-	atemp = gaf->weighted_y(gaf->seq1);
-	af::array y_reshape = af::moddims( atemp, gaf->new_dims );
+	gaf->atemp = gaf->weighted_y(gaf->seq1);
+	gaf->y_reshape = af::moddims( gaf->atemp, gaf->new_dims );
 	if (doprint*0)
-		af_print(y_reshape );
+		af_print(gaf->y_reshape );
 
-	af::array im2 = gaf->im(gaf->seq1);
-	af::array im_reshape = af::moddims( im2, gaf->new_dims );
+	gaf->im2 = gaf->im(gaf->seq1);
+	gaf->im2 = af::moddims( gaf->im2, gaf->new_dims );
 
-	af::array sums = af::sum( im_reshape, 0);
-	gaf->sums_x = af::sum( x_reshape, 0) / sums;
-	gaf->sums_y = af::sum( y_reshape, 0) / sums;
+	gaf->sums = af::sum( gaf->im2, 0);
+	gaf->sums_x = af::sum( gaf->x_reshape, 0) / gaf->sums;
+	gaf->sums_y = af::sum( gaf->y_reshape, 0) / gaf->sums;
 
   float *host_x = gaf->sums_x.host<float>();
   float *host_y = gaf->sums_y.host<float>();
@@ -351,8 +346,10 @@ int find_cendroids_af(unsigned char *buffer, int width, int height) {
   return 0;
 }
 
-DECL process(char *params)
+PLUGIN_API(centroiding,process,char *params)
 {
+	//spdlog::info("Aboit ot Cen propc");
+	
   // TODO: is dynamically changing the size allowed?
 	struct shmem_header* pShmem = (struct shmem_header*) shmem_region1.get_address();
 	uint16_t nCurrRing = pShmem->current_frame;
@@ -366,8 +363,11 @@ DECL process(char *params)
 	spdlog::info("Dims: {} {} {}", width, height, int(buffer[0])) ;
 #endif
 
+	//spdlog::info("RB");
   // If we need to...
   read_boxes(width);
+
+//	af_print_mem_info("message", -1);
 
   find_cendroids_af(buffer, width, height);
 	return 0;

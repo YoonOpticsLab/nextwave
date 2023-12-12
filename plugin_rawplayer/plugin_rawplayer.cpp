@@ -82,7 +82,7 @@ void read_file(std::string filename)
     rewind(fp);
 
     fread(buffer,1,height*width,fp); // only bytes
-    spdlog::info("Read {} {} {} {}",filename,height, width, file_size);
+    //spdlog::info("Read {} {} {} {}",filename,height, width, file_size);
   }
   fclose(fp);
 
@@ -151,7 +151,7 @@ DECL process(char *params)
 	nCurrRing += 1;
 	if (nCurrRing >= 1) nCurrRing = 0;
 
-  spdlog::info("Sent. {} {} {}", height, width, (int)buffer[0]);
+  //spdlog::info("Sent. {} {} {}", height, width, (int)buffer[0]);
 
 	return 0;
 };

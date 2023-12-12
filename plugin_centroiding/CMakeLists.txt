@@ -22,7 +22,7 @@ if(WIN32)
   #   windows headers being included.
   # - NOMINMAX is required for ArrayFire code that uses
   #   functions af::min & af::max. Having a namespace doesn't help also.
-  add_definitions(-DWIN32_LEAN_AND_MEAN -DVC_EXTRALEAN -DNOMINMAX)
+  add_definitions(-DWIN32_LEAN_AND_MEAN -DVC_EXTRALEAN -DNOMINMAX -DAF_TRACE -DAF_PRINT_ERRORS)
 #  unset(CMAKE_RUNTIME_OUTPUT_DIRECTORY)
 endif()
 

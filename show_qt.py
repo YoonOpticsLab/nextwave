@@ -12,6 +12,8 @@ from numba import jit
 
 import extract_memory
 
+WINDOWS=True
+    
 # TODO: read from butter
 QIMAGE_HEIGHT=1000
 QIMAGE_WIDTH=1000
@@ -114,6 +116,8 @@ def send_searchboxes(shmem_boxes, valid_x, valid_y, layout_boxes):
     shmem_boxes.write(buf)
     shmem_boxes.flush()
 
+    print(num_boxes)
+
 boxes=[ [512,512] ]
 boxsize=40 # Hard-code for now
 nboxes=np.shape(boxes)[0]
@@ -177,12 +181,18 @@ class Test(QMainWindow):
 
     MEM_LEN=512
     MEM_LEN_DATA=2048*2048*4 # TODO: Get from file
-    WINDOWS=False
+
     self.layout=extract_memory.get_header_format('memory_layout.h')
     self.layout_boxes=extract_memory.get_header_format('layout_boxes.h')
     if WINDOWS:
         self.shmem_hdr=mmap.mmap(-1,MEM_LEN,"NW_SRC0_HDR")
         self.shmem_data=mmap.mmap(-1,MEM_LEN_DATA,"NW_SRC0_BUFFER")
+        self.shmem_boxes=mmap.mmap(-1,self.layout_boxes[0],"NW_BUFFER2")
+        
+        #from multiprocessing import shared_memory
+        #self.shmem_hdr = shared_memory.SharedMemory(name="NW_SRC0_HDR" ).buf
+        #self.shmem_data = shared_memory.SharedMemory(name="NW_SRC0_BUFFER" ).buf
+        #self.shmem_boxes = shared_memory.SharedMemory(name="NW_BUFFER2").buf
     else:
         fd1=os.open('/dev/shm/NW_SRC0_HDR', os.O_RDWR)
         self.shmem_hdr=mmap.mmap(fd1, MEM_LEN)

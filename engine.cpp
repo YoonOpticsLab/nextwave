@@ -39,6 +39,9 @@ std::thread(thread_entry).detach();
   #include <windows.h>
   #include <strsafe.h>
   #include "boost/interprocess/windows_shared_memory.hpp"
+  
+  #define PLUGIN_API(prefix,which,params) extern "C"  __declspec(dllexport) int prefix##_##which(params)
+  PLUGIN_API(centroiding,process,char *params); // TODO: test
 #else
   #include <boost/interprocess/shared_memory_object.hpp>
   // On unix, for dl* functions:
@@ -47,6 +50,7 @@ std::thread(thread_entry).detach();
 #include <boost/interprocess/mapped_region.hpp>
 
 // For timing stuff:
+#define BOOST_CHRONO_HEADER_ONLY
 #include "boost/chrono.hpp"
 using namespace std::chrono;
 
@@ -137,13 +141,13 @@ int load_module(std::string name, std::string params, std::list<struct module> &
   struct module aModule;
 
 #if _WIN64
-  name += std::string(".dll");
-  handle=LoadLibrary(name.c_str());
-  if (name=="centroiding") {
+  spdlog::info("Name: {}", name);
+  if (name=="plugin_centroiding") {
     spdlog::info("Local exe override");
     // Centroiding need to live in the EXE (I think linking with the AF DLL problematic)
     handle=GetModuleHandle(NULL);
   } else {
+    name += std::string(".dll");
     handle=LoadLibrary(name.c_str());
   }
 #else
@@ -166,16 +170,17 @@ int load_module(std::string name, std::string params, std::list<struct module> &
   int (*fptr3)(const char*);
 
 #if _WIN64
-  const char prefix="";
-  if (name=="centroiding") {
-    const char prefix=name+"_";
+  std::string prefix="";
+  if (name=="plugin_centroiding") {
+    prefix="centroiding_";
   }
-  name1=prefix+"init";
-  *(int **)(&fptr1)=(int *)GetProcAddress((HMODULE)handle,name1);
-  name2=prefix+"process";
-  *(int **)(&fptr2)=(int *)GetProcAddress((HMODULE)handle,name2);
-  name3=prefix+"plugin_close";
-  *(int **)(&fptr3)=(int *)GetProcAddress((HMODULE)handle,name3);
+  std::string name1=prefix+"init";
+  spdlog::info("trying: {}", name1 );
+  *(int **)(&fptr1)=(int *)GetProcAddress((HMODULE)handle,name1.c_str());
+  std::string name2=prefix+"process";
+  *(int **)(&fptr2)=(int *)GetProcAddress((HMODULE)handle,name2.c_str());
+  std::string name3=prefix+"plugin_close";
+  *(int **)(&fptr3)=(int *)GetProcAddress((HMODULE)handle,name3.c_str());
 #else
   *(int **)(&fptr1) = (int *)dlsym(handle,"init");
   *(int **)(&fptr2) = (int *)dlsym(handle,"process");
@@ -260,9 +265,7 @@ int main(int argc, char** argv)
   pShmemBoxes->num_boxes=0;
 
 #define REPS 9999999
-#define REP_LOG 10
-	//spdlog::info("Press a key to continue to process {}", REPS);
-  //getchar();
+#define REP_LOG 20
 
   while ( pShmemBoxes->num_boxes==0 ) {
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -278,7 +281,9 @@ int main(int argc, char** argv)
 			//int result=(*it.fp_init)(str_nothing);
 			//spdlog::info("About to run {}",it.name);
       high_resolution_clock::time_point time_before = high_resolution_clock::now();
-			int result=(*it.fp_do_process)(str_nothing);
+	  
+	  //centroiding_process(str_nothing);
+	  int result=(*it.fp_do_process)(str_nothing);
       high_resolution_clock::time_point time_after = high_resolution_clock::now();
 
       duration<double> time_span = duration_cast<duration<double>>(time_after-time_before);
