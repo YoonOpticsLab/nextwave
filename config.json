@@ -2,7 +2,7 @@
     "plugin_rawplayer":
     {"mode": "inline",
      "type": "generator",
-     "filename": "c:/nextwave/test.bin"},
+     "filename": "/tmp/test.bin"},
 
     "plugin_centroiding":
     {"method": "single_pass"}

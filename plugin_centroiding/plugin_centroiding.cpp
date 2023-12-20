@@ -225,7 +225,7 @@ PLUGIN_API(centroiding,init,char *params)
   shmem_region1=mapped_region(shmem1, read_write);
   shmem_region2=mapped_region(shmem2, read_write);
   shmem_region3=mapped_region(shmem3, read_write);
-  
+ 
 #if _WIN64
 #else
   shmem1.truncate((size_t)SHMEM_HEADER_SIZE);
@@ -243,21 +243,19 @@ PLUGIN_API(centroiding,init,char *params)
 	int HEIGHT = height;
 	for (int x=0; x<WIDTH; x++) {
 		for (int y=0; y<HEIGHT; y++) {
-			fbuffer[y*WIDTH+x]=(float)x;
+			fbuffer[x*WIDTH+y]=(float)x;
 		}
 	}
 	gaf->im_xcoor=af::array(WIDTH, HEIGHT, fbuffer); // wedth and hight sietched? TODO
 
 	for (int x=0; x<WIDTH; x++) {
 		for (int y=0; y<HEIGHT; y++) {
-			fbuffer[y*WIDTH+x]=(float)y;
+			fbuffer[x*WIDTH+y]=(float)y;
 		}
 	}
 	gaf->im_ycoor=af::array(WIDTH, HEIGHT, fbuffer);
 
   gaf->new_dims=af::dim4(BOX_SIZE*BOX_SIZE,NBOXES); // AF stacks the boxes, so do this to reshape for easier sum reduction
-
-  //read_boxes();
 
   return 0;
 }
@@ -266,6 +264,7 @@ PLUGIN_API(centroiding,init,char *params)
 int find_cendroids_af(unsigned char *buffer, int width, int height) {
 
 	gaf->im=af::array(width, height, buffer).as(f32);
+  gaf->im = af::transpose( gaf->im );
 
 	gaf->im /= 255.0;
 
@@ -319,6 +318,7 @@ int find_cendroids_af(unsigned char *buffer, int width, int height) {
   float *host_x = gaf->sums_x.host<float>();
   float *host_y = gaf->sums_y.host<float>();
 
+  // TODO: Some weird transposes happening. Reverse here.
   struct shmem_boxes_header* pShmemBoxes = (struct shmem_boxes_header*) shmem_region3.get_address();
   memcpy(pShmemBoxes->centroid_x, host_x, sizeof(float)*num_boxes);
   memcpy(pShmemBoxes->centroid_y, host_y, sizeof(float)*num_boxes);
@@ -346,15 +346,28 @@ int find_cendroids_af(unsigned char *buffer, int width, int height) {
   return 0;
 }
 
+void wait_for_lock(uint8_t *lock) {
+  while (*lock) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+  *lock=1;
+}
+
+void unlock(uint8_t *lock) {
+  *lock=0;
+}
+
 PLUGIN_API(centroiding,process,char *params)
 {
-	//spdlog::info("Aboit ot Cen propc");
-	
+
   // TODO: is dynamically changing the size allowed?
 	struct shmem_header* pShmem = (struct shmem_header*) shmem_region1.get_address();
 	uint16_t nCurrRing = pShmem->current_frame;
 	uint16_t height = pShmem->dimensions[0];
 	uint16_t width = pShmem->dimensions[1];
+
+  struct shmem_boxes_header* pShmemBoxes = (struct shmem_boxes_header*) shmem_region3.get_address();
+  wait_for_lock(&pShmemBoxes->lock);
 
 	memcpy((void*)buffer,
          ((const char *)(shmem_region2.get_address()))+height*width*nCurrRing, height*width);
@@ -370,6 +383,8 @@ PLUGIN_API(centroiding,process,char *params)
 //	af_print_mem_info("message", -1);
 
   find_cendroids_af(buffer, width, height);
+
+  unlock(&pShmemBoxes->lock);
 	return 0;
 };
 

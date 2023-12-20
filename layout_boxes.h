@@ -14,4 +14,6 @@ struct shmem_boxes_header
 	float box_y[MAX_BOXES];
 	float centroid_x[MAX_BOXES];
 	float centroid_y[MAX_BOXES];
+	float box_x_normalized[MAX_BOXES];
+	float box_y_normalized[MAX_BOXES];
 };

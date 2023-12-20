@@ -140,8 +140,8 @@ int load_module(std::string name, std::string params, std::list<struct module> &
 
   struct module aModule;
 
-#if _WIN64
   spdlog::info("Name: {}", name);
+#if _WIN64
   if (name=="plugin_centroiding") {
     spdlog::info("Local exe override");
     // Centroiding need to live in the EXE (I think linking with the AF DLL problematic)
@@ -218,7 +218,7 @@ int main(int argc, char** argv)
 
   using namespace boost::interprocess;
 #if _WIN64
-    windows_shared_memory shmem(open_or_create, SHMEM_HEADER_NAME, read_write, (size_t)SHMEM_HEADER_SIZE);
+    windows_shared_memory shmem1(open_or_create, SHMEM_HEADER_NAME, read_write, (size_t)SHMEM_HEADER_SIZE);
     windows_shared_memory shmem2(open_or_create, SHMEM_BUFFER_NAME, read_write, (size_t)SHMEM_BUFFER_SIZE);
     windows_shared_memory shmem3(open_or_create, SHMEM_BUFFER_NAME2, read_write, (size_t)SHMEM_BUFFER_SIZE2);
 #else
@@ -229,8 +229,8 @@ int main(int argc, char** argv)
       ~shm_remove(){ shared_memory_object::remove(SHMEM_HEADER_NAME); shared_memory_object::remove(SHMEM_BUFFER_NAME); shared_memory_object::remove(SHMEM_BUFFER_NAME2); spdlog::info("Removed"); }
     } remover;
 
-    shared_memory_object shmem(open_or_create, SHMEM_HEADER_NAME, read_write);
-    shmem.truncate((size_t)SHMEM_HEADER_SIZE);
+    shared_memory_object shmem1(open_or_create, SHMEM_HEADER_NAME, read_write);
+    shmem1.truncate((size_t)SHMEM_HEADER_SIZE);
     shared_memory_object shmem2(open_or_create, SHMEM_BUFFER_NAME, read_write);
     shmem2.truncate((size_t)SHMEM_BUFFER_SIZE);
     shared_memory_object shmem3(open_or_create, SHMEM_BUFFER_NAME2, read_write);
@@ -238,7 +238,7 @@ int main(int argc, char** argv)
 #endif
 
     // Common to both OSes:
-    mapped_region shmem_region{ shmem, read_write };
+    mapped_region shmem_region1{ shmem1, read_write };
     mapped_region shmem_region2{ shmem2, read_write };
     mapped_region shmem_region3{ shmem3, read_write };
 
@@ -247,8 +247,6 @@ int main(int argc, char** argv)
   std::ifstream fil(filename_config);
   json jdata = json::parse(fil);
   for (json::iterator it = jdata.begin(); it != jdata.end(); ++it) {
-    //json jd2 = it.value(); // How to recurse
-    //std::cout << jd2["data"] << "\n";
 
     std::string name=it.key();
     std::string value=to_string(it.value());
@@ -294,7 +292,7 @@ int main(int argc, char** argv)
       modnum++;
       }
 
-      if ( pShmemBoxes->lock==2 ) {
+      if ( pShmemBoxes->header_version==2 ) {
         break;
       };
 
