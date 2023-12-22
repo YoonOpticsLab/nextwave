@@ -1,6 +1,6 @@
 from PyQt5.QtWidgets import (QMainWindow, QLabel, QSizePolicy, QApplication, QPushButton,
                              QHBoxLayout, QVBoxLayout, QWidget, QGroupBox, QTabWidget, QTextEdit,
-                             QFileDialog)
+                             QFileDialog, QCheckBox, QDialog, QFormLayout, QDialogButtonBox, QLineEdit)
 from PyQt5.QtGui import QPixmap, QImage, QPainter, QPen
 from PyQt5.QtCore import Qt, QTimer, QLineF, QPointF
 import numpy as np
@@ -19,13 +19,39 @@ from numpy.linalg import svd,lstsq
 
 WINDOWS=False
 
-def showdialog():
-   d = QDialog()
-   b1 = QPushButton("ok",d)
-   b1.move(50,50)
-   d.setWindowTitle("Dialog")
-   d.setWindowModality(Qt.ApplicationModal)
-   d.exec_()
+NUM_ZERNIKES=67 # TODO
+NUM_ZERN_DIALOG=14 # TODO
+START_ZC=1
+NUM_ZCS=68
+
+class ZernikeDialog(QDialog):
+    def createFormGroupBox(self,titl):
+        formGroupBox = QGroupBox(titl)
+        layout = QFormLayout()
+        self.lines = [QLineEdit() for n in np.arange(NUM_ZERN_DIALOG)]
+        for nZernike,le in enumerate(self.lines):
+            layout.addRow(QLabel("Z%2d"%nZernike), le)
+        formGroupBox.setLayout(layout)
+        return formGroupBox
+
+    def mycall(self,callback):
+        print ("okok")
+        zs = [str( l1.text()) for l1 in self.lines]
+        zs = [0 if z1=='' else float(z1) for z1 in zs]
+        callback(zs)
+
+    def __init__(self,titl,callback):
+        super().__init__()
+        self.setWindowTitle(titl)
+        buttonBox = QDialogButtonBox(QDialogButtonBox.Ok) # | QDialogButtonBox.Cancel)
+        buttonBox.accepted.connect(lambda: self.mycall(callback) )
+
+        buttonBox.setWindowModality(Qt.ApplicationModal)
+
+        mainLayout = QVBoxLayout()
+        mainLayout.addWidget(self.createFormGroupBox(titl))
+        mainLayout.addWidget(buttonBox)
+        self.setLayout(mainLayout)
 
 # TODO: read from butter
 QIMAGE_HEIGHT=1000
@@ -45,8 +71,6 @@ UI_UPDATE_RATE_MS=50
 # TODO
 PUPIL=6.4
 RI_RATIO=12.5
-START_ZC=1
-NUM_ZCS=68
 CCD_PIXEL=6.4
 FOCAL=5.9041
 
@@ -231,10 +255,14 @@ class NextWaveMainWindow(QMainWindow):
     self.cy=500
     box_x,box_y,box_norm_x,box_norm_y=make_initial_searchboxes(self.cx,self.cy)
     send_searchboxes(self.shmem_boxes, box_x, box_y, self.layout_boxes)
+    self.box_x = box_x
+    self.box_y = box_y
     self.ref_x = box_x
     self.ref_y = box_y
     self.norm_x = box_norm_x
     self.norm_y = box_norm_y
+    self.initial_x = box_x
+    self.initial_y = box_y
     self.update_zernike_svd() # Precompute
 
     #self.setFixedSize(1024,800)
@@ -242,21 +270,6 @@ class NextWaveMainWindow(QMainWindow):
     self.x = 2048/2
     self.y = 2048/2
 
-
- def make_boxes():
-    # Recompute searchbox and reference info each time based on center
-    # For y, all pixel numbers are increasing from top to bottom (array order)
-    self.searchBoxes_pixel_coord[:,0]=(   searchBoxes[:,0]*im_ratio) + self.cx;
-    self.searchBoxes_pixel_coord[:,1]=( -(searchBoxes[:,1]*im_ratio ) ) + self.cy;
-    self.upperleftx=round( self.searchBoxes_pixel_coord[:,0]-search_box_size_pixels/2.0 );
-    self.upperlefty=round( self.searchBoxes_pixel_coord[:,1]-search_box_size_pixels/2.0 );
-
-    self.center_pixel_coord=[self.cx, self.cy];
-    #center_offset=[imsize_x/2,imsize_y/2]-center_pixel_coord;
-
-    # Offset the references by the chosen center
-    self.references_pixel_coord[:,0]=  (references[:,0]*im_ratio ) + self.cx;
-    self.references_pixel_coord[:,1]= -(references[:,1]*im_ratio ) + self.cy;
 
  def update_zernike_svd(self):
     lefts =  self.norm_x - 0.5/RI_RATIO
@@ -279,6 +292,7 @@ class NextWaveMainWindow(QMainWindow):
     leftside = lstsq(ss_full, vv, rcond=0)[0].T # Python equiv to MATLAB's vv/ss (solving system of eqns) is lstsq
     # https://stackoverflow.com/questions/1001634/array-division-translating-from-matlab-to-python
     self.zterms = np.matmul( leftside, uu.T)
+    self.zterms_inv = np.linalg.pinv(self.zterms)
 
  def compute_zernikes(self):
     # find slope
@@ -291,15 +305,16 @@ class NextWaveMainWindow(QMainWindow):
     #print( coeff)
 
     coeff=np.matmul(self.zterms,slope)
+
     # Copied from MATLAB code
-    CVS_to_OSA_map = np.array([3,2, 5,4,6, 9,7,8,10, 15,13,11,12,14,
+    self.CVS_to_OSA_map = np.array([3,2, 5,4,6, 9,7,8,10, 15,13,11,12,14,
                             21,19,17,16,18,20,
                             27,25,23,22,24,26,28, 35,33,31,29,30,32,34,36,
                             45,43,41,39,37,38,40,42,44,
                             55,53,51,49,47,46,48,50,52,54,
                             65,63,61,59,57,56,58,60,62,64,66,67,68,69,70])
-
-    self.zernikes=coeff[CVS_to_OSA_map[START_ZC-1:NUM_ZCS-1]-START_ZC-1 ]
+    self.OSA_to_CVS_map = np.array( [np.where(self.CVS_to_OSA_map-2==n)[0][0] for n in np.arange(20) ] ) # TODO
+    self.zernikes=coeff[self.CVS_to_OSA_map[START_ZC-1:NUM_ZCS-1]-START_ZC-1 ]
 
  def update_ui(self):
     # TODO: Wait until it's safe (unlocked)
@@ -375,27 +390,27 @@ class NextWaveMainWindow(QMainWindow):
         pen = QPen(Qt.blue, 1, Qt.DotLine)
         painter.setPen(pen)
         BOX_BORDER=2
-        boxes1=[QLineF(self.ref_x[n]-box_size//2+BOX_BORDER, # top
-                       self.ref_y[n]-box_size//2+BOX_BORDER,
-                       self.ref_x[n]+box_size//2-BOX_BORDER,
-                       self.ref_y[n]-box_size//2+BOX_BORDER) for n in np.arange(self.ref_x.shape[0])]
+        boxes1=[QLineF(self.box_x[n]-box_size//2+BOX_BORDER, # top
+                       self.box_y[n]-box_size//2+BOX_BORDER,
+                       self.box_x[n]+box_size//2-BOX_BORDER,
+                       self.box_y[n]-box_size//2+BOX_BORDER) for n in np.arange(self.box_x.shape[0])]
 
 
         painter.drawLines(boxes1)
-        boxes1=[QLineF(self.ref_x[n]-box_size//2+BOX_BORDER, # bottom
-                       self.ref_y[n]+box_size//2-BOX_BORDER,
-                       self.ref_x[n]+box_size//2-BOX_BORDER,
-                       self.ref_y[n]+box_size//2-BOX_BORDER) for n in np.arange(self.ref_x.shape[0])]
+        boxes1=[QLineF(self.box_x[n]-box_size//2+BOX_BORDER, # bottom
+                       self.box_y[n]+box_size//2-BOX_BORDER,
+                       self.box_x[n]+box_size//2-BOX_BORDER,
+                       self.box_y[n]+box_size//2-BOX_BORDER) for n in np.arange(self.box_x.shape[0])]
         painter.drawLines(boxes1)
-        boxes1=[QLineF(self.ref_x[n]-box_size//2+BOX_BORDER, # left
-                       self.ref_y[n]-box_size//2+BOX_BORDER,
-                       self.ref_x[n]-box_size//2+BOX_BORDER,
-                       self.ref_y[n]+box_size//2-BOX_BORDER) for n in np.arange(self.ref_x.shape[0])]
+        boxes1=[QLineF(self.box_x[n]-box_size//2+BOX_BORDER, # left
+                       self.box_y[n]-box_size//2+BOX_BORDER,
+                       self.box_x[n]-box_size//2+BOX_BORDER,
+                       self.box_y[n]+box_size//2-BOX_BORDER) for n in np.arange(self.box_x.shape[0])]
         painter.drawLines(boxes1)
-        boxes1=[QLineF(self.ref_x[n]+box_size//2-BOX_BORDER, # right
-                       self.ref_y[n]-box_size//2+BOX_BORDER,
-                       self.ref_x[n]+box_size//2-BOX_BORDER,
-                       self.ref_y[n]+box_size//2-BOX_BORDER) for n in np.arange(self.ref_x.shape[0])]
+        boxes1=[QLineF(self.box_x[n]+box_size//2-BOX_BORDER, # right
+                       self.box_y[n]-box_size//2+BOX_BORDER,
+                       self.box_x[n]+box_size//2-BOX_BORDER,
+                       self.box_y[n]+box_size//2-BOX_BORDER) for n in np.arange(self.box_x.shape[0])]
         painter.drawLines(boxes1)
 
     # Centroids:
@@ -448,6 +463,26 @@ class NextWaveMainWindow(QMainWindow):
         s += 'Z%2d=%+0.4f\n'%(n+1,self.zernikes[n])
     self.text_status.setText(s)
 
+ def shift_search_boxes(self,zs):
+     zern_new = np.zeros(NUM_ZERNIKES)
+     zern_new[self.OSA_to_CVS_map[0:NUM_ZERN_DIALOG]]=zs 
+     delta=np.matmul(self.zterms_inv,zern_new) 
+     num_boxes = self.box_x.shape[0] 
+     self.box_y = self.initial_y - delta[0:num_boxes]
+     self.box_x = self.initial_x + delta[num_boxes:]
+
+ def shift_references(self,zs):
+     zern_new = np.zeros(NUM_ZERNIKES)
+     zern_new[self.OSA_to_CVS_map[0:NUM_ZERN_DIALOG]]=zs 
+     delta=np.matmul(self.zterms_inv,zern_new) 
+     num_boxes = self.box_x.shape[0] 
+     self.ref_y = self.initial_y - delta[0:num_boxes]
+     self.ref_x = self.initial_x + delta[num_boxes:]
+
+ def showdialog(self,which,callback):
+     dlg = ZernikeDialog(which, callback)
+     dlg.exec()
+
  def initUI(self):
 
      pixmap_label = QLabel()
@@ -479,9 +514,26 @@ class NextWaveMainWindow(QMainWindow):
      tabs = QTabWidget()
      tabs.setTabPosition(QTabWidget.North)
      tabs.setMovable(True)
-     for n, tabnames in enumerate(["Source", "Options", "Coords", "Boxes","Camera"]):
-         tabs.addTab(QTabWidget(), tabnames)
+
+     panel_names = ["Source", "Options", "Coords", "Boxes","Camera"]
+     pages = [QWidget(tabs) for nam in panel_names]
+     l1 = QHBoxLayout()
+
+     l1.addWidget(QCheckBox("Real-time"))
+     btn = QPushButton("Search box shift")
+     btn.clicked.connect(lambda: self.showdialog("Shift search boxes", self.shift_search_boxes ) )
+     l1.addWidget(btn)
+
+     btn = QPushButton("Reference shift")
+     btn.clicked.connect(lambda: self.showdialog("Shift references", self.shift_references ) )
+     l1.addWidget(btn)
+
+     pages[3].setLayout(l1)
+
+     for n, tabnames in enumerate(panel_names):
+         tabs.addTab(pages[n], tabnames)
      #self.setCentralWidget(tabs)
+
 
      self.text_status = QTextEdit()
      self.text_status.setReadOnly(True)
@@ -523,8 +575,12 @@ class NextWaveMainWindow(QMainWindow):
     #box_x,box_y=make_initial_searchboxes(500,500)
     box_x,box_y,box_norm_x,box_norm_y=make_initial_searchboxes(500,500)
     send_searchboxes(self.shmem_boxes, box_x, box_y, self.layout_boxes)
+    #self.initial_x = box_x
+    #self.initial_y = box_y
     self.ref_x = box_x
     self.ref_y = box_y
+    self.box_x = box_x
+    self.box_y = box_y
     self.norm_x = box_norm_x
     self.norm_y = box_norm_y
     self.update_zernike_svd()
@@ -571,6 +627,7 @@ class NextWaveMainWindow(QMainWindow):
     np.save('dy',self.spot_displace_y)
     np.save('slope',self.slope)
     np.save('zterms',self.zterms)
+    np.save('zterms_inv',self.zterms_inv)
 
  def close(self):
     buf = ByteStream()
