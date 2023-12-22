@@ -1,4 +1,5 @@
 #define MAX_BOXES 1024
+#define MAX_TERMS 67108864
 
 struct shmem_boxes_header
 {
@@ -16,4 +17,7 @@ struct shmem_boxes_header
 	float centroid_y[MAX_BOXES];
 	float box_x_normalized[MAX_BOXES];
 	float box_y_normalized[MAX_BOXES];
+
+  double zterms[MAX_TERMS];
+  double zterms_inv[MAX_TERMS];
 };

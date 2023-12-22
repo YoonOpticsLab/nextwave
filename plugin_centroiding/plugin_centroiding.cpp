@@ -215,7 +215,7 @@ PLUGIN_API(centroiding,init,char *params)
 #if _WIN64
   shmem1=windows_shared_memory(open_or_create, SHMEM_HEADER_NAME, read_write, (size_t)SHMEM_HEADER_SIZE);
   shmem2=windows_shared_memory(open_or_create, SHMEM_BUFFER_NAME, read_write, (size_t)SHMEM_BUFFER_SIZE);
-  shmem3=windows_shared_memory(open_or_create, SHMEM_BUFFER_NAME2, read_write, (size_t)SHMEM_BUFFER_SIZE2);
+  shmem3=windows_shared_memory(open_or_create, SHMEM_BUFFER_NAME2, read_write, (size_t)sizeof(shmem_boxes_header));
 #else
   shmem1=shared_memory_object(open_or_create, SHMEM_HEADER_NAME, read_write);
   shmem2=shared_memory_object(open_or_create, SHMEM_BUFFER_NAME, read_write);
@@ -230,7 +230,7 @@ PLUGIN_API(centroiding,init,char *params)
 #else
   shmem1.truncate((size_t)SHMEM_HEADER_SIZE);
   shmem2.truncate((size_t)SHMEM_BUFFER_SIZE);
-  shmem3.truncate((size_t)SHMEM_BUFFER_SIZE2);
+  shmem3.truncate((size_t)sizeof(shmem_boxes_header));
 #endif
 
   gaf=new af_instance();

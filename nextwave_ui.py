@@ -19,6 +19,14 @@ from numpy.linalg import svd,lstsq
 
 WINDOWS=False
 
+def showdialog():
+   d = QDialog()
+   b1 = QPushButton("ok",d)
+   b1.move(50,50)
+   d.setWindowTitle("Dialog")
+   d.setWindowModality(Qt.ApplicationModal)
+   d.exec_()
+
 # TODO: read from butter
 QIMAGE_HEIGHT=1000
 QIMAGE_WIDTH=1000
@@ -206,7 +214,7 @@ class NextWaveMainWindow(QMainWindow):
         self.shmem_hdr=mmap.mmap(-1,MEM_LEN,"NW_SRC0_HDR")
         self.shmem_data=mmap.mmap(-1,MEM_LEN_DATA,"NW_SRC0_BUFFER")
         self.shmem_boxes=mmap.mmap(-1,self.layout_boxes[0],"NW_BUFFER2")
-        
+
         #from multiprocessing import shared_memory
         #self.shmem_hdr = shared_memory.SharedMemory(name="NW_SRC0_HDR" ).buf
         #self.shmem_data = shared_memory.SharedMemory(name="NW_SRC0_BUFFER" ).buf
@@ -275,14 +283,14 @@ class NextWaveMainWindow(QMainWindow):
  def compute_zernikes(self):
     # find slope
     spot_displace_x = self.ref_x - self.centroids_x
-    self.spot_displace_x = spot_displace_x
     spot_displace_y = -(self.ref_y - self.centroids_y)
-    self.spot_displace_y = spot_displace_y
     slope = np.concatenate( (spot_displace_y, spot_displace_x)) * CCD_PIXEL/FOCAL;
-    coeff=np.matmul(self.zterms,slope)
+    self.spot_displace_x = spot_displace_x
+    self.spot_displace_y = spot_displace_y
     self.slope = slope
     #print( coeff)
 
+    coeff=np.matmul(self.zterms,slope)
     # Copied from MATLAB code
     CVS_to_OSA_map = np.array([3,2, 5,4,6, 9,7,8,10, 15,13,11,12,14,
                             21,19,17,16,18,20,
