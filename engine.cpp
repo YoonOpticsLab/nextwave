@@ -302,7 +302,7 @@ int main(int argc, char** argv)
       modnum++;
       }
 
-      if ( pShmemBoxes->header_version==2 ) {
+      if ( pShmemBoxes->header_version==99 ) {
         break;
       };
 

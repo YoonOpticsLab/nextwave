@@ -23,6 +23,7 @@ NUM_ZERNIKES=67 # TODO
 NUM_ZERN_DIALOG=14 # TODO
 START_ZC=1
 NUM_ZCS=68
+NUM_BOXES=437 # TODO
 
 class ZernikeDialog(QDialog):
     def createFormGroupBox(self,titl):
@@ -35,7 +36,6 @@ class ZernikeDialog(QDialog):
         return formGroupBox
 
     def mycall(self,callback):
-        print ("okok")
         zs = [str( l1.text()) for l1 in self.lines]
         zs = [0 if z1=='' else float(z1) for z1 in zs]
         callback(zs)
@@ -130,29 +130,46 @@ def make_initial_searchboxes(cx,cy,pupil_radius_pixel=500,box_size_pixel=40):
     return valid_x,valid_y,valid_x_norm,valid_y_norm
 
 class ByteStream(bytearray):
-    def append(self, v, fmt='>B'):
+    def append(self, v, fmt='B'):
         self.extend(struct.pack(fmt, v))
 
-def send_searchboxes(shmem_boxes, valid_x, valid_y, layout_boxes):
+def rcv_searchboxes(shmem_boxes, layout, box_x, box_y, layout_boxes):
+    fields=layout[1]
+
+    adr=fields['box_x']['bytenum_current']
+    shmem_boxes.seek(adr)
+    box_buf=shmem_boxes.read(NUM_BOXES*4)
+    box_x = [struct.unpack('f',box_buf[n*4:n*4+4]) for n in np.arange(NUM_BOXES)]
+    #box_x =np.frombuffer(box_buf, dtype='uint8', count=NUM_BOXES )
+    #print(box_x[0], box_x[1], box_x[2], box_x[3])
+
+    adr=fields['box_y']['bytenum_current']
+    shmem_boxes.seek(adr)
+    box_buf=shmem_boxes.read(NUM_BOXES*4)
+    box_y = [struct.unpack('f',box_buf[n*4:n*4+4]) for n in np.arange(NUM_BOXES)]
+    #box_x =np.frombuffer(box_buf, dtype='uint8', count=NUM_BOXES )
+
+    return box_x,box_y
+
+def send_searchboxes(shmem_boxes, box_x, box_y, layout_boxes):
     defs=layout_boxes[2]
     fields=layout_boxes[1]
-    NUM_BOXES=defs['MAX_BOXES']
 
-    num_boxes=valid_x.shape[0]
+    num_boxes=box_x.shape[0]
     box_size_pixel=box_size
     pupil_radius_pixel=500
 
     buf = ByteStream()
-    for item in valid_x:
+    for item in box_x:
         buf.append(item, 'f')
-    shmem_boxes.seek(fields['reference_x']['bytenum_current'])
+    shmem_boxes.seek(fields['box_x']['bytenum_current'])
     shmem_boxes.write(buf)
     shmem_boxes.flush()
 
     buf = ByteStream()
-    for item in valid_y:
+    for item in box_y:
         buf.append(item, 'f')
-    shmem_boxes.seek(fields['reference_y']['bytenum_current'])
+    shmem_boxes.seek(fields['box_y']['bytenum_current'])
     shmem_boxes.write(buf)
     shmem_boxes.flush()
 
@@ -314,6 +331,8 @@ class NextWaveMainWindow(QMainWindow):
                             55,53,51,49,47,46,48,50,52,54,
                             65,63,61,59,57,56,58,60,62,64,66,67,68,69,70])
     self.OSA_to_CVS_map = np.array( [np.where(self.CVS_to_OSA_map-2==n)[0][0] for n in np.arange(20) ] ) # TODO
+    self.OSA_to_CVS_map += 2
+    #print( self.OSA_to_CVS_map)
     self.zernikes=coeff[self.CVS_to_OSA_map[START_ZC-1:NUM_ZCS-1]-START_ZC-1 ]
 
  def update_ui(self):
@@ -332,6 +351,11 @@ class NextWaveMainWindow(QMainWindow):
     #bytes2 = bytes2.T.copy()
 
     bytesf = bytes2 / np.max(bytes2)
+
+    if self.chkFollow.isChecked():
+        box_x,box_y=rcv_searchboxes(self.shmem_boxes, self.layout_boxes, 0, 0, 0 )
+        self.box_x = np.array(box_x)
+        self.box_y = np.array(box_y)
 
     if False:
         weighted_x = X*np.array(bytesf,dtype='float')
@@ -463,21 +487,32 @@ class NextWaveMainWindow(QMainWindow):
         s += 'Z%2d=%+0.4f\n'%(n+1,self.zernikes[n])
     self.text_status.setText(s)
 
+
+ def set_follow(self,state):
+    buf = ByteStream()
+    buf.append(int(state)*2)
+    self.shmem_boxes.seek(0)
+    self.shmem_boxes.write(buf)
+    self.shmem_boxes.flush()
+
  def shift_search_boxes(self,zs):
      zern_new = np.zeros(NUM_ZERNIKES)
      zern_new[self.OSA_to_CVS_map[0:NUM_ZERN_DIALOG]]=zs 
      delta=np.matmul(self.zterms_inv,zern_new) 
      num_boxes = self.box_x.shape[0] 
-     self.box_y = self.initial_y - delta[0:num_boxes]
+     self.box_y = self.initial_y + delta[0:num_boxes]
      self.box_x = self.initial_x + delta[num_boxes:]
 
+     send_searchboxes(self.shmem_boxes, self.box_x, self.box_y, self.layout_boxes)
+
  def shift_references(self,zs):
-     zern_new = np.zeros(NUM_ZERNIKES)
-     zern_new[self.OSA_to_CVS_map[0:NUM_ZERN_DIALOG]]=zs 
-     delta=np.matmul(self.zterms_inv,zern_new) 
-     num_boxes = self.box_x.shape[0] 
-     self.ref_y = self.initial_y - delta[0:num_boxes]
-     self.ref_x = self.initial_x + delta[num_boxes:]
+    zern_new = np.zeros(NUM_ZERNIKES)
+    zern_new[self.OSA_to_CVS_map[0:NUM_ZERN_DIALOG]]=zs 
+    delta=np.matmul(self.zterms_inv,zern_new) 
+    num_boxes = self.box_x.shape[0] 
+    self.ref_y = self.initial_y - delta[0:num_boxes]
+    self.ref_x = self.initial_x + delta[num_boxes:]
+    self.update_zernike_svd()
 
  def showdialog(self,which,callback):
      dlg = ZernikeDialog(which, callback)
@@ -519,7 +554,10 @@ class NextWaveMainWindow(QMainWindow):
      pages = [QWidget(tabs) for nam in panel_names]
      l1 = QHBoxLayout()
 
-     l1.addWidget(QCheckBox("Real-time"))
+     self.chkFollow = QCheckBox("Boxes follow centroids")
+     self.chkFollow.stateChanged.connect(lambda:self.set_follow(self.chkFollow.isChecked()))
+     l1.addWidget(self.chkFollow)
+
      btn = QPushButton("Search box shift")
      btn.clicked.connect(lambda: self.showdialog("Shift search boxes", self.shift_search_boxes ) )
      l1.addWidget(btn)
@@ -563,6 +601,7 @@ class NextWaveMainWindow(QMainWindow):
      self.show()
 
  def butt(self, event):
+    return 
     #print("clicked:", event.pos() )
     self.x = event.pos().x()
     self.y = event.pos().y()
@@ -631,8 +670,8 @@ class NextWaveMainWindow(QMainWindow):
 
  def close(self):
     buf = ByteStream()
-    buf.append(2)
-    buf.append(2) # Quitter
+    buf.append(99) # Status:Quitter
+    buf.append(0)  # Lock
     buf.append(437, 'H')
     buf.append(40, 'd')
     buf.append(500, 'd')

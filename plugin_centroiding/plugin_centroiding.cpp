@@ -67,6 +67,10 @@ inline double time_highres() {
 #endif
 }
 
+// Make a class to store AF arrays across process calls.
+// Thus memory isn't destroyed/erased constantly (causing Garbage Collection issues).
+// There are members having to do with the boxes (which are updated sporadically)
+// and members which are created with each frame. (TODO: document the lifespan and purpose of each array)
 class af_instance {
 public: 
 
@@ -146,10 +150,11 @@ void read_boxes(int width) {
   int box_size_int = pShmemBoxes->box_size;
   pupil_radius_pixels = pShmemBoxes->pupil_radius_pixels;
 
-  float x_ref0 = pShmemBoxes->reference_x[0];
-  float y_ref0 = pShmemBoxes->reference_y[0];
- 
 #if 0
+  // DEbugging
+  //float x_ref0 = pShmemBoxes->reference_x[0];
+  //float y_ref0 = pShmemBoxes->reference_y[0];
+ 
 	//spdlog::info("RB0 {} {}", x_ref0, y_ref0);
 
 	//af_print_mem_info("message", -1);
@@ -167,8 +172,8 @@ void read_boxes(int width) {
 
   // Each box will have a set of 1D indices into its members
 	for (int ibox=0; ibox<num_boxes; ibox++) {
-		int ibox_x = pShmemBoxes->reference_x[ibox]-box_size/2;
-		int ibox_y = pShmemBoxes->reference_y[ibox]-box_size/2;
+		int ibox_x = pShmemBoxes->box_x[ibox]-box_size/2;
+		int ibox_y = pShmemBoxes->box_y[ibox]-box_size/2;
 		for (int y=0; y<box_size; y++)  {
 			for (int x=0; x<box_size; x++) {
         int posx=ibox_x+x;
@@ -323,6 +328,12 @@ int find_cendroids_af(unsigned char *buffer, int width, int height) {
   memcpy(pShmemBoxes->centroid_x, host_x, sizeof(float)*num_boxes);
   memcpy(pShmemBoxes->centroid_y, host_y, sizeof(float)*num_boxes);
 
+  if (pShmemBoxes->header_version & 2) //Follow
+  {
+    memcpy(pShmemBoxes->box_x, host_x, sizeof(float)*num_boxes);
+    memcpy(pShmemBoxes->box_y, host_y, sizeof(float)*num_boxes);
+  }
+
 #if VERBOSE
   spdlog::info("Val0 x,y: {},{}",host_x[0],host_y[0]);
 	spdlog::info("Count: {}", (float)af::count<float>(sums_x));
@@ -376,13 +387,11 @@ PLUGIN_API(centroiding,process,char *params)
 	spdlog::info("Dims: {} {} {}", width, height, int(buffer[0])) ;
 #endif
 
-	//spdlog::info("RB");
-  // If we need to...
+  // If we need to... TODO: only recompute idxs if needed; not every time
   read_boxes(width);
 
-//	af_print_mem_info("message", -1);
-
   find_cendroids_af(buffer, width, height);
+
 
   unlock(&pShmemBoxes->lock);
 	return 0;
