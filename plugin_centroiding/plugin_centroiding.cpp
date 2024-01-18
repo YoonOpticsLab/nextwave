@@ -113,8 +113,9 @@ class af_instance *gaf;
 
 //#define WIDTH 2048
 //#define HEIGHT 2048
-#define BOX_SIZE 40 // TODO
-#define NBOXES 437 // TODO
+//#define BOX_SIZE (328/5.5/2) // TODO
+#define BOX_SIZE (30) // TODO: need the ceiling of the above (29.81)
+#define NBOXES 657 // TODO
 float fbuffer[BUF_SIZE];
 int nbuffer[BUF_SIZE];
 
@@ -240,8 +241,8 @@ PLUGIN_API(centroiding,init,char *params)
 
   gaf=new af_instance();
 
-  int width=1000; // TODO: fixme
-  int height=1000;
+  int width=992; // TODO: fixme
+  int height=992;
 
   // Precompute indexing arrays for weighted average
 	int WIDTH=width;
@@ -384,14 +385,13 @@ PLUGIN_API(centroiding,process,char *params)
          ((const char *)(shmem_region2.get_address()))+height*width*nCurrRing, height*width);
 
 #if VERBOSE
-	spdlog::info("Dims: {} {} {}", width, height, int(buffer[0])) ;
+	spdlog::info("Centroiding Dims: {} {} {}", width, height, int(buffer[0])) ;
 #endif
 
   // If we need to... TODO: only recompute idxs if needed; not every time
   read_boxes(width);
 
   find_cendroids_af(buffer, width, height);
-
 
   unlock(&pShmemBoxes->lock);
 	return 0;

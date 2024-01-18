@@ -24,9 +24,10 @@ struct shmem_header
 	uint16_t manager_port_num;
 	uint16_t dimensions[4];
 	uint16_t datatype_code;
+	uint16_t fps[2];
 	uint8_t num_ring_frames;
 	uint8_t current_frame;
 	uint8_t max_frames=NW_MAX_FRAMES;
 	uint64_t timestamps[NW_MAX_FRAMES];
-	uint64_t statuses[NW_MAX_FRAMES];	
+	uint64_t statuses[NW_MAX_FRAMES];
 };

@@ -64,7 +64,8 @@ void read_file(std::string filename)
   int file_size = st.st_size;
 
   // TODO: Temp wait until file all populated
-  while (file_size != 1000000) {
+  //while (file_size != 1000000) {
+  while (file_size <992*992) {
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
     stat(filename.c_str(), &st);
     file_size = st.st_size;

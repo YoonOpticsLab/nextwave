@@ -6,7 +6,7 @@ numbytes={
     'double':8,
     'float':4,
     'int64_t':8, # longlong
-    'uint64_t':8 # longlong    
+    'uint64_t':8 # longlong
 }
 
 struct_codes={
@@ -19,9 +19,20 @@ struct_codes={
 } 
 
 def pytpe(str_type):
-    return str_type[:-2]
+    if str_type in ['float','double']:
+        return str_type
+    else:
+        return str_type[:-2]
 
 # https://docs.python.org/3.9/library/struct.html
+
+def get_item(layout,bytes,which_item):
+    entry = layout[1][which_item]
+    loc=entry['bytenum_current']
+    itemsize=numbytes[ entry['type'] ]
+    print(entry['type'], loc, itemsize)
+    data = np.frombuffer(bytes[loc:loc+itemsize], pytpe(entry['type']), count=1)[0]
+    return data
 
 def get_array_item(layout,bytes,which_item, which_index):
     entry = layout[1][which_item]

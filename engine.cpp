@@ -244,7 +244,7 @@ int main(int argc, char** argv)
     shmem2.truncate((size_t)SHMEM_BUFFER_SIZE);
     shared_memory_object shmem3(open_or_create, SHMEM_BUFFER_NAME2, read_write);
     shmem3.truncate((size_t)sizeof(shmem_boxes_header));
-    spdlog::info("Siz: {}",sizeof(shmem_boxes_header) );
+    //spdlog::info("Siz: {}",sizeof(shmem_boxes_header) );
 #endif
 
     // Common to both OSes:
@@ -269,6 +269,7 @@ int main(int argc, char** argv)
 	spdlog::info("Before Q");
 	spdlog::info("{} modules", listModules.size());
 
+  struct shmem_header* pShmem1 = (struct shmem_header*) shmem_region1.get_address();
   struct shmem_boxes_header* pShmemBoxes = (struct shmem_boxes_header*) shmem_region3.get_address();
   pShmemBoxes->num_boxes=0;
 
@@ -279,11 +280,15 @@ int main(int argc, char** argv)
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
   }
 
+  double times_total[10]; //TODO
+
   double ns[REP_LOG*4]; //TODO
 	char str_nothing[64] = ""; //.c_str();
 //	while ( (GetKeyState('Q') & 0x8000) == 0)
 	for (int pipeline_count=0; pipeline_count<REPS; pipeline_count++)
 	{
+    high_resolution_clock::time_point time_total_before = high_resolution_clock::now();
+
     int modnum=0;
 		for (struct module it: listModules) {
 			//int result=(*it.fp_init)(str_nothing);
@@ -293,37 +298,24 @@ int main(int argc, char** argv)
 	  //centroiding_process(str_nothing);
 	  int result=(*it.fp_do_process)(str_nothing);
       high_resolution_clock::time_point time_after = high_resolution_clock::now();
-
       duration<double> time_span = duration_cast<duration<double>>(time_after-time_before);
-
       int logidx=pipeline_count % REP_LOG;
       ns[logidx*2+modnum] = time_span.count();
 
       modnum++;
       }
 
+      high_resolution_clock::time_point time_now = high_resolution_clock::now();
+      duration<double> time_span = duration_cast<duration<double>>(time_now - time_total_before);
+      times_total[pipeline_count % 10] = time_span.count();
+      pShmem1->fps[0]=(uint16_t)(1000*time_span.count()); // TODO: take mean
+
       if ( pShmemBoxes->header_version==99 ) {
         break;
       };
 
-#if 0
-		if ( (GetKeyState('P') & 0x8000) != 0 )
-		{
-			spdlog::info("paused");
-
-			while ( (GetKeyState('C') & 0x8000) == 0)
-			{
-				Sleep(250); // sleep for X ms
-			};
-
-			spdlog::info("continue");
-		}
-#endif //0
-
-    //if (pipeline_count==0) {
-    //spdlog::info("After it0. Press a key to continue to continue processing");
-    //getchar();
-    //}
+    // TODO: Get this from config file. Don't busy spin if we are just developing/testing.
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
 	};
 
 	//spdlog::info("Finished. Press any key to cleanup.");

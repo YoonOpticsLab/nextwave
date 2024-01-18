@@ -3,6 +3,8 @@ from PyQt5.QtWidgets import (QMainWindow, QLabel, QSizePolicy, QApplication, QPu
                              QFileDialog, QCheckBox, QDialog, QFormLayout, QDialogButtonBox, QLineEdit)
 from PyQt5.QtGui import QPixmap, QImage, QPainter, QPen
 from PyQt5.QtCore import Qt, QTimer, QLineF, QPointF
+import PyQt5.QtGui as QtGui
+
 import numpy as np
 import sys
 import os
@@ -23,7 +25,9 @@ NUM_ZERNIKES=67 # TODO
 NUM_ZERN_DIALOG=14 # TODO
 START_ZC=1
 NUM_ZCS=68
-NUM_BOXES=437 # TODO
+NUM_BOXES=657 # TODO
+
+#0=horizontal, 1=vertical,3=defocus?
 
 class ZernikeDialog(QDialog):
     def createFormGroupBox(self,titl):
@@ -31,7 +35,7 @@ class ZernikeDialog(QDialog):
         layout = QFormLayout()
         self.lines = [QLineEdit() for n in np.arange(NUM_ZERN_DIALOG)]
         for nZernike,le in enumerate(self.lines):
-            layout.addRow(QLabel("Z%2d"%nZernike), le)
+            layout.addRow(QLabel("Z%2d"%(nZernike)) , le)
         formGroupBox.setLayout(layout)
         return formGroupBox
 
@@ -56,7 +60,12 @@ class ZernikeDialog(QDialog):
 # TODO: read from butter
 QIMAGE_HEIGHT=1000
 QIMAGE_WIDTH=1000
-box_size=40
+BOX_UM=328
+CCD_PIXEL=5.5 * 2
+#CCD_PIXEL=6.4
+
+box_size_pixel=BOX_UM/CCD_PIXEL # /2: down-sampling ?
+print(box_size_pixel)
 
 MAIN_HEIGHT_WIN=1000
 MAIN_WIDTH_WIN=1800
@@ -66,12 +75,14 @@ SPOTS_WIDTH_WIN=1024
 MEM_LEN=512
 MEM_LEN_DATA=2048*2048*4
 
-UI_UPDATE_RATE_MS=50
+# TODO: Put in config file
+UI_UPDATE_RATE_MS=2000
 
 # TODO
-PUPIL=6.4
-RI_RATIO=12.5
-CCD_PIXEL=6.4
+PUPIL=5.5
+pupil_radius_pixel=PUPIL*1000/CCD_PIXEL
+RI_RATIO=pupil_radius_pixel/box_size_pixel
+print(pupil_radius_pixel)
 FOCAL=5.9041
 
 x=np.arange( QIMAGE_WIDTH )
@@ -95,12 +106,16 @@ def initial_searchboxes(ri_ratio,limit):
     sb = np.vstack( (b_x,b_y)).T
     return sb
 
-def make_initial_searchboxes(cx,cy,pupil_radius_pixel=500,box_size_pixel=40):
+def make_initial_searchboxes(cx,cy,pupil_radius_pixel,box_size_pixel,aperture=0.9):
     # Like the MATLAB code, but doesn't use loops,
     # instead builds and filters arrays
 
     # How many boxwidths in the pupil
     ri_ratio = pupil_radius_pixel / box_size_pixel
+
+    aperture = ri_ratio * aperture
+
+    print( pupil_radius_pixel, box_size_pixel, ri_ratio)
 
     # The max number of boxes possible + or -
     max_boxes = np.ceil( pupil_radius_pixel/ box_size_pixel )
@@ -114,8 +129,8 @@ def make_initial_searchboxes(cx,cy,pupil_radius_pixel=500,box_size_pixel=40):
     XX,YY = np.meshgrid(boxes_x, boxes_y )
 
     RR = np.sqrt( (XX+0.5*np.sign(XX))**2 + (YY+0.5*np.sign(YY))**2 )
-    valid_boxes = np.where(RR<ri_ratio)
-    max_dist_boxwidths = np.max(RR[RR<ri_ratio])
+    valid_boxes = np.where(RR<aperture)
+    max_dist_boxwidths = np.max(RR[RR<aperture])
 
     # Normalize to range -1 .. 1 (vs. pupil size)
     valid_x_norm=XX[valid_boxes]/ri_ratio
@@ -124,8 +139,11 @@ def make_initial_searchboxes(cx,cy,pupil_radius_pixel=500,box_size_pixel=40):
     num_boxes=valid_x_norm.shape[0]
     box_zero = np.where(valid_x_norm**2+valid_y_norm**2==0)[0] # Index of zeroth (middle) element
 
-    valid_x = valid_x_norm * 500 + cx
-    valid_y = valid_y_norm * 500 + cy
+    # TODO: check this
+    img_max = 992  # TODO
+    MULT = img_max / 2.0 # 1000 / 2.0
+    valid_x = valid_x_norm * MULT + cx
+    valid_y = valid_y_norm * MULT + cy
 
     return valid_x,valid_y,valid_x_norm,valid_y_norm
 
@@ -156,8 +174,7 @@ def send_searchboxes(shmem_boxes, box_x, box_y, layout_boxes):
     fields=layout_boxes[1]
 
     num_boxes=box_x.shape[0]
-    box_size_pixel=box_size
-    pupil_radius_pixel=500
+    #box_size_pixel=box_size_pixel
 
     buf = ByteStream()
     for item in box_x:
@@ -178,34 +195,35 @@ def send_searchboxes(shmem_boxes, box_x, box_y, layout_boxes):
     buf.append(1)
     buf.append(0)
     buf.append(num_boxes, 'H')
-    buf.append(box_size_pixel, 'd')
+    buf.append(np.ceil(box_size_pixel), 'd')
     buf.append(pupil_radius_pixel, 'd')
     shmem_boxes.seek(0)
     shmem_boxes.write(buf)
     shmem_boxes.flush()
     #print(num_boxes)
 
-boxes=[ [512,512] ]
-boxsize=40 # Hard-code for now
-nboxes=np.shape(boxes)[0]
-# im_ratio = ri_ratio * search_box_size_pixels;
-# pPupilRadius_um = pupilDiameter_um/2;
-# pInterLensletDistance_um = searchBoxSize_um;
-# ri_ratio = pPupilRadius_um/pInterLensletDistance_um;
-# search_box_size_pixels=searchBoxSize_um/ccd_pixel;
-ccd_pixel=6.4;
-focal=5.9041;
-pupilDiameter_um=7168;
-searchBoxSize_um=256;
-
-pInterLensletDistance_um = searchBoxSize_um;
-num_pix_lenslet=searchBoxSize_um/ccd_pixel; 
-
-ri_ratio = pupilDiameter_um/2.0/pInterLensletDistance_um;
-MAXCOLS = np.ceil(pupilDiameter_um/searchBoxSize_um/2)*2+2;
-limit = MAXCOLS/2;
-searchBoxes=initial_searchboxes(ri_ratio,limit);
-references=searchBoxes; # Initially, searchBoxes and refere
+if 0:
+    boxes=[ [512,512] ]
+    boxsize=40 # Hard-code for now
+    nboxes=np.shape(boxes)[0]
+    # im_ratio = ri_ratio * search_box_size_pixels;
+    # pPupilRadius_um = pupilDiameter_um/2;
+    # pInterLensletDistance_um = searchBoxSize_um;
+    # ri_ratio = pPupilRadius_um/pInterLensletDistance_um;
+    # search_box_size_pixels=searchBoxSize_um/ccd_pixel;
+    ccd_pixel=6.4;
+    focal=5.9041;
+    pupilDiameter_um=7168;
+    searchBoxSize_um=256;
+    
+    pInterLensletDistance_um = searchBoxSize_um;
+    num_pix_lenslet=searchBoxSize_um/ccd_pixel; 
+    
+    ri_ratio = pupilDiameter_um/2.0/pInterLensletDistance_um;
+    MAXCOLS = np.ceil(pupilDiameter_um/searchBoxSize_um/2)*2+2;
+    limit = MAXCOLS/2;
+    searchBoxes=initial_searchboxes(ri_ratio,limit);
+    references=searchBoxes; # Initially, searchBoxes and refere
 
 # @jit(nopython=True)
 def find_centroids(boxes,data,weighted_x,weighted_y,nboxes):
@@ -268,9 +286,9 @@ class NextWaveMainWindow(QMainWindow):
         fd3=os.open('/dev/shm/NW_BUFFER2', os.O_RDWR)
         self.shmem_boxes=mmap.mmap(fd3,self.layout_boxes[0])
 
-    self.cx=500
-    self.cy=500
-    box_x,box_y,box_norm_x,box_norm_y=make_initial_searchboxes(self.cx,self.cy)
+    self.cx=518
+    self.cy=488
+    box_x,box_y,box_norm_x,box_norm_y=make_initial_searchboxes(self.cx,self.cy,pupil_radius_pixel,box_size_pixel)
     send_searchboxes(self.shmem_boxes, box_x, box_y, self.layout_boxes)
     self.box_x = box_x
     self.box_y = box_y
@@ -319,7 +337,6 @@ class NextWaveMainWindow(QMainWindow):
     self.spot_displace_x = spot_displace_x
     self.spot_displace_y = spot_displace_y
     self.slope = slope
-    #print( coeff)
 
     coeff=np.matmul(self.zterms,slope)
 
@@ -332,17 +349,16 @@ class NextWaveMainWindow(QMainWindow):
                             65,63,61,59,57,56,58,60,62,64,66,67,68,69,70])
     self.OSA_to_CVS_map = np.array( [np.where(self.CVS_to_OSA_map-2==n)[0][0] for n in np.arange(20) ] ) # TODO
     self.OSA_to_CVS_map += 2
-    #print( self.OSA_to_CVS_map)
     self.zernikes=coeff[self.CVS_to_OSA_map[START_ZC-1:NUM_ZCS-1]-START_ZC-1 ]
 
  def update_ui(self):
     # TODO: Wait until it's safe (unlocked)
     mem_header=self.shmem_hdr.seek(0)
     mem_header=self.shmem_hdr.read(MEM_LEN)
+    #fps=extract_memory.get_item(self.layout,mem_header,'fps')
+    fps=extract_memory.get_array_item(self.layout,mem_header,'fps',0)
     height=extract_memory.get_array_item(self.layout,mem_header,'dimensions',0)
     width=extract_memory.get_array_item(self.layout,mem_header,'dimensions',1)
-    #print ('%dx%d'%(height,width),end=' ', flush=True);
-    #print( type(height) )
 
     self.shmem_data.seek(0)
     im_buf=self.shmem_data.read(width*height)
@@ -356,19 +372,6 @@ class NextWaveMainWindow(QMainWindow):
         box_x,box_y=rcv_searchboxes(self.shmem_boxes, self.layout_boxes, 0, 0, 0 )
         self.box_x = np.array(box_x)
         self.box_y = np.array(box_y)
-
-    if False:
-        weighted_x = X*np.array(bytesf,dtype='float')
-        weighted_y = Y*np.array(bytesf,dtype='float')
-        cen=find_centroids(boxes,bytesf,weighted_x,weighted_y,nboxes)
-        #print( cen )
-
-        cx=int(cen[0][0])
-        cy=int(cen[0][1])
-        bytes2[(cx-10):(cx+10),(cx-12):(cx-10)] = 255
-        bytes2[(cx-10):(cx+10),(cx+10):(cx+12)] = 255
-        bytes2[(cx-12):(cx-10),(cx-10):(cx+10)] = 255
-        bytes2[(cx+10):(cx+12),(cx-10):(cx+10)] = 255
 
     qimage = QImage(bytes2, bytes2.shape[1], bytes2.shape[0],
                  QImage.Format_Grayscale8)
@@ -386,7 +389,7 @@ class NextWaveMainWindow(QMainWindow):
 		#gradient.setColorAt(1.0, Qt::black);
 		#gradient.setColorAt(0.0, palette().background().color());
 
-        num_boxes=437 # TODO
+        num_boxes=NUM_BOXES # TODO
         fields=self.layout_boxes[1]
         self.shmem_boxes.seek(fields['centroid_x']['bytenum_current'])
         buf=self.shmem_boxes.read(num_boxes*4)
@@ -414,32 +417,31 @@ class NextWaveMainWindow(QMainWindow):
         pen = QPen(Qt.blue, 1, Qt.DotLine)
         painter.setPen(pen)
         BOX_BORDER=2
-        boxes1=[QLineF(self.box_x[n]-box_size//2+BOX_BORDER, # top
-                       self.box_y[n]-box_size//2+BOX_BORDER,
-                       self.box_x[n]+box_size//2-BOX_BORDER,
-                       self.box_y[n]-box_size//2+BOX_BORDER) for n in np.arange(self.box_x.shape[0])]
+        boxes1=[QLineF(self.box_x[n]-box_size_pixel//2+BOX_BORDER, # top
+                       self.box_y[n]-box_size_pixel//2+BOX_BORDER,
+                       self.box_x[n]+box_size_pixel//2-BOX_BORDER,
+                       self.box_y[n]-box_size_pixel//2+BOX_BORDER) for n in np.arange(self.box_x.shape[0])]
 
-
         painter.drawLines(boxes1)
-        boxes1=[QLineF(self.box_x[n]-box_size//2+BOX_BORDER, # bottom
-                       self.box_y[n]+box_size//2-BOX_BORDER,
-                       self.box_x[n]+box_size//2-BOX_BORDER,
-                       self.box_y[n]+box_size//2-BOX_BORDER) for n in np.arange(self.box_x.shape[0])]
+        boxes1=[QLineF(self.box_x[n]-box_size_pixel//2+BOX_BORDER, # bottom
+                       self.box_y[n]+box_size_pixel//2-BOX_BORDER,
+                       self.box_x[n]+box_size_pixel//2-BOX_BORDER,
+                       self.box_y[n]+box_size_pixel//2-BOX_BORDER) for n in np.arange(self.box_x.shape[0])]
         painter.drawLines(boxes1)
-        boxes1=[QLineF(self.box_x[n]-box_size//2+BOX_BORDER, # left
-                       self.box_y[n]-box_size//2+BOX_BORDER,
-                       self.box_x[n]-box_size//2+BOX_BORDER,
-                       self.box_y[n]+box_size//2-BOX_BORDER) for n in np.arange(self.box_x.shape[0])]
+        boxes1=[QLineF(self.box_x[n]-box_size_pixel//2+BOX_BORDER, # left
+                       self.box_y[n]-box_size_pixel//2+BOX_BORDER,
+                       self.box_x[n]-box_size_pixel//2+BOX_BORDER,
+                       self.box_y[n]+box_size_pixel//2-BOX_BORDER) for n in np.arange(self.box_x.shape[0])]
         painter.drawLines(boxes1)
-        boxes1=[QLineF(self.box_x[n]+box_size//2-BOX_BORDER, # right
-                       self.box_y[n]-box_size//2+BOX_BORDER,
-                       self.box_x[n]+box_size//2-BOX_BORDER,
-                       self.box_y[n]+box_size//2-BOX_BORDER) for n in np.arange(self.box_x.shape[0])]
+        boxes1=[QLineF(self.box_x[n]+box_size_pixel//2-BOX_BORDER, # right
+                       self.box_y[n]-box_size_pixel//2+BOX_BORDER,
+                       self.box_x[n]+box_size_pixel//2-BOX_BORDER,
+                       self.box_y[n]+box_size_pixel//2-BOX_BORDER) for n in np.arange(self.box_x.shape[0])]
         painter.drawLines(boxes1)
 
     # Centroids:
     if self.draw_centroids:
-        num_boxes=437 # TODO
+        num_boxes=NUM_BOXES # TODO
         fields=self.layout_boxes[1]
         self.shmem_boxes.seek(fields['centroid_x']['bytenum_current'])
         buf=self.shmem_boxes.read(num_boxes*4)
@@ -448,6 +450,10 @@ class NextWaveMainWindow(QMainWindow):
         self.shmem_boxes.seek(fields['centroid_y']['bytenum_current'])
         buf=self.shmem_boxes.read(num_boxes*4)
         self.centroids_y=struct.unpack_from(''.join((['f']*num_boxes)), buf)
+
+        for ncen,cen in enumerate(self.centroids_x):
+            if np.isnan(cen):
+                print(ncen,end=' ')
 
         pen = QPen(Qt.blue, 2)
         painter.setPen(pen)
@@ -487,6 +493,9 @@ class NextWaveMainWindow(QMainWindow):
         s += 'Z%2d=%+0.4f\n'%(n+1,self.zernikes[n])
     self.text_status.setText(s)
 
+    s="Running. %3.2f FPS (%3.0f ms)"%(1000/fps,fps)
+    self.label_status0.setText(s)
+    self.label_status0.setStyleSheet("color: rgb(0, 255, 0); background-color: rgb(0,0,0);")
 
  def set_follow(self,state):
     buf = ByteStream()
@@ -497,21 +506,31 @@ class NextWaveMainWindow(QMainWindow):
 
  def shift_search_boxes(self,zs):
      zern_new = np.zeros(NUM_ZERNIKES)
-     zern_new[self.OSA_to_CVS_map[0:NUM_ZERN_DIALOG]]=zs 
+     #zern_new[self.OSA_to_CVS_map[0:NUM_ZERN_DIALOG]]=zs 
+
+     #zern_new[0:NUM_ZERN_DIALOG]=zs 
+     # TODO: What about term 0?
+     zern_new[self.CVS_to_OSA_map[0:NUM_ZERN_DIALOG-1]-START_ZC-1 ] = zs[1:]
+     #print(self.OSA_to_CVS_map)
+     #print( zern_new[0:9] )
+
      delta=np.matmul(self.zterms_inv,zern_new) 
      num_boxes = self.box_x.shape[0] 
      self.box_y = self.initial_y + delta[0:num_boxes]
-     self.box_x = self.initial_x + delta[num_boxes:]
+     self.box_x = self.initial_x - delta[num_boxes:]
 
      send_searchboxes(self.shmem_boxes, self.box_x, self.box_y, self.layout_boxes)
 
  def shift_references(self,zs):
     zern_new = np.zeros(NUM_ZERNIKES)
-    zern_new[self.OSA_to_CVS_map[0:NUM_ZERN_DIALOG]]=zs 
+    #zern_new[self.OSA_to_CVS_map[0:NUM_ZERN_DIALOG]]=zs 
+    #zern_new[0:NUM_ZERN_DIALOG]=zs 
+    # TODO: What about term 0?
+    zern_new[self.CVS_to_OSA_map[0:NUM_ZERN_DIALOG-1]-START_ZC-1 ] = zs[1:]
     delta=np.matmul(self.zterms_inv,zern_new) 
     num_boxes = self.box_x.shape[0] 
-    self.ref_y = self.initial_y - delta[0:num_boxes]
-    self.ref_x = self.initial_x + delta[num_boxes:]
+    self.ref_y = (self.initial_y + delta[0:num_boxes])
+    self.ref_x =  self.initial_x - delta[num_boxes:]
     self.update_zernike_svd()
 
  def showdialog(self,which,callback):
@@ -519,6 +538,10 @@ class NextWaveMainWindow(QMainWindow):
      dlg.exec()
 
  def initUI(self):
+
+     self.setWindowIcon(QtGui.QIcon("./wave_icon.png"))
+     self.setWindowTitle('NextWave')
+     #self.setWindowTitle("Icon")
 
      pixmap_label = QLabel()
      #pixmap_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
@@ -567,21 +590,34 @@ class NextWaveMainWindow(QMainWindow):
      l1.addWidget(btn)
 
      pages[3].setLayout(l1)
-
      for n, tabnames in enumerate(panel_names):
          tabs.addTab(pages[n], tabnames)
      #self.setCentralWidget(tabs)
 
+     self.widget_status_buttons = QWidget()
+     layoutStatusButtons = QHBoxLayout()
+     self.status_btn1 = QPushButton("Init")
+     layoutStatusButtons.addWidget(self.status_btn1)
+     self.status_btn2 = QPushButton("Run")
+     layoutStatusButtons.addWidget(self.status_btn2)
+     self.status_btn3 = QPushButton("AO")
+     layoutStatusButtons.addWidget(self.status_btn3)
+     self.widget_status_buttons.setLayout(layoutStatusButtons)
+     layout.addWidget(self.widget_status_buttons,1)
+
+     self.label_status0 = QLabel("Status: ")
+     layout.addWidget(self.label_status0, 1)
 
      self.text_status = QTextEdit()
      self.text_status.setReadOnly(True)
-     layout.addWidget(self.text_status)
 
-     layout.addWidget(tabs)
+     layout.addWidget(self.text_status, 20)
+     layout.addWidget(tabs, 20)
+
      #self.widget_controls = QGroupBox('Controls')
      self.widget_controls.setLayout(layout)
 
-     layout.addWidget(QGroupBox('Statistics'))
+     layout.addWidget(QGroupBox('Statistics'), 20)
 
      # Main Widget
      self.widget_main = QWidget()
@@ -593,7 +629,6 @@ class NextWaveMainWindow(QMainWindow):
 
      self.setCentralWidget(self.widget_main)
 
-     self.setWindowTitle('NextWave')
      menu=self.menuBar().addMenu('&File')
      menu.addAction('&Export Centroids & Zernikes', self.export)
      menu.addAction('e&Xit', self.close)
@@ -672,7 +707,7 @@ class NextWaveMainWindow(QMainWindow):
     buf = ByteStream()
     buf.append(99) # Status:Quitter
     buf.append(0)  # Lock
-    buf.append(437, 'H')
+    buf.append(NUM_BOXES, 'H')
     buf.append(40, 'd')
     buf.append(500, 'd')
     self.shmem_boxes.seek(0)
