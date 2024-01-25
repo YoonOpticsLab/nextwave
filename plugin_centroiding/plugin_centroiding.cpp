@@ -111,11 +111,9 @@ public:
 
 class af_instance *gaf;
 
-//#define WIDTH 2048
-//#define HEIGHT 2048
 //#define BOX_SIZE (328/5.5/2) // TODO
-#define BOX_SIZE (30) // TODO: need the ceiling of the above (29.81)
-#define NBOXES 657 // TODO
+#define BOX_SIZE (40) // TODO: need the ceiling of the above (29.81)
+#define NBOXES 437 // TODO
 float fbuffer[BUF_SIZE];
 int nbuffer[BUF_SIZE];
 
@@ -241,8 +239,8 @@ PLUGIN_API(centroiding,init,char *params)
 
   gaf=new af_instance();
 
-  int width=992; // TODO: fixme
-  int height=992;
+  int width=1000; // TODO: fixme
+  int height=1000; // TODO: fixme
 
   // Precompute indexing arrays for weighted average
 	int WIDTH=width;
