@@ -111,15 +111,17 @@ public:
 
 class af_instance *gaf;
 
-//#define BOX_SIZE (328/5.5/2) // TODO
-#define BOX_SIZE (40) // TODO: need the ceiling of the above (29.81)
-#define NBOXES 437 // TODO
 float fbuffer[BUF_SIZE];
 int nbuffer[BUF_SIZE];
 
 uint16_t num_boxes;
+double pixel_um;
 double box_size;
 double pupil_radius_pixels;
+int box_size_int;
+
+int width;
+int height;
 
 using namespace boost::interprocess;
 
@@ -140,15 +142,42 @@ mapped_region shmem_region3; //{ shmem3, read_write };
 
 float local_refs[MAX_BOXES];
 
+void init_buffers(int width, int height, int box_size, int nboxes) {
+  // Precompute indexing arrays for weighted average
+	for (int x=0; x<width; x++) {
+		for (int y=0; y<height; y++) {
+			fbuffer[x*width+y]=(float)x;
+		}
+	}
+	gaf->im_xcoor=af::array(width, height, fbuffer); // wedth and hight sietched? TODO
+
+	for (int x=0; x<width; x++) {
+		for (int y=0; y<height; y++) {
+			fbuffer[x*width+y]=(float)y;
+		}
+	}
+	gaf->im_ycoor=af::array(width, height, fbuffer);
+  gaf->new_dims=af::dim4(box_size*box_size,nboxes); // AF stacks the boxes, so do this to reshape for easier sum reduction
+}
+
 void read_boxes(int width) {
+
   // TODO: is dynamically changing the size allowed?
+  struct shmem_header* pShmem = (struct shmem_header*) shmem_region1.get_address();
   struct shmem_boxes_header* pShmemBoxes = (struct shmem_boxes_header*) shmem_region3.get_address();
 
   num_boxes = pShmemBoxes->num_boxes;
-  box_size = pShmemBoxes->box_size;
-  int box_size_int = pShmemBoxes->box_size;
-  pupil_radius_pixels = pShmemBoxes->pupil_radius_pixels;
+  pixel_um = pShmemBoxes->pixel_um;
+  box_size = pShmemBoxes->box_um/pixel_um;
+  box_size_int = (int)(box_size+0.5); // round up to nearest integer
+  pupil_radius_pixels = pShmemBoxes->pupil_radius_um/pixel_um;
 
+  height = pShmem->dimensions[0];
+  width = pShmem->dimensions[1];
+  // TODO: this will be slow to do every time.
+  init_buffers(width, height, box_size_int, num_boxes);
+
+	//spdlog::info("Info from: {} {} {} {} {}", num_boxes, pixel_um, box_size, pupil_radius_pixels, box_size_int);
 #if 0
   // DEbugging
   //float x_ref0 = pShmemBoxes->reference_x[0];
@@ -163,7 +192,7 @@ void read_boxes(int width) {
 		memcpy(local_refs, pShmemBoxes->reference_x, sizeof(float) * MAX_BOXES);
 		//af::array box_x = af::array(box_size, num_boxes, local_refs); // pShmemBoxes->reference_x);
     } catch (af::exception &e) { fprintf(stderr, "%s\n", e.what()); }
-		
+
 	spdlog::info("RBf {} {} {}", box_size,num_boxes,pShmemBoxes->reference_x[0]);
 	//gaf->box_y = af::array(box_size,num_boxes,pShmemBoxes->reference_y);
 	spdlog::info("RB1");
@@ -207,14 +236,13 @@ PLUGIN_API(centroiding,init,char *params)
     af::setBackend(AF_BACKEND_CUDA);
     spdlog::info("Set AF_BACKEND_CUDA");
   } catch (...){
-	  try {
-    af::setBackend(AF_BACKEND_CPU);
-    spdlog::info("Set AF_BACKEND_CPU");
-  } catch (...){
-    spdlog::error("Couldn't load AF BACKEND");
+      try {
+      af::setBackend(AF_BACKEND_CPU);
+      spdlog::info("Set AF_BACKEND_CPU");
+    } catch (...){
+      spdlog::error("Couldn't load any AF_BACKEND!!");
+    }
   }
-  }
-
 
 #if _WIN64
   shmem1=windows_shared_memory(open_or_create, SHMEM_HEADER_NAME, read_write, (size_t)SHMEM_HEADER_SIZE);
@@ -238,29 +266,7 @@ PLUGIN_API(centroiding,init,char *params)
 #endif
 
   gaf=new af_instance();
-
-  int width=1000; // TODO: fixme
-  int height=1000; // TODO: fixme
-
-  // Precompute indexing arrays for weighted average
-	int WIDTH=width;
-	int HEIGHT = height;
-	for (int x=0; x<WIDTH; x++) {
-		for (int y=0; y<HEIGHT; y++) {
-			fbuffer[x*WIDTH+y]=(float)x;
-		}
-	}
-	gaf->im_xcoor=af::array(WIDTH, HEIGHT, fbuffer); // wedth and hight sietched? TODO
-
-	for (int x=0; x<WIDTH; x++) {
-		for (int y=0; y<HEIGHT; y++) {
-			fbuffer[x*WIDTH+y]=(float)y;
-		}
-	}
-	gaf->im_ycoor=af::array(WIDTH, HEIGHT, fbuffer);
-
-  gaf->new_dims=af::dim4(BOX_SIZE*BOX_SIZE,NBOXES); // AF stacks the boxes, so do this to reshape for easier sum reduction
-
+  //init_buffers();
   return 0;
 }
 // https://stackoverflow.com/questions/49692531/transfer-data-from-arrayfire-arrays-to-armadillo-structures

@@ -6,8 +6,10 @@ struct shmem_boxes_header
 	uint8_t header_version=NW_HEADER_VERSION;
 	uint8_t lock=0;
 	uint16_t num_boxes;
-	double box_size;
-	double pupil_radius_pixels;
+
+	double pixel_um;
+	double box_um;
+	double pupil_radius_um;
 
 	float reference_x[MAX_BOXES];
 	float reference_y[MAX_BOXES];

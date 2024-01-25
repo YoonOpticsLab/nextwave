@@ -26,8 +26,6 @@ NUM_ZERNIKES=67 # TODO
 NUM_ZERN_DIALOG=14 # TODO
 START_ZC=1
 NUM_ZCS=68
-NUM_BOXES=657 # TODO
-NUM_BOXES=437 # TODO
 
 #0=horizontal, 1=vertical,3=defocus?
 
@@ -108,7 +106,7 @@ class NextwaveEngineComm():
           - Computation of Zernikes, matrices for SVD, etc.
     """
 
-    def make_initial_searchboxes(self,cx,cy,pupil_radius_pixel,box_size_pixel,img_max=1000,aperture=1.0):
+    def make_initial_searchboxes(self,cx,cy,pupil_radius_pixel,box_size_pixel,img_max=1000,aperture=0.9):
         """
         Like the MATLAB code to make equally spaced boxes, but doesn't use loops.
         Instead builds and filters arrays
@@ -174,6 +172,8 @@ class NextwaveEngineComm():
         self.initial_y = valid_y
         self.update_zernike_svd() # Precompute
 
+        self.num_boxes= num_boxes
+
         return valid_x,valid_y,valid_x_norm,valid_y_norm
 
     def rcv_searchboxes(self,shmem_boxes, layout, box_x, box_y, layout_boxes):
@@ -219,9 +219,10 @@ class NextwaveEngineComm():
         buf = ByteStream()
         buf.append(1)
         buf.append(0)
-        buf.append(num_boxes, 'H')
-        buf.append(np.ceil(box_size_pixel), 'd')
-        buf.append(pupil_radius_pixel, 'd')
+        buf.append(num_boxes, 'H') # unsigned short
+        buf.append(CCD_PIXEL,'d')
+        buf.append(BOX_UM, 'd')
+        buf.append(pupil_radius_pixel*CCD_PIXEL, 'd')
         shmem_boxes.seek(0)
         shmem_boxes.write(buf)
         shmem_boxes.flush()
@@ -273,7 +274,13 @@ class NextwaveEngineComm():
         # find slope
         spot_displace_x = self.ref_x - self.centroids_x
         spot_displace_y = -(self.ref_y - self.centroids_y)
+
+        # Not sure whether should do this:
+        spot_displace_x -= spot_displace_x.mean()
+        spot_displace_y -= spot_displace_y.mean()
+        print( spot_displace_y.mean(), spot_displace_x.mean() )
         slope = np.concatenate( (spot_displace_y, spot_displace_x)) * CCD_PIXEL/FOCAL;
+
         self.spot_displace_x = spot_displace_x
         self.spot_displace_y = spot_displace_y
         self.slope = slope
@@ -343,6 +350,12 @@ class NextwaveEngineComm():
             fd3=os.open('/dev/shm/NW_BUFFER2', os.O_RDWR)
             self.shmem_boxes=mmap.mmap(fd3,self.layout_boxes[0])
 
+        bytez =np.array([6.4, 6.4, 40/6.4], dtype='double').tobytes()
+        fields = self.layout_boxes[1] # TODO
+        self.shmem_boxes.seek(fields['pixel_um']['bytenum_current'])
+        self.shmem_boxes.write(bytez)
+        self.shmem_boxes.flush()
+
     def receive_image(self):
         # TODO: Wait until it's safe (unlocked)
         mem_header=self.shmem_hdr.seek(0)
@@ -368,24 +381,22 @@ class NextwaveEngineComm():
         return bytes2
 
     def receive_centroids(self):
-        num_boxes=NUM_BOXES # TODO
-        self.num_boxes = num_boxes
         fields=self.layout_boxes[1]
         self.shmem_boxes.seek(fields['centroid_x']['bytenum_current'])
         buf=self.shmem_boxes.read(self.num_boxes*4)
-        self.centroids_x=struct.unpack_from(''.join((['f']*num_boxes)), buf)
+        self.centroids_x=struct.unpack_from(''.join((['f']*self.num_boxes)), buf)
 
         self.shmem_boxes.seek(fields['centroid_y']['bytenum_current'])
-        buf=self.shmem_boxes.read(num_boxes*4)
-        self.centroids_y=struct.unpack_from(''.join((['f']*num_boxes)), buf)
+        buf=self.shmem_boxes.read(self.num_boxes*4)
+        self.centroids_y=struct.unpack_from(''.join((['f']*self.num_boxes)), buf)
 
     def send_quit(self):
         buf = ByteStream()
         buf.append(99) # Status:Quitter
         buf.append(0)  # Lock
-        buf.append(NUM_BOXES, 'H')
-        buf.append(40, 'd')
-        buf.append(500, 'd')
+        buf.append(1, 'H') # NUM BOXES. Hopefully doesn't matter
+        #buf.append(40, 'd')
+        #buf.append(500, 'd')
         self.shmem_boxes.seek(0)
         self.shmem_boxes.write(buf)
         self.shmem_boxes.flush()
@@ -409,10 +420,10 @@ class NextWaveMainWindow(QMainWindow):
     self.draw_centroids = True
     self.draw_arrows = False
     self.draw_crosshair = True
-    self.cx=518 # TODO
-    self.cy=488 # TODO
-    self.cx=500 # TODO
-    self.cy=500 # TODO
+    #self.cx=518 # TODO
+    #self.cy=488 # TODO
+    self.cx=501 # TODO
+    self.cy=496 # TODO
 
     self.engine = NextwaveEngineComm()
     self.engine.init()
@@ -493,16 +504,6 @@ class NextWaveMainWindow(QMainWindow):
 
     # Centroids:
     if self.draw_centroids:
-        #num_boxes=NUM_BOXES # TODO
-        #fields=self.layout_boxes[1]
-        #self.shmem_boxes.seek(fields['centroid_x']['bytenum_current'])
-        #buf=self.shmem_boxes.read(num_boxes*4)
-        #self.centroids_x=struct.unpack_from(''.join((['f']*num_boxes)), buf)
-#
-        #self.shmem_boxes.seek(fields['centroid_y']['bytenum_current'])
-        #buf=self.shmem_boxes.read(num_boxes*4)
-        #self.centroids_y=struct.unpack_from(''.join((['f']*num_boxes)), buf)
-#
         #for ncen,cen in enumerate(self.centroids_x):
             #if np.isnan(cen):
                 #print(ncen,end=' ')
