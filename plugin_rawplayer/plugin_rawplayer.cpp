@@ -87,6 +87,12 @@ void read_file(std::string filename)
   }
   fclose(fp);
 
+  // Read json metadata file near the .bin  -- now Python handles this
+  //std::ifstream fil(filename + ".json" );
+  //json jdata = json::parse(fil);
+  //float val=jdata["pixel"];
+  //spdlog::info("{}",val);
+
   return; 
 }
 
