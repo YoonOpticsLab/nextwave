@@ -9,18 +9,16 @@ import numpy as np
 import sys
 import os
 
+#from numba import jit
+
 import mmap
 import struct
-
-
-from numba import jit
-
 import extract_memory
 
 import zernike_integrals
 from numpy.linalg import svd,lstsq
 
-WINDOWS=False
+WINDOWS=(os.name == 'nt')
 
 NUM_ZERNIKES=67 # TODO
 NUM_ZERN_DIALOG=14 # TODO
@@ -106,7 +104,7 @@ class NextwaveEngineComm():
           - Computation of Zernikes, matrices for SVD, etc.
     """
 
-    def make_initial_searchboxes(self,cx,cy,pupil_radius_pixel,box_size_pixel,img_max=1000,aperture=0.9):
+    def make_searchboxes(self,cx,cy,pupil_radius_pixel,box_size_pixel,img_max=1000,aperture=1.0):
         """
         Like the MATLAB code to make equally spaced boxes, but doesn't use loops.
         Instead builds and filters arrays
@@ -123,7 +121,6 @@ class NextwaveEngineComm():
                     b_y += [y / ri_ratio]
 
         """
-
 
         aperture = ri_ratio * aperture
 
@@ -173,6 +170,20 @@ class NextwaveEngineComm():
         self.update_zernike_svd() # Precompute
 
         self.num_boxes= num_boxes
+
+        #box_x,box_y=make_searchboxes(500,500)
+        #box_x,box_y,box_norm_x,box_norm_y=make_searchboxes(500,500)
+        #self.engine.make_searchboxes(500,500)
+        self.send_searchboxes(self.shmem_boxes, self.box_x, self.box_y, self.layout_boxes)
+        #self.initial_x = box_x
+        #self.initial_y = box_y
+        #self.engine.ref_x = box_x
+        #self.engine.ref_y = box_y
+        #self.engine.box_x = box_x
+        #self.engine.box_y = box_y
+        #self.engine.norm_x = box_norm_x
+        #self.engine.norm_y = box_norm_y
+        self.update_zernike_svd()
 
         return valid_x,valid_y,valid_x_norm,valid_y_norm
 
@@ -276,9 +287,10 @@ class NextwaveEngineComm():
         spot_displace_y = -(self.ref_y - self.centroids_y)
 
         # Not sure whether should do this:
-        spot_displace_x -= spot_displace_x.mean()
-        spot_displace_y -= spot_displace_y.mean()
-        print( spot_displace_y.mean(), spot_displace_x.mean() )
+        #spot_displace_x -= spot_displace_x.mean()
+        #spot_displace_y -= spot_displace_y.mean()
+        #print( spot_displace_y.mean(), spot_displace_x.mean() )
+
         slope = np.concatenate( (spot_displace_y, spot_displace_x)) * CCD_PIXEL/FOCAL;
 
         self.spot_displace_x = spot_displace_x
@@ -309,9 +321,9 @@ class NextwaveEngineComm():
         #print( zern_new[0:9] )
 
         delta=np.matmul(self.zterms_inv,zern_new) 
-        num_boxes = self.box_x.shape[0] 
-        self.box_y = self.initial_y + delta[0:num_boxes]
-        self.box_x = self.initial_x - delta[num_boxes:]
+        num_boxes = self.engine.box_x.shape[0] 
+        self.engine.box_y = self.initial_y + delta[0:num_boxes]
+        self.engine.box_x = self.initial_x - delta[num_boxes:]
 
         send_searchboxes(self.shmem_boxes, self.box_x, self.box_y, self.layout_boxes)
 
@@ -323,16 +335,17 @@ class NextwaveEngineComm():
         zern_new[self.CVS_to_OSA_map[0:NUM_ZERN_DIALOG-1]-START_ZC-1 ] = zs[1:]
         delta=np.matmul(self.zterms_inv,zern_new) 
         num_boxes = self.box_x.shape[0] 
-        self.ref_y = (self.initial_y + delta[0:num_boxes])
-        self.ref_x =  self.initial_x - delta[num_boxes:]
+        self.engine.ref_y = (self.initial_y + delta[0:num_boxes])
+        self.engine.ref_x =  self.initial_x - delta[num_boxes:]
         self.update_zernike_svd()
 
     def init(self):
-        MEM_LEN=512 # TODO
-        MEM_LEN_DATA=2048*2048*4 # TODO: Get from file
-
         self.layout=extract_memory.get_header_format('memory_layout.h')
         self.layout_boxes=extract_memory.get_header_format('layout_boxes.h')
+
+        # Could be math in the defines for sizes, use eval
+        MEM_LEN=int( eval(self.layout[2]['SHMEM_HEADER_SIZE'] ) )
+        MEM_LEN_DATA=int(eval(self.layout[2]['SHMEM_BUFFER_SIZE'] ) )
         if WINDOWS:
             self.shmem_hdr=mmap.mmap(-1,MEM_LEN,"NW_SRC0_HDR")
             self.shmem_data=mmap.mmap(-1,MEM_LEN_DATA,"NW_SRC0_BUFFER")
@@ -350,8 +363,8 @@ class NextwaveEngineComm():
             fd3=os.open('/dev/shm/NW_BUFFER2', os.O_RDWR)
             self.shmem_boxes=mmap.mmap(fd3,self.layout_boxes[0])
 
-        bytez =np.array([6.4, 6.4, 40/6.4], dtype='double').tobytes()
-        fields = self.layout_boxes[1] # TODO
+        bytez =np.array([CCD_PIXEL, PUPIL*2, BOX_UM], dtype='double').tobytes() 
+        fields = self.layout_boxes[1]
         self.shmem_boxes.seek(fields['pixel_um']['bytenum_current'])
         self.shmem_boxes.write(bytez)
         self.shmem_boxes.flush()
@@ -423,27 +436,27 @@ class NextWaveMainWindow(QMainWindow):
     #self.cx=518 # TODO
     #self.cy=488 # TODO
     self.cx=501 # TODO
-    self.cy=496 # TODO
+    self.cy=499.5 # TODO
 
     self.engine = NextwaveEngineComm()
     self.engine.init()
 
-    box_x,box_y,box_norm_x,box_norm_y=self.engine.make_initial_searchboxes(self.cx,self.cy,pupil_radius_pixel,box_size_pixel)
-    self.engine.send_searchboxes(self.engine.shmem_boxes, self.engine.box_x, self.engine.box_y, self.engine.layout_boxes)
-    self.box_x = box_x
-    self.box_y = box_y
-    self.ref_x = box_x
-    self.ref_y = box_y
-    self.norm_x = box_norm_x
-    self.norm_y = box_norm_y
-    self.initial_x = box_x
-    self.initial_y = box_y
+    box_x,box_y,box_norm_x,box_norm_y=self.engine.make_searchboxes(self.cx,self.cy,pupil_radius_pixel,box_size_pixel)
+    #self.engine.send_searchboxes(self.engine.shmem_boxes, self.engine.box_x, self.engine.box_y, self.engine.layout_boxes)
+    #self.engine.box_x = box_x
+    #self.engine.box_y = box_y
+    #self.engine.ref_x = box_x
+    #self.engine.ref_y = box_y
+    #self.engine.norm_x = box_norm_x
+    #self.engine.norm_y = box_norm_y
+    #self.initial_x = box_x
+    #self.initial_y = box_y
     #self.update_zernike_svd() # Precompute
 
     #self.setFixedSize(1024,800)
     #self.move( 100,100 )
-    self.x = 2048/2
-    self.y = 2048/2
+    #self.x = 2048/2
+    #self.y = 2048/2
 
  def update_ui(self):
     image_pixels = self.engine.receive_image()
@@ -464,8 +477,8 @@ class NextWaveMainWindow(QMainWindow):
 		#gradient.setColorAt(0.0, palette().background().color());
         pen = QPen(Qt.green, 2)
         painter.setPen(pen)
-        arrows=[QLineF(self.ref_x[n],
-                       self.ref_y[n],
+        arrows=[QLineF(self.engine.ref_x[n],
+                       self.engine.ref_y[n],
                        self.engine.centroids_x[n],
                        self.engine.centroids_y[n]) for n in np.arange(0,self.engine.num_boxes)]
         painter.drawLines(arrows)
@@ -473,33 +486,33 @@ class NextWaveMainWindow(QMainWindow):
     if self.draw_refs:
         pen = QPen(Qt.red, 2)
         painter.setPen(pen)
-        points_ref=[QPointF(self.ref_x[n],self.ref_y[n]) for n in np.arange(self.ref_x.shape[0])]
+        points_ref=[QPointF(self.engine.ref_x[n],self.engine.ref_y[n]) for n in np.arange(self.engine.ref_x.shape[0])]
         painter.drawPoints(points_ref)
 
     if self.draw_boxes:
         pen = QPen(Qt.blue, 1, Qt.DotLine)
         painter.setPen(pen)
         BOX_BORDER=2
-        boxes1=[QLineF(self.box_x[n]-box_size_pixel//2+BOX_BORDER, # top
-                       self.box_y[n]-box_size_pixel//2+BOX_BORDER,
-                       self.box_x[n]+box_size_pixel//2-BOX_BORDER,
-                       self.box_y[n]-box_size_pixel//2+BOX_BORDER) for n in np.arange(self.box_x.shape[0])]
+        boxes1=[QLineF(self.engine.box_x[n]-box_size_pixel//2+BOX_BORDER, # top
+                       self.engine.box_y[n]-box_size_pixel//2+BOX_BORDER,
+                       self.engine.box_x[n]+box_size_pixel//2-BOX_BORDER,
+                       self.engine.box_y[n]-box_size_pixel//2+BOX_BORDER) for n in np.arange(self.engine.box_x.shape[0])]
 
         painter.drawLines(boxes1)
-        boxes1=[QLineF(self.box_x[n]-box_size_pixel//2+BOX_BORDER, # bottom
-                       self.box_y[n]+box_size_pixel//2-BOX_BORDER,
-                       self.box_x[n]+box_size_pixel//2-BOX_BORDER,
-                       self.box_y[n]+box_size_pixel//2-BOX_BORDER) for n in np.arange(self.box_x.shape[0])]
+        boxes1=[QLineF(self.engine.box_x[n]-box_size_pixel//2+BOX_BORDER, # bottom
+                       self.engine.box_y[n]+box_size_pixel//2-BOX_BORDER,
+                       self.engine.box_x[n]+box_size_pixel//2-BOX_BORDER,
+                       self.engine.box_y[n]+box_size_pixel//2-BOX_BORDER) for n in np.arange(self.engine.box_x.shape[0])]
         painter.drawLines(boxes1)
-        boxes1=[QLineF(self.box_x[n]-box_size_pixel//2+BOX_BORDER, # left
-                       self.box_y[n]-box_size_pixel//2+BOX_BORDER,
-                       self.box_x[n]-box_size_pixel//2+BOX_BORDER,
-                       self.box_y[n]+box_size_pixel//2-BOX_BORDER) for n in np.arange(self.box_x.shape[0])]
+        boxes1=[QLineF(self.engine.box_x[n]-box_size_pixel//2+BOX_BORDER, # left
+                       self.engine.box_y[n]-box_size_pixel//2+BOX_BORDER,
+                       self.engine.box_x[n]-box_size_pixel//2+BOX_BORDER,
+                       self.engine.box_y[n]+box_size_pixel//2-BOX_BORDER) for n in np.arange(self.engine.box_x.shape[0])]
         painter.drawLines(boxes1)
-        boxes1=[QLineF(self.box_x[n]+box_size_pixel//2-BOX_BORDER, # right
-                       self.box_y[n]-box_size_pixel//2+BOX_BORDER,
-                       self.box_x[n]+box_size_pixel//2-BOX_BORDER,
-                       self.box_y[n]+box_size_pixel//2-BOX_BORDER) for n in np.arange(self.box_x.shape[0])]
+        boxes1=[QLineF(self.engine.box_x[n]+box_size_pixel//2-BOX_BORDER, # right
+                       self.engine.box_y[n]-box_size_pixel//2+BOX_BORDER,
+                       self.engine.box_x[n]+box_size_pixel//2-BOX_BORDER,
+                       self.engine.box_y[n]+box_size_pixel//2-BOX_BORDER) for n in np.arange(self.engine.box_x.shape[0])]
         painter.drawLines(boxes1)
 
     # Centroids:
@@ -561,6 +574,8 @@ class NextWaveMainWindow(QMainWindow):
 
  def initUI(self):
 
+     self.key_control = False 
+
      self.setWindowIcon(QtGui.QIcon("./resources/wave_icon.png"))
      self.setWindowTitle('NextWave')
      #self.setWindowTitle("Icon")
@@ -578,7 +593,6 @@ class NextWaveMainWindow(QMainWindow):
      pixmap = QPixmap(qimage)
      pixmap = pixmap.scaled(SPOTS_WIDTH_WIN,SPOTS_HEIGHT_WIN, Qt.KeepAspectRatio)
      pixmap_label.setPixmap(pixmap)
-
      pixmap_label.mousePressEvent = self.butt
 
      self.widget_displays = QWidget()
@@ -654,46 +668,74 @@ class NextWaveMainWindow(QMainWindow):
      menu=self.menuBar().addMenu('&File')
      menu.addAction('&Export Centroids & Zernikes', self.export)
      menu.addAction('e&Xit', self.close)
+
+     pixmap_label.setFocus()
+
      self.setGeometry(2,2,MAIN_WIDTH_WIN,MAIN_HEIGHT_WIN)
      self.show()
 
+
  def butt(self, event):
+    print("clicked:", event.pos() )
     return 
-    #print("clicked:", event.pos() )
     self.x = event.pos().x()
     self.y = event.pos().y()
     top_left = (130,18)
     bottom_right = (895,781)
-    self.x = (self.x - top_left[0])/(bottom_right[0]-top_left[0])*1000 # TODO: img_siz
-    self.y = (self.y - top_left[1])/(bottom_right[1]-top_left[1])*1000
+    #self.x = (self.x - top_left[0])/(bottom_right[0]-top_left[0])*1000 # TODO: img_siz
+    #self.y = (self.y - top_left[1])/(bottom_right[1]-top_left[1])*1000
     #print(self.x, self.y)
 
-    #box_x,box_y=make_initial_searchboxes(500,500)
-    box_x,box_y,box_norm_x,box_norm_y=make_initial_searchboxes(500,500)
+    #box_x,box_y=make_searchboxes(500,500)
+    box_x,box_y,box_norm_x,box_norm_y=make_searchboxes(500,500)
     send_searchboxes(self.shmem_boxes, box_x, box_y, self.layout_boxes)
     #self.initial_x = box_x
     #self.initial_y = box_y
-    self.ref_x = box_x
-    self.ref_y = box_y
-    self.box_x = box_x
-    self.box_y = box_y
-    self.norm_x = box_norm_x
-    self.norm_y = box_norm_y
+    self.engine.ref_x = box_x
+    self.engine.ref_y = box_y
+    self.engine.box_x = box_x
+    self.engine.box_y = box_y
+    self.engine.norm_x = box_norm_x
+    self.engine.norm_y = box_norm_y
     self.update_zernike_svd()
 
+ def keyReleaseEvent(self, event):
+    if event.key()==Qt.Key_Control:
+        self.key_control = False 
+
  def keyPressEvent(self, event):
-     if event.key()==ord('A'):
-         self.draw_arrows = not( self.draw_arrows )
-     if event.key()==ord('R'):
-         self.draw_refs = not( self.draw_refs )
-     if event.key()==ord('B'):
-         self.draw_boxes = not( self.draw_boxes )
-     if event.key()==ord('C'):
-         self.draw_centroids = not( self.draw_centroids )
-     if event.key()==ord('X'):
-         self.draw_crosshair = not( self.draw_crosshair )
-     if event.key()==ord('Q'):
-         self.close()
+    update_search_boxes=False
+    if event.key()==ord('A'):
+        self.draw_arrows = not( self.draw_arrows )
+    elif event.key()==ord('R'):
+        self.draw_refs = not( self.draw_refs )
+    elif event.key()==ord('B'):
+        self.draw_boxes = not( self.draw_boxes )
+    elif event.key()==ord('C'):
+        self.draw_centroids = not( self.draw_centroids )
+    elif event.key()==ord('X'):
+        self.draw_crosshair = not( self.draw_crosshair )
+    elif event.key()==ord('Q'):
+        self.close()
+    elif event.key()==Qt.Key_Control:
+        self.key_control = True
+    elif event.key()==Qt.Key_Left:
+        self.cx -= 1 + 10 * self.key_control
+        update_search_boxes=True
+    elif event.key()==Qt.Key_Right:
+        self.cx += 1 + 10 * self.key_control
+        update_search_boxes=True
+    elif event.key()==Qt.Key_Up:
+        self.cy -= 1 + 10 * self.key_control
+        update_search_boxes=True
+    elif event.key()==Qt.Key_Down:
+        self.cy += 1 + 10 * self.key_control
+        update_search_boxes=True
+    else:
+        print( "Uknown Key:", event.key() )
+
+    if update_search_boxes:
+        self.engine.make_searchboxes(self.cx,self.cy,pupil_radius_pixel,box_size_pixel)
 
         #if event.key() == QtCore.Qt.Key_Q:
         #elif event.key() == QtCore.Qt.Key_Enter:
@@ -708,9 +750,9 @@ class NextWaveMainWindow(QMainWindow):
 
         fil.writelines( '[image size = %dx%d]\n'%(QIMAGE_WIDTH,QIMAGE_HEIGHT)) # TODO
         fil.writelines( '[pupil = %f,%d,%d]\n'%(PUPIL,self.cx,self.cy)) # TODO
-        for nbox in np.arange( len(self.ref_x)):
+        for nbox in np.arange( len(self.engine.ref_x)):
             # TODO: Valid or invalid
-            fil.writelines('%d\t%f\t%f\t%f\t%f\t\n'%(1,self.ref_x[nbox], self.ref_y[nbox], self.centroids_x[nbox], self.centroids_y[nbox] ) )
+            fil.writelines('%d\t%f\t%f\t%f\t%f\t\n'%(1,self.engine.ref_x[nbox], self.engine.ref_y[nbox], self.centroids_x[nbox], self.centroids_y[nbox] ) )
         fil.close()
 
     filename="zernikes.txt"
