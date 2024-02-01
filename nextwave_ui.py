@@ -81,7 +81,8 @@ UI_UPDATE_RATE_MS=2000
 
 # TODO
 PUPIL=6.4/2.0
-pupil_radius_pixel=PUPIL*1000/CCD_PIXEL
+PUPIL_RADIUS_MM=PUPIL
+pupil_radius_pixel=PUPIL_RADIUS_MM*1000/CCD_PIXEL
 RI_RATIO=pupil_radius_pixel/box_size_pixel
 print(pupil_radius_pixel)
 FOCAL=5.9041
@@ -171,18 +172,7 @@ class NextwaveEngineComm():
 
         self.num_boxes= num_boxes
 
-        #box_x,box_y=make_searchboxes(500,500)
-        #box_x,box_y,box_norm_x,box_norm_y=make_searchboxes(500,500)
-        #self.engine.make_searchboxes(500,500)
         self.send_searchboxes(self.shmem_boxes, self.box_x, self.box_y, self.layout_boxes)
-        #self.initial_x = box_x
-        #self.initial_y = box_y
-        #self.engine.ref_x = box_x
-        #self.engine.ref_y = box_y
-        #self.engine.box_x = box_x
-        #self.engine.box_y = box_y
-        #self.engine.norm_x = box_norm_x
-        #self.engine.norm_y = box_norm_y
         self.update_zernike_svd()
 
         return valid_x,valid_y,valid_x_norm,valid_y_norm
@@ -266,7 +256,7 @@ class NextwaveEngineComm():
 
         # Compute all integrals for all box corners 
         lenslet_dx,lenslet_dy=zernike_integrals.zernike_integral_average_from_corners(
-            lefts, rights, ups, downs, PUPIL)
+            lefts, rights, ups, downs, PUPIL_RADIUS_MM)
         lenslet_dx = lenslet_dx[START_ZC:NUM_ZCS,:].T
         lenslet_dy = lenslet_dy[START_ZC:NUM_ZCS,:].T
 
@@ -424,7 +414,6 @@ class NextWaveMainWindow(QMainWindow):
     #self.worker_thread.start();
 
     self.updater = QTimer(self);
-    #self.updater.setInterval(1000)
     self.updater.timeout.connect(self.update_ui)
     self.updater.start(UI_UPDATE_RATE_MS)
 
@@ -678,26 +667,6 @@ class NextWaveMainWindow(QMainWindow):
  def butt(self, event):
     print("clicked:", event.pos() )
     return 
-    self.x = event.pos().x()
-    self.y = event.pos().y()
-    top_left = (130,18)
-    bottom_right = (895,781)
-    #self.x = (self.x - top_left[0])/(bottom_right[0]-top_left[0])*1000 # TODO: img_siz
-    #self.y = (self.y - top_left[1])/(bottom_right[1]-top_left[1])*1000
-    #print(self.x, self.y)
-
-    #box_x,box_y=make_searchboxes(500,500)
-    box_x,box_y,box_norm_x,box_norm_y=make_searchboxes(500,500)
-    send_searchboxes(self.shmem_boxes, box_x, box_y, self.layout_boxes)
-    #self.initial_x = box_x
-    #self.initial_y = box_y
-    self.engine.ref_x = box_x
-    self.engine.ref_y = box_y
-    self.engine.box_x = box_x
-    self.engine.box_y = box_y
-    self.engine.norm_x = box_norm_x
-    self.engine.norm_y = box_norm_y
-    self.update_zernike_svd()
 
  def keyReleaseEvent(self, event):
     if event.key()==Qt.Key_Control:

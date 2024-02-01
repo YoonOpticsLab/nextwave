@@ -157,7 +157,7 @@ def zernike_inty1(x,y,terms=70):
     return zernike_inty[1:,:]; # Back to zero-based (Python)
 
 # Combine the four corners of the box:
-def zernike_integral_average_from_corners(left,right,upper,lower,pupil,terms=71):
+def zernike_integral_average_from_corners(left,right,upper,lower,pupil_radius,terms=71):
     spacing_x = right - left;
     spacing_y = upper - lower;
 
@@ -165,4 +165,4 @@ def zernike_integral_average_from_corners(left,right,upper,lower,pupil,terms=71)
           zernike_intx1(right,lower) + zernike_intx1(left,lower))/spacing_x/spacing_y
     inty=(zernike_inty1(right,upper) - zernike_inty1(left,upper) -
           zernike_inty1(right,lower) + zernike_inty1(left,lower))/spacing_x/spacing_y
-    return intx/(pupil/2),inty/(pupil/2)
+    return intx/pupil_radius,inty/pupil_radius
