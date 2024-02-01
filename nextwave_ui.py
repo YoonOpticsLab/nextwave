@@ -5,10 +5,13 @@ from PyQt5.QtGui import QPixmap, QImage, QPainter, QPen
 from PyQt5.QtCore import Qt, QTimer, QLineF, QPointF
 import PyQt5.QtGui as QtGui
 
+import pyqtgraph as pg
+
 import numpy as np
 import sys
 import os
 
+import matplotlib.cm as cmap
 #from numba import jit
 
 import mmap
@@ -547,9 +550,22 @@ class NextWaveMainWindow(QMainWindow):
         s += 'Z%2d=%+0.4f\n'%(n+1,self.engine.zernikes[n])
     self.text_status.setText(s)
 
+    self.text_stats.setText("Hi there")
+
     s="Running. %3.2f FPS (%3.0f ms)"%(1000/self.engine.fps,self.engine.fps)
     self.label_status0.setText(s)
     self.label_status0.setStyleSheet("color: rgb(0, 255, 0); background-color: rgb(0,0,0);")
+
+    colr1=np.array(cmap.Spectral(0.5))*255
+    bg1 = pg.BarGraphItem(x=np.arange(3), height=self.engine.zernikes[2:5], width=1.0, brush=colr1)
+    colr2=np.array(cmap.Spectral(0.8))*255
+    bg2 = pg.BarGraphItem(x=np.arange(4)+3, height=self.engine.zernikes[5:9], width=1.0, brush=colr2)
+
+    self.bar_plot.clear()
+    self.bar_plot.addItem(bg1)
+    self.bar_plot.addItem(bg2)
+    #self.bar_plot.addItem(bg3)
+
 
  def set_follow(self,state):
     buf = ByteStream()
@@ -569,6 +585,8 @@ class NextWaveMainWindow(QMainWindow):
      self.setWindowTitle('NextWave')
      #self.setWindowTitle("Icon")
 
+     self.widget_centrals = QWidget()
+     layout=QVBoxLayout()
      pixmap_label = QLabel()
      #pixmap_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
      pixmap_label.resize(SPOTS_WIDTH_WIN,SPOTS_HEIGHT_WIN)
@@ -583,14 +601,18 @@ class NextWaveMainWindow(QMainWindow):
      pixmap = pixmap.scaled(SPOTS_WIDTH_WIN,SPOTS_HEIGHT_WIN, Qt.KeepAspectRatio)
      pixmap_label.setPixmap(pixmap)
      pixmap_label.mousePressEvent = self.butt
+     layout.addWidget(pixmap_label,15)
+     self.bar_plot = pg.PlotWidget()
+     layout.addWidget(self.bar_plot,1)
+     self.widget_centrals.setLayout(layout)
 
      self.widget_displays = QWidget()
      layout=QVBoxLayout()
+     self.widget_displays.setLayout(layout)
      layout.addWidget(QGroupBox('Pupil'))
      layout.addWidget(QGroupBox('AO'))
      layout.addWidget(QGroupBox('Wavefront'))
      layout.addWidget(QGroupBox('PSF'))
-     self.widget_displays.setLayout(layout)
 
      self.widget_controls = QWidget()
      layout=QVBoxLayout()
@@ -642,12 +664,14 @@ class NextWaveMainWindow(QMainWindow):
      #self.widget_controls = QGroupBox('Controls')
      self.widget_controls.setLayout(layout)
 
-     layout.addWidget(QGroupBox('Statistics'), 20)
+     #layout.addWidget(QGroupBox('Statistics'), 20)
+     self.text_stats = QTextEdit()
+     layout.addWidget(self.text_stats)
 
      # Main Widget
      self.widget_main = QWidget()
      layoutCentral = QHBoxLayout()
-     layoutCentral.addWidget(self.pixmap_label, stretch=3)
+     layoutCentral.addWidget(self.widget_centrals, stretch=3)
      layoutCentral.addWidget(self.widget_displays)
      layoutCentral.addWidget(self.widget_controls, stretch=1)
      self.widget_main.setLayout(layoutCentral)
