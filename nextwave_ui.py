@@ -2,7 +2,7 @@ from PyQt5.QtWidgets import (QMainWindow, QLabel, QSizePolicy, QApplication, QPu
                              QHBoxLayout, QVBoxLayout, QWidget, QGroupBox, QTabWidget, QTextEdit,
                              QFileDialog, QCheckBox, QDialog, QFormLayout, QDialogButtonBox, QLineEdit)
 from PyQt5.QtGui import QPixmap, QImage, QPainter, QPen
-from PyQt5.QtCore import Qt, QTimer, QLineF, QPointF
+from PyQt5.QtCore import Qt, QTimer, QLineF, QPointF, pyqtSignal
 import PyQt5.QtGui as QtGui
 
 import pyqtgraph as pg
@@ -29,6 +29,22 @@ START_ZC=1
 NUM_ZCS=68
 
 #0=horizontal, 1=vertical,3=defocus?
+
+'''
+Zernike order, first mode in that order:
+0 0
+1 1
+2 3
+3 6
+4 10
+5 15
+6 21
+7 28
+8 36
+9 45
+10 55
+11 66
+'''
 
 class ZernikeDialog(QDialog):
     def createFormGroupBox(self,titl):
@@ -80,7 +96,7 @@ MEM_LEN=512
 MEM_LEN_DATA=2048*2048*4
 
 # TODO: Put in config file
-UI_UPDATE_RATE_MS=2000
+UI_UPDATE_RATE_MS=1000
 
 # TODO
 PUPIL=6.4/2.0
@@ -407,6 +423,28 @@ class NextwaveEngineComm():
         self.shmem_boxes.write(buf)
         self.shmem_boxes.flush()
 
+class MyBarWidget(pg.PlotWidget):
+
+    sigMouseClicked = pyqtSignal(object) # add our custom signal
+
+    def __init__(self, *args, **kwargs):
+        super(MyBarWidget, self).__init__(*args, **kwargs)
+        self.terms_expanded=False
+        self.setToolTip('This is a tooltip YO.')
+
+    def tooltip(self):
+        #self.setToolTip('This is a tooltip YO.')
+        return "WHAT"
+
+    def mousePressEvent(self, ev):
+        super().mousePressEvent(ev)
+        self.sigMouseClicked.emit(ev)
+        print(ev, ev.pos() )
+        print( self.getViewBox().viewRange() )
+        if ev.button()==Qt.LeftButton:
+            if (self.getViewBox().boundingRect().right() - self.getViewBox().mapFromScene(ev.pos()).x())<20:
+                self.terms_expanded = not( self.terms_expanded )
+
 class NextWaveMainWindow(QMainWindow):
  def __init__(self):
     super().__init__(parent=None)
@@ -556,14 +594,43 @@ class NextWaveMainWindow(QMainWindow):
     self.label_status0.setText(s)
     self.label_status0.setStyleSheet("color: rgb(0, 255, 0); background-color: rgb(0,0,0);")
 
-    colr1=np.array(cmap.Spectral(0.5))*255
-    bg1 = pg.BarGraphItem(x=np.arange(3), height=self.engine.zernikes[2:5], width=1.0, brush=colr1)
-    colr2=np.array(cmap.Spectral(0.8))*255
-    bg2 = pg.BarGraphItem(x=np.arange(4)+3, height=self.engine.zernikes[5:9], width=1.0, brush=colr2)
-
     self.bar_plot.clear()
-    self.bar_plot.addItem(bg1)
-    self.bar_plot.addItem(bg2)
+
+    if self.bar_plot.terms_expanded:
+        orders_list=np.arange(2,10)
+    else:
+        orders_list=np.arange(2,5)
+
+    first_term=np.sum(orders_list[0]+1) # First time is sum of orders - 1
+    nterms=orders_list[0]+1 # Nterms in first order
+    last_term= first_term+nterms+1
+
+    first_term -= 1 # To match the order in the Z array (Zero-based issue, etc.?)
+
+    num_orders=len(orders_list)
+    MAX_BAR_ORDERS=10 # TODO: Or could be based on displayed
+    order_colors=[np.array(cmap.tab10(norder))*255 for norder in np.linspace(0.0,1,MAX_BAR_ORDERS)]
+
+    zernikes_bar=self.engine.zernikes
+
+    for norder,order in enumerate(orders_list):
+        colrx=order_colors[norder]
+        zterms1=np.arange(first_term,first_term+nterms)
+        xr=zterms1
+        bgx = pg.BarGraphItem(x=zterms1+1, height=self.engine.zernikes[zterms1], width=1.0, brush=colrx)
+        first_term += nterms #=first_termzterms1[-1]+1
+        nterms += 1
+        self.bar_plot.addItem(bgx)
+
+    #print( self.bar_plot.getViewBox().state['limits'] )
+    # First_term will now be the first of the next order
+    maxval=np.max( self.engine.zernikes[6:first_term] )
+    minval=np.min( self.engine.zernikes[6:first_term] )
+    self.bar_plot.setYRange(minval, maxval)
+
+    #colr2=np.array(cmap.Spectral(0.8))*255
+    #bg2 = pg.BarGraphItem(x=np.arange(4)+3, height=self.engine.zernikes[5:9], width=1.0, brush=colr2)
+
     #self.bar_plot.addItem(bg3)
 
 
@@ -602,7 +669,7 @@ class NextWaveMainWindow(QMainWindow):
      pixmap_label.setPixmap(pixmap)
      pixmap_label.mousePressEvent = self.butt
      layout.addWidget(pixmap_label,15)
-     self.bar_plot = pg.PlotWidget()
+     self.bar_plot = MyBarWidget()
      layout.addWidget(self.bar_plot,1)
      self.widget_centrals.setLayout(layout)
 
@@ -620,7 +687,7 @@ class NextWaveMainWindow(QMainWindow):
      tabs.setTabPosition(QTabWidget.North)
      tabs.setMovable(True)
 
-     panel_names = ["Source", "Options", "Coords", "Boxes","Camera"]
+     panel_names = ["Operation", "Settings", "Config"]
      pages = [QWidget(tabs) for nam in panel_names]
      l1 = QHBoxLayout()
 
@@ -636,7 +703,16 @@ class NextWaveMainWindow(QMainWindow):
      btn.clicked.connect(lambda: self.showdialog("Shift references", self.shift_references ) )
      l1.addWidget(btn)
 
-     pages[3].setLayout(l1)
+     self.widget_op = QWidget()
+     layout_op = QVBoxLayout()
+     self.ops_camera = QGroupBox('Camera')
+     layout_op.addWidget(self.ops_camera)
+     self.ops_source = QGroupBox('Source')
+     layout_op.addWidget(self.ops_source)
+     self.widget_op.setLayout(layout_op)
+
+     pages[0].setLayout(layout_op)
+
      for n, tabnames in enumerate(panel_names):
          tabs.addTab(pages[n], tabnames)
      #self.setCentralWidget(tabs)
@@ -658,7 +734,7 @@ class NextWaveMainWindow(QMainWindow):
      self.text_status = QTextEdit()
      self.text_status.setReadOnly(True)
 
-     layout.addWidget(self.text_status, 20)
+     layout.addWidget(self.text_status, 1)
      layout.addWidget(tabs, 20)
 
      #self.widget_controls = QGroupBox('Controls')
@@ -672,7 +748,7 @@ class NextWaveMainWindow(QMainWindow):
      self.widget_main = QWidget()
      layoutCentral = QHBoxLayout()
      layoutCentral.addWidget(self.widget_centrals, stretch=3)
-     layoutCentral.addWidget(self.widget_displays)
+     #layoutCentral.addWidget(self.widget_displays)
      layoutCentral.addWidget(self.widget_controls, stretch=1)
      self.widget_main.setLayout(layoutCentral)
 
