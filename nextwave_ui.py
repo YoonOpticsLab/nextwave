@@ -1,7 +1,8 @@
 from PyQt5.QtWidgets import (QMainWindow, QLabel, QSizePolicy, QApplication, QPushButton,
-                             QHBoxLayout, QVBoxLayout, QWidget, QGroupBox, QTabWidget, QTextEdit,
+                             QHBoxLayout, QVBoxLayout, QGridLayout,
+                             QWidget, QGroupBox, QTabWidget, QTextEdit,
                              QFileDialog, QCheckBox, QDialog, QFormLayout, QDialogButtonBox, QLineEdit)
-from PyQt5.QtGui import QPixmap, QImage, QPainter, QPen
+from PyQt5.QtGui import QPixmap, QImage, QPainter, QPen, QFont
 from PyQt5.QtCore import Qt, QTimer, QEvent, QLineF, QPointF, pyqtSignal 
 import PyQt5.QtGui as QtGui
 
@@ -448,11 +449,8 @@ class MyBarWidget(pg.PlotWidget):
             bar_which = round(pos_plot.x())
             zernike_val = self.app.engine.zernikes[bar_which-1]
             self.setToolTip("Z%d=%+0.3f"%(bar_which,zernike_val) )
-            print( self.parent(), self.app.engine ) # TODO: get parent app to get Engine, to display Zernike value
 
         return super(MyBarWidget, self).eventFilter(obj, event)
-
-
 
 class NextWaveMainWindow(QMainWindow):
  def __init__(self):
@@ -597,7 +595,20 @@ class NextWaveMainWindow(QMainWindow):
         s += 'Z%2d=%+0.4f\n'%(n+1,self.engine.zernikes[n])
     self.text_status.setText(s)
 
-    self.text_stats.setText("Hi there")
+    rms=np.sqrt( np.nansum(self.engine.zernikes[3:]**2 ) )
+    left_chars=15
+    str_stats=f"{'RMS':<15}= {rms:3.4f}\n"
+    rms5p=np.sqrt( np.nansum(self.engine.zernikes[5:]**2 ) )
+    str_stats+=f"{'RMS(Z5+)':<15}= {rms5p:3.4f}\n"
+    str_stats+=f"{'Sphere(+cyl)':<15}= {rms:3.4f}\n"
+    str_stats+=f"{'Sphere(-cyl)':<15}= {rms:3.4f}\n"
+    str_stats+=f"{'Cylinder':<15}= {rms:3.4f}\n"
+    str_stats+=f"{'Axes(-cyl)':<15}= {rms:3.4f}\n"
+    self.text_stats.setText(str_stats)
+    #self.text_stats.setHtml(str_stats) # TODO: To get other colors, can embed <font color="red">TEXT</font><br>, etc.
+
+    self.line_centerx.setText(str(self.cx) )
+    self.line_centery.setText(str(self.cy) )
 
     s="Running. %3.2f FPS (%3.0f ms)"%(1000/self.engine.fps,self.engine.fps)
     self.label_status0.setText(s)
@@ -606,7 +617,7 @@ class NextWaveMainWindow(QMainWindow):
     self.bar_plot.clear()
 
     if self.bar_plot.terms_expanded:
-        orders_list=np.arange(2,10)
+        orders_list=np.arange(2,11)
     else:
         orders_list=np.arange(2,5)
 
@@ -617,7 +628,7 @@ class NextWaveMainWindow(QMainWindow):
     first_term -= 1 # To match the order in the Z array (zero-based issue maybe?)
 
     num_orders=len(orders_list)
-    MAX_BAR_ORDERS=10 # TODO: Or could be based on displayed
+    MAX_BAR_ORDERS=11 # TODO: Or could be based on displayed
     order_colors=[np.array(cmap.tab10(norder))*255 for norder in np.linspace(0.0,1,MAX_BAR_ORDERS)]
 
     zernikes_bar=self.engine.zernikes
@@ -689,7 +700,7 @@ class NextWaveMainWindow(QMainWindow):
      layout.addWidget(pixmap_label,15)
      self.bar_plot = MyBarWidget()
      self.bar_plot.app = self
-     layout.addWidget(self.bar_plot,1)
+     layout.addWidget(self.bar_plot,3)
      self.widget_centrals.setLayout(layout)
 
      self.widget_displays = QWidget()
@@ -724,10 +735,12 @@ class NextWaveMainWindow(QMainWindow):
 
      self.widget_op = QWidget()
      layout_op = QVBoxLayout()
-     self.ops_camera = QGroupBox('Camera')
-     layout_op.addWidget(self.ops_camera)
-     self.ops_source = QGroupBox('Source')
+     self.ops_pupil = QGroupBox('Pupil')
+     layout_op.addWidget(self.ops_pupil)
+     self.ops_source = QGroupBox('Camera/Source')
      layout_op.addWidget(self.ops_source)
+     self.ops_dm = QGroupBox('DM')
+     layout_op.addWidget(self.ops_dm)
      self.widget_op.setLayout(layout_op)
 
      pages[0].setLayout(layout_op)
@@ -736,16 +749,63 @@ class NextWaveMainWindow(QMainWindow):
          tabs.addTab(pages[n], tabnames)
      #self.setCentralWidget(tabs)
 
-     self.widget_status_buttons = QWidget()
-     layoutStatusButtons = QHBoxLayout()
-     self.status_btn1 = QPushButton("Init")
-     layoutStatusButtons.addWidget(self.status_btn1)
-     self.status_btn2 = QPushButton("Run")
-     layoutStatusButtons.addWidget(self.status_btn2)
-     self.status_btn3 = QPushButton("AO")
-     layoutStatusButtons.addWidget(self.status_btn3)
-     self.widget_status_buttons.setLayout(layoutStatusButtons)
-     layout.addWidget(self.widget_status_buttons,1)
+     ### Pupil ops
+     layout1 = QGridLayout(self.ops_pupil)
+
+     ### Arrows pad 
+     btnL = QPushButton("\u2190") # l
+     layout1.addWidget(btnL,1,4)
+     btnU = QPushButton("\u2191") # u
+     layout1.addWidget(btnU,0,5)
+     btnR = QPushButton("\u2192") # r
+     layout1.addWidget(btnR,1,6)
+     btnD = QPushButton("\u2193") # d
+     layout1.addWidget(btnD,2,5)
+     btnM = QPushButton() # d
+     layout1.addWidget(btnM,1,5)
+
+     lbl = QLabel("Center X:")
+     layout1.addWidget(lbl,0,0)
+     lbl = QLabel("Center Y:")
+     layout1.addWidget(lbl,1,0)
+     self.line_centerx = QLineEdit()
+     self.line_centerx.setMaxLength(5)
+     layout1.addWidget(self.line_centerx,0,1)
+     self.line_centery = QLineEdit()
+     self.line_centery.setMaxLength(5)
+     layout1.addWidget(self.line_centery,1,1)
+
+     btnFind = QPushButton("Find center")
+     layout1.addWidget(btnFind,2,1)
+
+     btnIt1 = QPushButton("Run Iterative")
+     layout1.addWidget(btnIt1,3,1)
+
+     ### Camera Ops
+     layout1 = QGridLayout(self.ops_source)
+     btnBackSet = QPushButton("Set background")
+     layout1.addWidget(btnBackSet,0,0)
+     btnBackReset = QPushButton("Reset Background") # d
+     layout1.addWidget(btnBackReset,0,1)
+
+     ### DM Ops
+     layout1 = QGridLayout(self.ops_dm)
+     self.chkLoop = QCheckBox("Close AO Loop")
+     layout1.addWidget(self.chkLoop,0,0)
+
+     self.widget_mode_buttons = QWidget()
+     layoutStatusButtons = QHBoxLayout(self.widget_mode_buttons)
+     self.mode_btn1 = QPushButton("Init")
+     layoutStatusButtons.addWidget(self.mode_btn1)
+     self.mode_btn2 = QPushButton("Snap")
+     layoutStatusButtons.addWidget(self.mode_btn2)
+     self.mode_btn3 = QPushButton("Run")
+     layoutStatusButtons.addWidget(self.mode_btn3)
+     self.mode_btn4 = QPushButton("Stop")
+     layoutStatusButtons.addWidget(self.mode_btn4)
+
+     #self.widget_status_buttons.setLayout(layoutStatusButtons)
+     layout.addWidget(self.widget_mode_buttons,1)
 
      self.label_status0 = QLabel("Status: ")
      layout.addWidget(self.label_status0, 1)
@@ -759,8 +819,13 @@ class NextWaveMainWindow(QMainWindow):
      #self.widget_controls = QGroupBox('Controls')
      self.widget_controls.setLayout(layout)
 
+     font=QFont("Courier",18,QFont.Bold);
+     #font.setStyleHint(QFont::TypeWriter);
+
      #layout.addWidget(QGroupBox('Statistics'), 20)
      self.text_stats = QTextEdit()
+     self.text_stats.setCurrentFont(font)
+     self.text_stats.setReadOnly(True)
      layout.addWidget(self.text_stats)
 
      # Main Widget
