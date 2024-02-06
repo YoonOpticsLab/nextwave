@@ -445,9 +445,10 @@ class MyBarWidget(pg.PlotWidget):
     def eventFilter(self, obj, event):
         if event.type() == QEvent.ToolTip:
             pos_plot = self.getViewBox().mapSceneToView(event.pos())
-            bar_which = int(pos_plot.x())
-            self.setToolTip(str(bar_which) )
-            #print( self.parent(), self.parent().engine ) # TODO: get parent app to get Engine, to display Zernike value
+            bar_which = round(pos_plot.x())
+            zernike_val = self.app.engine.zernikes[bar_which-1]
+            self.setToolTip("Z%d=%+0.3f"%(bar_which,zernike_val) )
+            print( self.parent(), self.app.engine ) # TODO: get parent app to get Engine, to display Zernike value
 
         return super(MyBarWidget, self).eventFilter(obj, event)
 
@@ -687,6 +688,7 @@ class NextWaveMainWindow(QMainWindow):
      pixmap_label.mousePressEvent = self.butt
      layout.addWidget(pixmap_label,15)
      self.bar_plot = MyBarWidget()
+     self.bar_plot.app = self
      layout.addWidget(self.bar_plot,1)
      self.widget_centrals.setLayout(layout)
 
