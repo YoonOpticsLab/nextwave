@@ -2,7 +2,7 @@ from PyQt5.QtWidgets import (QMainWindow, QLabel, QSizePolicy, QApplication, QPu
                              QHBoxLayout, QVBoxLayout, QWidget, QGroupBox, QTabWidget, QTextEdit,
                              QFileDialog, QCheckBox, QDialog, QFormLayout, QDialogButtonBox, QLineEdit)
 from PyQt5.QtGui import QPixmap, QImage, QPainter, QPen
-from PyQt5.QtCore import Qt, QTimer, QLineF, QPointF, pyqtSignal
+from PyQt5.QtCore import Qt, QTimer, QEvent, QLineF, QPointF, pyqtSignal 
 import PyQt5.QtGui as QtGui
 
 import pyqtgraph as pg
@@ -430,11 +430,8 @@ class MyBarWidget(pg.PlotWidget):
     def __init__(self, *args, **kwargs):
         super(MyBarWidget, self).__init__(*args, **kwargs)
         self.terms_expanded=False
-        self.setToolTip('This is a tooltip YO.')
-
-    def tooltip(self):
         #self.setToolTip('This is a tooltip YO.')
-        return "WHAT"
+        self.installEventFilter(self)
 
     def mousePressEvent(self, ev):
         super().mousePressEvent(ev)
@@ -444,6 +441,17 @@ class MyBarWidget(pg.PlotWidget):
         if ev.button()==Qt.LeftButton:
             if (self.getViewBox().boundingRect().right() - self.getViewBox().mapFromScene(ev.pos()).x())<20:
                 self.terms_expanded = not( self.terms_expanded )
+
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.ToolTip:
+            pos_plot = self.getViewBox().mapSceneToView(event.pos())
+            bar_which = int(pos_plot.x())
+            self.setToolTip(str(bar_which) )
+            #print( self.parent(), self.parent().engine ) # TODO: get parent app to get Engine, to display Zernike value
+
+        return super(MyBarWidget, self).eventFilter(obj, event)
+
+
 
 class NextWaveMainWindow(QMainWindow):
  def __init__(self):
@@ -605,7 +613,7 @@ class NextWaveMainWindow(QMainWindow):
     nterms=orders_list[0]+1 # Nterms in first order
     last_term= first_term+nterms+1
 
-    first_term -= 1 # To match the order in the Z array (Zero-based issue, etc.?)
+    first_term -= 1 # To match the order in the Z array (zero-based issue maybe?)
 
     num_orders=len(orders_list)
     MAX_BAR_ORDERS=10 # TODO: Or could be based on displayed
@@ -624,8 +632,17 @@ class NextWaveMainWindow(QMainWindow):
 
     #print( self.bar_plot.getViewBox().state['limits'] )
     # First_term will now be the first of the next order
-    maxval=np.max( self.engine.zernikes[6:first_term] )
-    minval=np.min( self.engine.zernikes[6:first_term] )
+    maxval=np.max( self.engine.zernikes[5:first_term-1] )
+    minval=np.min( self.engine.zernikes[5:first_term-1] )
+
+    for ntrunc in np.arange(3,6):
+        if self.engine.zernikes[ntrunc-1]>maxval:
+            itm=pg.ScatterPlotItem([ntrunc],[maxval],symbol="arrow_up",size=40)
+            self.bar_plot.addItem(itm)
+        elif self.engine.zernikes[ntrunc-1]<minval:
+            itm=pg.ScatterPlotItem([ntrunc],[minval],symbol="arrow_down",size=40)
+            self.bar_plot.addItem(itm)
+
     self.bar_plot.setYRange(minval, maxval)
 
     #colr2=np.array(cmap.Spectral(0.8))*255
@@ -734,7 +751,7 @@ class NextWaveMainWindow(QMainWindow):
      self.text_status = QTextEdit()
      self.text_status.setReadOnly(True)
 
-     layout.addWidget(self.text_status, 1)
+     layout.addWidget(self.text_status, 6)
      layout.addWidget(tabs, 20)
 
      #self.widget_controls = QGroupBox('Controls')
