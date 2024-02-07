@@ -56,9 +56,6 @@ MAIN_WIDTH_WIN=1800
 SPOTS_HEIGHT_WIN=1024
 SPOTS_WIDTH_WIN=1024
 
-# TODO: Put in config file
-UI_UPDATE_RATE_MS=1000
-
 class MyBarWidget(pg.PlotWidget):
 
     sigMouseClicked = pyqtSignal(object) # add our custom signal
@@ -98,7 +95,6 @@ class NextWaveMainWindow(QMainWindow):
 
     self.updater = QTimer(self);
     self.updater.timeout.connect(self.update_ui)
-    self.updater.start(UI_UPDATE_RATE_MS)
 
     self.draw_refs = True
     self.draw_boxes = False
@@ -110,11 +106,32 @@ class NextWaveMainWindow(QMainWindow):
     self.cx=501 # TODO
     self.cy=499.5 # TODO
 
+    self.params = [
+        {'name': 'UI', 'type': 'group', 'title':'User interface', 'children': [
+            {'name': 'update_rate', 'type': 'int', 'value': 500, 'title':'Display update rate (ms)', 'limits':[50,2000]},
+            {'name': 'show_boxes', 'type': 'bool', 'value': False, 'title':'Show search boxes'}
+        ]},
+        {'name': 'WF Camera', 'type': 'group', 'children': [
+            {'name': 'Offset (%)', 'type': 'int', 'value': 0, 'limits':[0,100]},
+            {'name': 'Binning Mode', 'type': 'list', 'value': 'None', 'limits':['None','2x2','4x4']} ]},
+        {'name': 'Pupil Camera', 'type': 'group', 'children': [
+            {'name': 'offset', 'title': 'Offset (%)', 'type': 'int', 'value': 0, 'limits':[0,100]},
+            {'name': 'gain', 'title':'Gain (%)', 'type': 'int', 'value': 0, 'limits':[0,100]},
+            {'name': 'exposure', 'title':'Exposure time (ms)', 'type': 'int', 'value': 0, 'limits':[1,1000]} ]}
+        ]
+    self.p = Parameter.create(name='params', type='group', children=self.params)
+    self.params = self.p.saveState()
+    self.apply_params()
+
     self.engine = NextwaveEngineComm()
     self.engine.init()
 
     box_x,box_y,box_norm_x,box_norm_y=self.engine.make_searchboxes(self.cx,self.cy,
                                                                    self.engine.pupil_radius_pixel,self.engine.box_size_pixel)
+
+ def apply_params(self):
+    self.updater.start(self.get_param("UI","update_rate"))
+
  def update_ui(self):
     image_pixels = self.engine.receive_image()
     self.engine.receive_centroids()
@@ -146,7 +163,8 @@ class NextWaveMainWindow(QMainWindow):
         points_ref=[QPointF(self.engine.ref_x[n],self.engine.ref_y[n]) for n in np.arange(self.engine.ref_x.shape[0])]
         painter.drawPoints(points_ref)
 
-    if self.draw_boxes:
+    #if self.draw_boxes:
+    if self.get_param("UI","show_boxes"):
         pen = QPen(Qt.blue, 1, Qt.DotLine)
         painter.setPen(pen)
         BOX_BORDER=2
@@ -284,9 +302,6 @@ class NextWaveMainWindow(QMainWindow):
 
     #self.bar_plot.addItem(bg3)
 
-    print(self.get_param("UI","update_rate") )
-    #print(self.params)
-
 
  def set_follow(self,state):
     buf = ByteStream()
@@ -298,9 +313,10 @@ class NextWaveMainWindow(QMainWindow):
      dlg = ZernikeDialog(which, callback)
      dlg.exec()
 
- def get_param(self,name_parent,name,level=None):
+ def get_paramX(self,name_parent,name,level=None):
     if level==None:
         level=self.params['children'] # start at top
+    print( level )
     for node in level:
         if node['name']==name_parent:
             return( self.get_param("",name,node["children"]) )
@@ -308,10 +324,17 @@ class NextWaveMainWindow(QMainWindow):
             if node['name']==name:
                 return(node["value"])
 
- def params_apply(self):
+ def get_param(self,name_parent,name):
+    return self.params["children"][name_parent]["children"][name]["value"] 
+
+ def set_param(self,name_parent,name,newval):
+    self.params["children"][name_parent]["children"][name]["value"] = newval
+
+ def params_apply_clicked(self):
      self.par= self.p.saveState()
-     print(self.par)
+     #print(self.par)
      self.params=self.par
+     self.apply_params()
 
  def initUI(self):
 
@@ -476,18 +499,11 @@ class NextWaveMainWindow(QMainWindow):
 
      # Settings
      layout1 = QGridLayout(pages[1])
-     self.params = [
-        {'name': 'UI', 'type': 'group', 'title':'User interface', 'children': [
-            {'name': 'update_rate', 'type': 'int', 'value': 500, 'title':'Display update rate (ms)'}]},
-        {'name': 'Other', 'type': 'group', 'children': [
-            {'name': 'Add missing items', 'type': 'int', 'value': True}]}
-        ]
-     self.p = Parameter.create(name='params', type='group', children=self.params)
      t = ParameterTree()
      t.setParameters(self.p, showTop=False)
      layout1.addWidget(t,0,0)
      btn = QPushButton("Apply")
-     btn.clicked.connect(self.params_apply)
+     btn.clicked.connect(self.params_apply_clicked)
      layout1.addWidget(btn,1,0)
 
      #self.widget_status_buttons.setLayout(layoutStatusButtons)
@@ -550,6 +566,7 @@ class NextWaveMainWindow(QMainWindow):
         self.draw_refs = not( self.draw_refs )
     elif event.key()==ord('B'):
         self.draw_boxes = not( self.draw_boxes )
+        self.set_param("UI","show_boxes", not( self.get_param("UI","show_boxes") ) )
     elif event.key()==ord('C'):
         self.draw_centroids = not( self.draw_centroids )
     elif event.key()==ord('X'):
