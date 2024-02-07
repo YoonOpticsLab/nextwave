@@ -7,6 +7,7 @@ from PyQt5.QtCore import Qt, QTimer, QEvent, QLineF, QPointF, pyqtSignal
 import PyQt5.QtGui as QtGui
 
 import pyqtgraph as pg
+from pyqtgraph.parametertree import Parameter, ParameterTree
 
 import numpy as np
 import sys
@@ -100,7 +101,7 @@ class NextWaveMainWindow(QMainWindow):
     self.updater.start(UI_UPDATE_RATE_MS)
 
     self.draw_refs = True
-    self.draw_boxes = True
+    self.draw_boxes = False
     self.draw_centroids = True
     self.draw_arrows = False
     self.draw_crosshair = True
@@ -114,22 +115,6 @@ class NextWaveMainWindow(QMainWindow):
 
     box_x,box_y,box_norm_x,box_norm_y=self.engine.make_searchboxes(self.cx,self.cy,
                                                                    self.engine.pupil_radius_pixel,self.engine.box_size_pixel)
-    #self.engine.send_searchboxes(self.engine.shmem_boxes, self.engine.box_x, self.engine.box_y, self.engine.layout_boxes)
-    #self.engine.box_x = box_x
-    #self.engine.box_y = box_y
-    #self.engine.ref_x = box_x
-    #self.engine.ref_y = box_y
-    #self.engine.norm_x = box_norm_x
-    #self.engine.norm_y = box_norm_y
-    #self.initial_x = box_x
-    #self.initial_y = box_y
-    #self.update_zernike_svd() # Precompute
-
-    #self.setFixedSize(1024,800)
-    #self.move( 100,100 )
-    #self.x = 2048/2
-    #self.y = 2048/2
-
  def update_ui(self):
     image_pixels = self.engine.receive_image()
     self.engine.receive_centroids()
@@ -299,6 +284,9 @@ class NextWaveMainWindow(QMainWindow):
 
     #self.bar_plot.addItem(bg3)
 
+    print(self.get_param("UI","update_rate") )
+    #print(self.params)
+
 
  def set_follow(self,state):
     buf = ByteStream()
@@ -309,6 +297,21 @@ class NextWaveMainWindow(QMainWindow):
  def showdialog(self,which,callback):
      dlg = ZernikeDialog(which, callback)
      dlg.exec()
+
+ def get_param(self,name_parent,name,level=None):
+    if level==None:
+        level=self.params['children'] # start at top
+    for node in level:
+        if node['name']==name_parent:
+            return( self.get_param("",name,node["children"]) )
+        else:
+            if node['name']==name:
+                return(node["value"])
+
+ def params_apply(self):
+     self.par= self.p.saveState()
+     print(self.par)
+     self.params=self.par
 
  def initUI(self):
 
@@ -467,6 +470,25 @@ class NextWaveMainWindow(QMainWindow):
      layout1.addWidget(self.edit_xml, 0,1)
      btn = QPushButton("...")
      layout1.addWidget(btn, 0,2)
+     btn = QPushButton("Edit+Reload")
+     layout1.addWidget(btn, 0,3)
+     #os.system('c:/tmp/sample.txt') # <- on windows this will launch the defalut editor
+
+     # Settings
+     layout1 = QGridLayout(pages[1])
+     self.params = [
+        {'name': 'UI', 'type': 'group', 'title':'User interface', 'children': [
+            {'name': 'update_rate', 'type': 'int', 'value': 500, 'title':'Display update rate (ms)'}]},
+        {'name': 'Other', 'type': 'group', 'children': [
+            {'name': 'Add missing items', 'type': 'int', 'value': True}]}
+        ]
+     self.p = Parameter.create(name='params', type='group', children=self.params)
+     t = ParameterTree()
+     t.setParameters(self.p, showTop=False)
+     layout1.addWidget(t,0,0)
+     btn = QPushButton("Apply")
+     btn.clicked.connect(self.params_apply)
+     layout1.addWidget(btn,1,0)
 
      #self.widget_status_buttons.setLayout(layoutStatusButtons)
      layout.addWidget(self.widget_mode_buttons,1)
