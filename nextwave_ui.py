@@ -5,6 +5,7 @@ from PyQt5.QtWidgets import (QMainWindow, QLabel, QSizePolicy, QApplication, QPu
 from PyQt5.QtGui import QPixmap, QImage, QPainter, QPen, QFont
 from PyQt5.QtCore import Qt, QTimer, QEvent, QLineF, QPointF, pyqtSignal 
 import PyQt5.QtGui as QtGui
+import PyQt5.QtCore as QtCore
 
 import pyqtgraph as pg
 from pyqtgraph.parametertree import Parameter, ParameterTree
@@ -56,6 +57,108 @@ MAIN_WIDTH_WIN=1800
 SPOTS_HEIGHT_WIN=1024
 SPOTS_WIDTH_WIN=1024
 
+class ActuatorPlot(QLabel):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        #self.generatePicture()
+        #self.init_ui()
+
+    #def init_ui(self):
+        #self.show()
+        #boxes1=[QLineF(self.engine.box_x[n]-box_size_pixel//2+BOX_BORDER, # top
+
+        self.pixmap = QPixmap(10,10)
+
+        bits=np.random.normal(size=(10,10))*32+128
+        self.qi = QImage(bits*0,10,10,QImage.Format_Indexed8)
+
+    def set_colors(self):
+        for n in np.arange(256):
+            if 0<n<64:
+                val=QtGui.qRgb(255-n,0,0)
+            elif n>=(256-64): # TODO check this
+                val=QtGui.qRgb(0,n,0)
+            else:
+                val=QtGui.qRgb(n,n,n) # Middle values are gray
+            self.qi.setColor(n, val)
+
+    def generatePicture(self):
+        ## pre-computing a QPicture object allows paint() to run much more quickly, 
+        ## rather than re-drawing the shapes every time.
+        self.picture = QtGui.QPicture()
+        p = QtGui.QPainter(self.picture)
+        p.setPen(pg.mkPen('w'))
+        data = [  ## fields are (time, open, close, min, max).
+    (1., 10, 13, 5, 15),
+    (2., 13, 17, 9, 20),
+    (3., 17, 14, 11, 23),
+    (4., 14, 15, 5, 19),
+    (5., 15, 9, 8, 22),
+    (6., 9, 15, 8, 16),
+]
+        w = (data[1][0] - data[0][0]) / 3.
+        for (t, open, close, min, max) in data:
+            p.drawLine(QtCore.QPointF(t, min), QtCore.QPointF(t, max))
+            if open > close:
+                p.setBrush(pg.mkBrush('r'))
+            else:
+                p.setBrush(pg.mkBrush('g'))
+            p.drawRect(QtCore.QRectF(t-w, open, w*2, close-open))
+        p.drawPicture(0,0,self.picture)
+
+    def paintEvent_manual(self): #, p, *args):
+        #bits[0,0]=128
+        #bits[9,9]=128
+        #yybits=np.random.normal(0,255,size=(10,10), dtype='uint8' )
+        #qi.setColorTable(self.ct)
+        #self.generatePicture()
+        #self.setStyleSheet("background-color:black;");
+        #self.pixmap.fill(Qt.black)
+        #for n in np.arange(256):
+            #val = QtGui.qRgb(*self.ct[n])
+            #self.qi.setColor(n, val)
+        #self.qi.loadFromData(bits)
+
+        bits=np.array(np.random.normal(size=(10,10))*32+128, dtype='uint8' )
+        bits[0,0:3]=0
+        bits[1,0:2]=0
+        bits[2,0:1]=0
+        bits[0,-3:]=0
+        bits[1,-2:]=0
+        bits[2,-1:]=0
+
+        bits[-1,0:3]=0
+        bits[-2,0:2]=0
+        bits[-3,0:1]=0
+        bits[-1,-3:]=0
+        bits[-2,-2:]=0
+        bits[-3,-1:]=0
+        # calculate the total number of bytes in the frame 
+        width=10
+        height = 10
+        totalBytes = bits.nbytes
+        bytesPerLine = int(totalBytes/height)
+
+        # Needed to fix skew problem.
+        #https://stackoverflow.com/questions/41596940/qimage-skews-some-images-but-not-others
+
+        #image = QImage(bits, width, height, bytesPerLine, QImage.Format_Grayscale8)
+
+        #self.imageLabel.setPixmap(QPixmap.fromImage(image))
+
+        self.qi = QImage(bits,width,height,bytesPerLine,QImage.Format_Indexed8)
+        self.set_colors()
+
+        #qp = QPainter(self.qi)
+        #qp.setBrush(br)
+        #qp.setPen(QtGui.QColor(200,0,0)) 
+        #qp.setBrush(QtGui.QColor(200,0,0)) 
+        #qp.drawRect(10, 10, 30,30)
+        #qp.end()
+        pixmap = QPixmap(self.qi)
+        pixmap = pixmap.scaled(self.height(),self.width(),Qt.KeepAspectRatio)
+        self.setPixmap(pixmap)
+
 class MyBarWidget(pg.PlotWidget):
 
     sigMouseClicked = pyqtSignal(object) # add our custom signal
@@ -96,6 +199,9 @@ class NextWaveMainWindow(QMainWindow):
     self.updater = QTimer(self);
     self.updater.timeout.connect(self.update_ui)
 
+    self.updater_dm = QTimer(self);
+    self.updater_dm.timeout.connect(self.update_ui_dm)
+
     self.draw_refs = True
     self.draw_boxes = False
     self.draw_centroids = True
@@ -109,6 +215,7 @@ class NextWaveMainWindow(QMainWindow):
     self.params = [
         {'name': 'UI', 'type': 'group', 'title':'User interface', 'children': [
             {'name': 'update_rate', 'type': 'int', 'value': 500, 'title':'Display update rate (ms)', 'limits':[50,2000]},
+            {'name': 'update_rate_dm', 'type': 'int', 'value': 100, 'title':'DM Display update rate (ms)', 'limits':[50,2000]},
             {'name': 'show_boxes', 'type': 'bool', 'value': False, 'title':'Show search boxes'}
         ]},
         {'name': 'WF Camera', 'type': 'group', 'children': [
@@ -126,11 +233,11 @@ class NextWaveMainWindow(QMainWindow):
     self.engine = NextwaveEngineComm()
     self.engine.init()
 
-    box_x,box_y,box_norm_x,box_norm_y=self.engine.make_searchboxes(self.cx,self.cy,
-                                                                   self.engine.pupil_radius_pixel,self.engine.box_size_pixel)
+    box_x,box_y,box_norm_x,box_norm_y=self.engine.make_searchboxes(self.cx,self.cy)
 
  def apply_params(self):
     self.updater.start(self.get_param("UI","update_rate"))
+    self.updater_dm.start(self.get_param("UI","update_rate_dm"))
 
  def update_ui(self):
     image_pixels = self.engine.receive_image()
@@ -234,15 +341,14 @@ class NextWaveMainWindow(QMainWindow):
         s += 'Z%2d=%+0.4f\n'%(n+1,self.engine.zernikes[n])
     self.text_status.setText(s)
 
-    rms=np.sqrt( np.nansum(self.engine.zernikes[3:]**2 ) )
+    rms,rms5p,cylinder,sphere,axes=self.engine.calc_diopters()
     left_chars=15
     str_stats=f"{'RMS':<15}= {rms:3.4f}\n"
-    rms5p=np.sqrt( np.nansum(self.engine.zernikes[5:]**2 ) )
     str_stats+=f"{'RMS(Z5+)':<15}= {rms5p:3.4f}\n"
-    str_stats+=f"{'Sphere(+cyl)':<15}= {rms:3.4f}\n"
-    str_stats+=f"{'Sphere(-cyl)':<15}= {rms:3.4f}\n"
-    str_stats+=f"{'Cylinder':<15}= {rms:3.4f}\n"
-    str_stats+=f"{'Axes(-cyl)':<15}= {rms:3.4f}\n"
+    str_stats+=f"{'Sphere(+cyl)':<15}= {sphere:3.4f}\n"
+    str_stats+=f"{'Sphere(-cyl)':<15}= {sphere:3.4f}\n"
+    str_stats+=f"{'Cylinder':<15}= {cylinder:3.4f}\n"
+    str_stats+=f"{'Axes(-cyl)':<15}= {axes:3.4f}\n"
     self.text_stats.setText(str_stats)
     #self.text_stats.setHtml(str_stats) # TODO: To get other colors, can embed <font color="red">TEXT</font><br>, etc.
 
@@ -301,7 +407,9 @@ class NextWaveMainWindow(QMainWindow):
     #bg2 = pg.BarGraphItem(x=np.arange(4)+3, height=self.engine.zernikes[5:9], width=1.0, brush=colr2)
 
     #self.bar_plot.addItem(bg3)
-
+ def update_ui_dm(self):
+    if self.chkLoop.isChecked():
+        self.actuator_plot.paintEvent_manual()
 
  def set_follow(self,state):
     buf = ByteStream()
@@ -336,6 +444,13 @@ class NextWaveMainWindow(QMainWindow):
      self.params=self.par
      self.apply_params()
 
+     # Auto-populate from parameters when the tab is shown:
+    #self.tabWidget.tabBarClicked.connect(self.userSettings)
+#def userSettings(self, tabIndex):
+    #if tabIndex != 5:
+     #self.param_tree.setParameters(self.p, showTop=False)
+
+
  def initUI(self):
 
      self.key_control = False 
@@ -369,9 +484,14 @@ class NextWaveMainWindow(QMainWindow):
      self.widget_displays = QWidget()
      layout=QVBoxLayout(self.widget_displays)
      layout.addWidget(QGroupBox('Pupil'))
-     layout.addWidget(QGroupBox('DM'))
+     #layout.addWidget(QGroupBox('DM'))
+     self.actuator_plot = ActuatorPlot()
+     self.actuator_plot.resize(200,200)
      #layout.addWidget(QGroupBox('Wavefront'))
      #layout.addWidget(QGroupBox('PSF'))
+     #self.ap = pg.plot()
+     #self.ap.addItem( self.actuator_plot )
+     layout.addWidget(self.actuator_plot)
 
      self.widget_controls = QWidget()
      layout=QVBoxLayout()
@@ -407,10 +527,8 @@ class NextWaveMainWindow(QMainWindow):
      self.widget_op.setLayout(layout_op)
 
      pages[0].setLayout(layout_op)
-
      for n, tabnames in enumerate(panel_names):
          tabs.addTab(pages[n], tabnames)
-     #self.setCentralWidget(tabs)
 
      ### Pupil ops
      layout1 = QGridLayout(self.ops_pupil)
@@ -499,9 +617,9 @@ class NextWaveMainWindow(QMainWindow):
 
      # Settings
      layout1 = QGridLayout(pages[1])
-     t = ParameterTree()
-     t.setParameters(self.p, showTop=False)
-     layout1.addWidget(t,0,0)
+     self.param_tree = ParameterTree()
+     self.param_tree.setParameters(self.p, showTop=False)
+     layout1.addWidget(self.param_tree,0,0)
      btn = QPushButton("Apply")
      btn.clicked.connect(self.params_apply_clicked)
      layout1.addWidget(btn,1,0)
@@ -591,7 +709,7 @@ class NextWaveMainWindow(QMainWindow):
         print( "Uknown Key:", event.key() )
 
     if update_search_boxes:
-        self.engine.make_searchboxes(self.cx,self.cy,pupil_radius_pixel,box_size_pixel)
+        self.engine.make_searchboxes(self.cx,self.cy)
 
         #if event.key() == QtCore.Qt.Key_Q:
         #elif event.key() == QtCore.Qt.Key_Enter:

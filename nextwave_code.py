@@ -43,8 +43,8 @@ Zernike order, first mode in that order:
 CCD_PIXEL=6.4
 BOX_UM=CCD_PIXEL * 40
 
-box_size_pixel=BOX_UM/CCD_PIXEL # /2: down-sampling ?
-print(box_size_pixel)
+BOX_SIZE_PIXEL=BOX_UM/CCD_PIXEL # /2: down-sampling ?
+print(BOX_SIZE_PIXEL)
 
 MAIN_HEIGHT_WIN=1000
 MAIN_WIDTH_WIN=1800
@@ -57,13 +57,12 @@ MEM_LEN_DATA=2048*2048*4
 # TODO
 PUPIL=6.4/2.0
 PUPIL_RADIUS_MM=PUPIL
-pupil_radius_pixel=PUPIL_RADIUS_MM*1000/CCD_PIXEL
-RI_RATIO=pupil_radius_pixel/box_size_pixel
-print(pupil_radius_pixel)
+PUPIL_RADIUS_PIXEL=PUPIL_RADIUS_MM*1000/CCD_PIXEL
+print(PUPIL_RADIUS_PIXEL)
 FOCAL=5.9041
 
-ri_ratio = pupil_radius_pixel / box_size_pixel
-print(ri_ratio)
+#RI_RATIO = PUPIL_RADIUS_PIXEL / BOX_SIZE_PIXEL
+#print(RI_RATIO)
 
 class ByteStream(bytearray):
     def append(self, v, fmt='B'):
@@ -77,10 +76,12 @@ class NextwaveEngineComm():
     """
     def __init__(self):
         # TODO:
-        self.pupil_radius_pixel=pupil_radius_pixel
-        self.box_size_pixel=box_size_pixel
+        self.pupil_radius_pixel=PUPIL_RADIUS_PIXEL
+        self.pupil_radius_mm=PUPIL_RADIUS_MM
+        self.box_size_pixel=BOX_SIZE_PIXEL
+        self.ri_ratio = self.pupil_radius_pixel / self.box_size_pixel
 
-    def make_searchboxes(self,cx,cy,pupil_radius_pixel,box_size_pixel,img_max=1000,aperture=1.0):
+    def make_searchboxes(self,cx,cy,img_max=1000,aperture=1.0):
         """
         Like the MATLAB code to make equally spaced boxes, but doesn't use loops.
         Instead builds and filters arrays
@@ -98,9 +99,12 @@ class NextwaveEngineComm():
 
         """
 
-        aperture = ri_ratio * aperture
 
-        print( pupil_radius_pixel, box_size_pixel, ri_ratio)
+        pupil_radius_pixel=self.pupil_radius_pixel
+        box_size_pixel=self.box_size_pixel
+        ri_ratio = self.ri_ratio
+        aperture = ri_ratio * aperture
+        #print( pupil_radius_pixel, box_size_pixel, ri_ratio)
 
         # The max number of boxes possible + or -
         max_boxes = np.ceil( pupil_radius_pixel/ box_size_pixel )
@@ -198,11 +202,10 @@ class NextwaveEngineComm():
         buf.append(num_boxes, 'H') # unsigned short
         buf.append(CCD_PIXEL,'d')
         buf.append(BOX_UM, 'd')
-        buf.append(pupil_radius_pixel*CCD_PIXEL, 'd')
+        buf.append(self.pupil_radius_pixel*CCD_PIXEL, 'd')
         shmem_boxes.seek(0)
         shmem_boxes.write(buf)
         shmem_boxes.flush()
-        #print(num_boxes)
 
         # REMOVE ME:
     # @jit(nopython=True)
@@ -224,14 +227,14 @@ class NextwaveEngineComm():
         return centroids
 
     def update_zernike_svd(self):
-        lefts =  self.norm_x - 0.5/RI_RATIO
-        rights = self.norm_x + 0.5/RI_RATIO
-        ups =    -(self.norm_y + 0.5/RI_RATIO)
-        downs =  -(self.norm_y - 0.5/RI_RATIO)
+        lefts =  self.norm_x - 0.5/self.ri_ratio
+        rights = self.norm_x + 0.5/self.ri_ratio
+        ups =    -(self.norm_y + 0.5/self.ri_ratio)
+        downs =  -(self.norm_y - 0.5/self.ri_ratio)
 
         # Compute all integrals for all box corners 
         lenslet_dx,lenslet_dy=zernike_integrals.zernike_integral_average_from_corners(
-            lefts, rights, ups, downs, PUPIL_RADIUS_MM)
+            lefts, rights, ups, downs, self.pupil_radius_mm)
         lenslet_dx = lenslet_dx[START_ZC:NUM_ZCS,:].T
         lenslet_dy = lenslet_dy[START_ZC:NUM_ZCS,:].T
 
@@ -274,6 +277,33 @@ class NextwaveEngineComm():
         self.OSA_to_CVS_map = np.array( [np.where(self.CVS_to_OSA_map-2==n)[0][0] for n in np.arange(20) ] ) # TODO
         self.OSA_to_CVS_map += 2
         self.zernikes=coeff[self.CVS_to_OSA_map[START_ZC-1:NUM_ZCS-1]-START_ZC-1 ]
+
+    def calc_diopters(self):
+
+        radius = self.pupil_radius_mm
+        EPS=1e-10
+        sqrt3=np.sqrt(3.0)
+        sqrt6=np.sqrt(6.0)
+        z3=self.zernikes[3-1]
+        z4=self.zernikes[4-1]
+        z5=self.zernikes[5-1]
+        cylinder = (4.0 * sqrt6 / (radius * radius)) * np.sqrt((z3 * z3) + (z5 * z5))
+        sphere = (-4.0 * sqrt3 * z4 / (radius * radius)) - 0.5 * cylinder
+
+        if (np.abs(z5) <= EPS):
+            thetaRad = 1.0 if (np.abs(z3) > EPS) else -1.0
+            thetaRad *= float(np.pi) / 4.0
+        else:
+            thetaRad = 0.5 * np.arctan(z3 / z5)
+
+        axis = thetaRad * 180.0 / float(np.pi)
+        if (axis < 0.0):
+            axis += 180.0
+
+        rms=np.sqrt( np.nansum(self.zernikes[(3-1):]**2 ) )
+        rms5p=np.sqrt( np.nansum(self.zernikes[(5-1):]**2 ) )
+
+        return rms,rms5p,cylinder,sphere,axis
 
     def shift_search_boxes(self,zs):
         zern_new = np.zeros(NUM_ZERNIKES)
