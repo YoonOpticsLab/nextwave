@@ -73,6 +73,8 @@ class ActuatorPlot(QLabel):
         self.qi = QImage(bits*0,10,10,QImage.Format_Indexed8)
 
     def set_colors(self):
+        #https://het.as.utexas.edu/HET/Software/html/qimage.html#image-transformations
+        #https://stackoverflow.com/questions/35382088/qimage-custom-indexed-colors-using-setcolortable
         for n in np.arange(256):
             if 0<n<64:
                 val=QtGui.qRgb(255-n,0,0)
@@ -499,8 +501,6 @@ class NextWaveMainWindow(QMainWindow):
      tabs.setTabPosition(QTabWidget.North)
      tabs.setMovable(True)
 
-     panel_names = ["Operation", "Settings", "Config"]
-     pages = [QWidget(tabs) for nam in panel_names]
      l1 = QHBoxLayout()
 
      self.chkFollow = QCheckBox("Boxes follow centroids")
@@ -526,6 +526,8 @@ class NextWaveMainWindow(QMainWindow):
      layout_op.addWidget(self.ops_dm)
      self.widget_op.setLayout(layout_op)
 
+     panel_names = ["Operation", "Settings", "Config", "Offline"]
+     pages = [QWidget(tabs) for nam in panel_names]
      pages[0].setLayout(layout_op)
      for n, tabnames in enumerate(panel_names):
          tabs.addTab(pages[n], tabnames)
@@ -633,7 +635,7 @@ class NextWaveMainWindow(QMainWindow):
      self.text_status = QTextEdit()
      self.text_status.setReadOnly(True)
 
-     layout.addWidget(self.text_status, 6)
+     #layout.addWidget(self.text_status, 1)
      layout.addWidget(tabs, 20)
 
      #self.widget_controls = QGroupBox('Controls')
@@ -647,6 +649,12 @@ class NextWaveMainWindow(QMainWindow):
      self.text_stats.setCurrentFont(font)
      self.text_stats.setReadOnly(True)
      layout.addWidget(self.text_stats)
+
+     # OFFLINE
+     layout1 = QGridLayout(pages[3])
+     btn1 = QPushButton("Load spot image")
+     btn1.setStyleSheet("color : orange")
+     layout1.addWidget(btn1,3,0)
 
      # Main Widget
      self.widget_main = QWidget()

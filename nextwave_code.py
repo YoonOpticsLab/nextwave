@@ -341,10 +341,15 @@ class NextwaveEngineComm():
         # Could be math in the defines for sizes, use eval
         MEM_LEN=int( eval(self.layout[2]['SHMEM_HEADER_SIZE'] ) )
         MEM_LEN_DATA=int(eval(self.layout[2]['SHMEM_BUFFER_SIZE'] ) )
+        #MEM_LEN_BOXES=int(eval(self.layout_boxes[2]['SHMEM_BUFFER_SIZE_BOXES'] ) )
+        #print( MEM_LEN_BOXES )
+        MEM_LEN_BOXES=self.layout_boxes[0]
+        print( MEM_LEN_BOXES)
         if WINDOWS:
+            # TODO: Get these all from the .h defines
             self.shmem_hdr=mmap.mmap(-1,MEM_LEN,"NW_SRC0_HDR")
             self.shmem_data=mmap.mmap(-1,MEM_LEN_DATA,"NW_SRC0_BUFFER")
-            self.shmem_boxes=mmap.mmap(-1,self.layout_boxes[0],"NW_BUFFER2")
+            self.shmem_boxes=mmap.mmap(-1,MEM_LEN_BOXES,"NW_BUFFER_BOXES")
 
             #from multiprocessing import shared_memory
             #self.shmem_hdr = shared_memory.SharedMemory(name="NW_SRC0_HDR" ).buf
@@ -355,8 +360,8 @@ class NextwaveEngineComm():
             self.shmem_hdr=mmap.mmap(fd1, MEM_LEN)
             fd2=os.open('/dev/shm/NW_SRC0_BUFFER', os.O_RDWR)
             self.shmem_data=mmap.mmap(fd2,MEM_LEN_DATA)
-            fd3=os.open('/dev/shm/NW_BUFFER2', os.O_RDWR)
-            self.shmem_boxes=mmap.mmap(fd3,self.layout_boxes[0])
+            fd3=os.open('/dev/shm/NW_BUFFER_BOXES', os.O_RDWR)
+            self.shmem_boxes=mmap.mmap(fd3,MEM_LEN_BOXES)
 
         bytez =np.array([CCD_PIXEL, PUPIL*2, BOX_UM], dtype='double').tobytes() 
         fields = self.layout_boxes[1]

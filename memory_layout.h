@@ -13,10 +13,6 @@
 #define SHMEM_BUFFER_SIZE MAX_IMAGE_SIZE*NW_MAX_FRAMES
 #define SHMEM_BUFFER_NAME "NW_SRC0_BUFFER"
 
-#define MAX_BOXES 1024
-#define SHMEM_BUFFER_SIZE2 MAX_BOXES*sizeof(float)*4+MAX_BOXES*sizeof(double)*2+32
-#define SHMEM_BUFFER_NAME2 "NW_BUFFER2"
-
 struct shmem_header
 {
 	uint8_t lock=0;

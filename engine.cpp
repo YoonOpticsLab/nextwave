@@ -220,7 +220,7 @@ int main(int argc, char** argv)
 #if _WIN64
     windows_shared_memory shmem1(open_or_create, SHMEM_HEADER_NAME, read_write, (size_t)SHMEM_HEADER_SIZE);
     windows_shared_memory shmem2(open_or_create, SHMEM_BUFFER_NAME, read_write, (size_t)SHMEM_BUFFER_SIZE);
-    windows_shared_memory shmem3(open_or_create, SHMEM_BUFFER_NAME2, read_write, (size_t)sizeof(shmem_boxes_header));
+    windows_shared_memory shmem3(open_or_create, SHMEM_BUFFER_NAME_BOXES, read_write, (size_t)sizeof(shmem_boxes_header));
 #else
 
     struct shm_remove
@@ -228,13 +228,13 @@ int main(int argc, char** argv)
       shm_remove() {
         shared_memory_object::remove(SHMEM_HEADER_NAME);
         shared_memory_object::remove(SHMEM_BUFFER_NAME);
-        shared_memory_object::remove(SHMEM_BUFFER_NAME2);
+        shared_memory_object::remove(SHMEM_BUFFER_NAME_BOXES);
         spdlog::info("Ok. removed");
       }
       ~shm_remove() {
         shared_memory_object::remove(SHMEM_HEADER_NAME);
         shared_memory_object::remove(SHMEM_BUFFER_NAME);
-        shared_memory_object::remove(SHMEM_BUFFER_NAME2);
+        shared_memory_object::remove(SHMEM_BUFFER_NAME_BOXES);
         spdlog::info("Removed"); }
     } remover;
 
@@ -242,7 +242,7 @@ int main(int argc, char** argv)
     shmem1.truncate((size_t)SHMEM_HEADER_SIZE);
     shared_memory_object shmem2(open_or_create, SHMEM_BUFFER_NAME, read_write);
     shmem2.truncate((size_t)SHMEM_BUFFER_SIZE);
-    shared_memory_object shmem3(open_or_create, SHMEM_BUFFER_NAME2, read_write);
+    shared_memory_object shmem3(open_or_create, SHMEM_BUFFER_NAME_BOXES, read_write);
     shmem3.truncate((size_t)sizeof(shmem_boxes_header));
     //spdlog::info("Siz: {}",sizeof(shmem_boxes_header) );
 #endif

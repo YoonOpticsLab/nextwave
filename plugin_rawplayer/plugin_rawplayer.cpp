@@ -110,20 +110,20 @@ DECL process(char *params)
 #if _WIN64
     windows_shared_memory shmem(open_or_create, SHMEM_HEADER_NAME, read_write, (size_t)SHMEM_HEADER_SIZE);
     windows_shared_memory shmem2(open_or_create, SHMEM_BUFFER_NAME, read_write, (size_t)SHMEM_BUFFER_SIZE);
-    windows_shared_memory shmem3(open_or_create, SHMEM_BUFFER_NAME2, read_write, (size_t)SHMEM_BUFFER_SIZE2);
+    //windows_shared_memory shmem3(open_or_create, SHMEM_BUFFER_NAME_BOXES, read_write, (size_t)SHMEM_BUFFER_SIZE_BOXES);
 #else
     shared_memory_object shmem(open_or_create, SHMEM_HEADER_NAME, read_write);
     shmem.truncate((size_t)SHMEM_HEADER_SIZE);
     shared_memory_object shmem2(open_or_create, SHMEM_BUFFER_NAME, read_write);
     shmem2.truncate((size_t)SHMEM_BUFFER_SIZE);
-    shared_memory_object shmem3(open_or_create, SHMEM_BUFFER_NAME2, read_write);
-    shmem3.truncate((size_t)SHMEM_BUFFER_SIZE2);
+    //shared_memory_object shmem3(open_or_create, SHMEM_BUFFER_NAME_BOXES, read_write);
+    //shmem3.truncate((size_t)SHMEM_BUFFER_SIZE_BOXES);
 #endif
 
   // Common to both OSes:
   mapped_region shmem_region{ shmem, read_write };
   mapped_region shmem_region2{ shmem2, read_write };
-  mapped_region shmem_region3{ shmem3, read_write };
+  //mapped_region shmem_region3{ shmem3, read_write };
 
   read_file(gfilename);
 
