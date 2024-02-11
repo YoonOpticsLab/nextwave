@@ -275,13 +275,11 @@ int main(int argc, char** argv)
 #define REP_LOG 20
 
   while ( pShmem1->mode==MODE_OFF || pShmemBoxes->num_boxes==0 ) {
-    if ( pShmem1->mode==MODE_QUIT )
-      break;
-    spdlog::info("{} {}", pShmem1->mode, pShmemBoxes->num_boxes);
     // sleep until the UI is ready to tell us to do something
     std::this_thread::sleep_for(std::chrono::milliseconds(200));
   }
 
+  // TODO: Call proper init here somehow?
 
   double times_total[10]; //TODO
 
@@ -294,15 +292,15 @@ int main(int argc, char** argv)
 
         int modnum=0;
         for (struct module it: listModules) {
-          high_resolution_clock::time_point time_before = high_resolution_clock::now();
+            high_resolution_clock::time_point time_before = high_resolution_clock::now();
 
-          int result=(*it.fp_do_process)(str_nothing);
-          high_resolution_clock::time_point time_after = high_resolution_clock::now();
-          duration<double> time_span = duration_cast<duration<double>>(time_after-time_before);
-          int logidx=pipeline_count % REP_LOG;
-          ns[logidx*2+modnum] = time_span.count();
+            int result=(*it.fp_do_process)(str_nothing);
+            high_resolution_clock::time_point time_after = high_resolution_clock::now();
+            duration<double> time_span = duration_cast<duration<double>>(time_after-time_before);
+            int logidx=pipeline_count % REP_LOG;
+            ns[logidx*2+modnum] = time_span.count();
 
-          modnum++;
+            modnum++;
           }
 
           high_resolution_clock::time_point time_now = high_resolution_clock::now();
@@ -310,7 +308,7 @@ int main(int argc, char** argv)
           times_total[pipeline_count % 10] = time_span.count();
           pShmem1->fps[0]=(uint16_t)(1000*time_span.count()); // TODO: take mean
 
-          if ( pShmem1->header_version==99 ) {
+          if ( pShmem1->header_version==99 || pShmem1->mode==MODE_QUIT ) {
             break;
           };
 

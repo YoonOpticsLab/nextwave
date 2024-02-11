@@ -405,20 +405,18 @@ class NextwaveEngineComm():
 
     def send_quit(self):
         buf = ByteStream()
-        buf.append(99) # Status:Quitter
-        buf.append(0)  # Lock
-        buf.append(1, 'H') # NUM BOXES. Hopefully doesn't matter
+        buf.append(255) # TODO: MODE from file
+        #buf.append(0)  # Lock
+        #buf.append(1, 'H') # NUM BOXES. Hopefully doesn't matter
         #buf.append(40, 'd')
         #buf.append(500, 'd')
-        self.shmem_boxes.seek(0)
-        self.shmem_boxes.write(buf)
-        self.shmem_boxes.flush()
+        self.shmem_hdr.seek(2) # TODO: get address
+        self.shmem_hdr.write(buf)
+        self.shmem_hdr.flush()
 
     def mode_init(self):
         buf = ByteStream()
-        buf.append(1) # Status:Quitter
-        buf.append(1) # Status:Quitter
-        buf.append(1) # Status:Quitter
-        self.shmem_hdr.seek(0) #TODO: get address
+        buf.append(1) # TODO: MODE_
+        self.shmem_hdr.seek(2) #TODO: get address
         self.shmem_hdr.write(buf)
         self.shmem_hdr.flush()

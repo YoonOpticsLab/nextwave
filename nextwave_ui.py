@@ -242,7 +242,9 @@ class NextWaveMainWindow(QMainWindow):
     self.updater_dm.start(self.get_param("UI","update_rate_dm"))
 
  def update_ui(self):
-    return
+
+    # if self.engine.status ==  // TODO: see if engine is running before proceed
+
     image_pixels = self.engine.receive_image()
     self.engine.receive_centroids()
 
