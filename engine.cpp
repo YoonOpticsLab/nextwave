@@ -163,7 +163,6 @@ int load_module(std::string name, std::string params, std::list<struct module> &
 
   // Error check. What to do if can't load?
   chkerr();
-  //std::cout << handle << " Ok1\n" << std::flush;;
 
   int (*fptr1)(const char*);
   int (*fptr2)(const char*);
@@ -194,7 +193,6 @@ int load_module(std::string name, std::string params, std::list<struct module> &
   aModule.fp_close=fptr3;
 
 chkerr();
-//std::cout <<" Ok2\n" << std::flush;;
 
  spdlog::info("Loaded {} {}", name, handle);
  int result=(**aModule.fp_init)(params.c_str());
@@ -276,52 +274,52 @@ int main(int argc, char** argv)
 #define REPS 9999999
 #define REP_LOG 20
 
-  while ( pShmemBoxes->num_boxes==0 ) {
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  while ( pShmem1->mode==MODE_OFF || pShmemBoxes->num_boxes==0 ) {
+    if ( pShmem1->mode==MODE_QUIT )
+      break;
+    spdlog::info("{} {}", pShmem1->mode, pShmemBoxes->num_boxes);
+    // sleep until the UI is ready to tell us to do something
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
   }
+
 
   double times_total[10]; //TODO
 
   double ns[REP_LOG*4]; //TODO
 	char str_nothing[64] = ""; //.c_str();
-//	while ( (GetKeyState('Q') & 0x8000) == 0)
-	for (int pipeline_count=0; pipeline_count<REPS; pipeline_count++)
-	{
-    high_resolution_clock::time_point time_total_before = high_resolution_clock::now();
+  while ( pShmem1->mode!=MODE_QUIT ) {
+      for (int pipeline_count=0; pipeline_count<REPS; pipeline_count++)
+      {
+        high_resolution_clock::time_point time_total_before = high_resolution_clock::now();
 
-    int modnum=0;
-		for (struct module it: listModules) {
-			//int result=(*it.fp_init)(str_nothing);
-			//spdlog::info("About to run {}",it.name);
-      high_resolution_clock::time_point time_before = high_resolution_clock::now();
-	  
-	  //centroiding_process(str_nothing);
-	  int result=(*it.fp_do_process)(str_nothing);
-      high_resolution_clock::time_point time_after = high_resolution_clock::now();
-      duration<double> time_span = duration_cast<duration<double>>(time_after-time_before);
-      int logidx=pipeline_count % REP_LOG;
-      ns[logidx*2+modnum] = time_span.count();
+        int modnum=0;
+        for (struct module it: listModules) {
+          high_resolution_clock::time_point time_before = high_resolution_clock::now();
 
-      modnum++;
-      }
+          int result=(*it.fp_do_process)(str_nothing);
+          high_resolution_clock::time_point time_after = high_resolution_clock::now();
+          duration<double> time_span = duration_cast<duration<double>>(time_after-time_before);
+          int logidx=pipeline_count % REP_LOG;
+          ns[logidx*2+modnum] = time_span.count();
 
-      high_resolution_clock::time_point time_now = high_resolution_clock::now();
-      duration<double> time_span = duration_cast<duration<double>>(time_now - time_total_before);
-      times_total[pipeline_count % 10] = time_span.count();
-      pShmem1->fps[0]=(uint16_t)(1000*time_span.count()); // TODO: take mean
+          modnum++;
+          }
 
-      if ( pShmemBoxes->header_version==99 ) {
-        break;
+          high_resolution_clock::time_point time_now = high_resolution_clock::now();
+          duration<double> time_span = duration_cast<duration<double>>(time_now - time_total_before);
+          times_total[pipeline_count % 10] = time_span.count();
+          pShmem1->fps[0]=(uint16_t)(1000*time_span.count()); // TODO: take mean
+
+          if ( pShmem1->header_version==99 ) {
+            break;
+          };
+
+        // TODO: Get this from config file. Don't busy spin if we are just developing/testing.
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
       };
+  }
 
-    // TODO: Get this from config file. Don't busy spin if we are just developing/testing.
-    std::this_thread::sleep_for(std::chrono::milliseconds(200));
-	};
-
-	//spdlog::info("Finished. Press any key to cleanup.");
-  //getchar();
-
-	spdlog::info("After OK");
+	spdlog::info("Quit");
 	for (int pipeline_count=0; pipeline_count<REP_LOG; pipeline_count++)
     {
       int modnum=0;

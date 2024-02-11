@@ -13,10 +13,19 @@
 #define SHMEM_BUFFER_SIZE MAX_IMAGE_SIZE*NW_MAX_FRAMES
 #define SHMEM_BUFFER_NAME "NW_SRC0_BUFFER"
 
+#define MODE_OFF 0
+#define MODE_READY 1
+#define MODE_RUNONCE_CENTROIDING 2
+#define MODE_RUNONCE_CENTROIDING_AO 3
+#define MODE_LOOP_CENTROIDING 0x10
+#define MODE_LOOP_AO 0x20
+#define MODE_QUIT 0xFF
+
 struct shmem_header
 {
 	uint8_t lock=0;
 	uint8_t header_version=NW_HEADER_VERSION;
+	uint8_t mode=MODE_OFF;
 	uint16_t manager_port_num;
 	uint16_t dimensions[4];
 	uint16_t datatype_code;

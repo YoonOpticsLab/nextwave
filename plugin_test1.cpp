@@ -13,7 +13,7 @@ DECL process(char *params)
   return 0;
 };
 
-DECL close(char *params)
+DECL do_close(char *params)
 {
   std::cout <<"P1 close\n" ;
   return 0;

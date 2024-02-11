@@ -242,6 +242,7 @@ class NextWaveMainWindow(QMainWindow):
     self.updater_dm.start(self.get_param("UI","update_rate_dm"))
 
  def update_ui(self):
+    return
     image_pixels = self.engine.receive_image()
     self.engine.receive_centroids()
 
@@ -594,6 +595,7 @@ class NextWaveMainWindow(QMainWindow):
      layoutStatusButtons = QHBoxLayout(self.widget_mode_buttons)
      self.mode_btn1 = QPushButton("Init")
      layoutStatusButtons.addWidget(self.mode_btn1)
+     self.mode_btn1.clicked.connect(self.mode_init)
      self.mode_btn2 = QPushButton("Snap")
      layoutStatusButtons.addWidget(self.mode_btn2)
      self.mode_btn3 = QPushButton("Run")
@@ -722,6 +724,9 @@ class NextWaveMainWindow(QMainWindow):
         #if event.key() == QtCore.Qt.Key_Q:
         #elif event.key() == QtCore.Qt.Key_Enter:
 
+ def mode_init(self):
+    self.engine.mode_init()
+
  def export(self):
     default_filename="centroids.dat"
     filename, _ = QFileDialog.getSaveFileName(
@@ -748,6 +753,7 @@ class NextWaveMainWindow(QMainWindow):
     np.save('slope',self.slope)
     np.save('zterms',self.zterms)
     np.save('zterms_inv',self.zterms_inv)
+
 
  def close(self):
     self.engine.send_quit() # Send stop command to engine

@@ -81,6 +81,41 @@ class NextwaveEngineComm():
         self.box_size_pixel=BOX_SIZE_PIXEL
         self.ri_ratio = self.pupil_radius_pixel / self.box_size_pixel
 
+    def init(self):
+        self.layout=extract_memory.get_header_format('memory_layout.h')
+        self.layout_boxes=extract_memory.get_header_format('layout_boxes.h')
+
+        # Could be math in the defines for sizes, use eval
+        MEM_LEN=int( eval(self.layout[2]['SHMEM_HEADER_SIZE'] ) )
+        MEM_LEN_DATA=int(eval(self.layout[2]['SHMEM_BUFFER_SIZE'] ) )
+        #MEM_LEN_BOXES=int(eval(self.layout_boxes[2]['SHMEM_BUFFER_SIZE_BOXES'] ) )
+        #print( MEM_LEN_BOXES )
+        MEM_LEN_BOXES=self.layout_boxes[0]
+        print( MEM_LEN_BOXES)
+        if WINDOWS:
+            # TODO: Get these all from the .h defines
+            self.shmem_hdr=mmap.mmap(-1,MEM_LEN,"NW_SRC0_HDR")
+            self.shmem_data=mmap.mmap(-1,MEM_LEN_DATA,"NW_SRC0_BUFFER")
+            self.shmem_boxes=mmap.mmap(-1,MEM_LEN_BOXES,"NW_BUFFER_BOXES")
+
+            #from multiprocessing import shared_memory
+            #self.shmem_hdr = shared_memory.SharedMemory(name="NW_SRC0_HDR" ).buf
+            #self.shmem_data = shared_memory.SharedMemory(name="NW_SRC0_BUFFER" ).buf
+            #self.shmem_boxes = shared_memory.SharedMemory(name="NW_BUFFER2").buf
+        else:
+            fd1=os.open('/dev/shm/NW_SRC0_HDR', os.O_RDWR)
+            self.shmem_hdr=mmap.mmap(fd1, MEM_LEN)
+            fd2=os.open('/dev/shm/NW_SRC0_BUFFER', os.O_RDWR)
+            self.shmem_data=mmap.mmap(fd2,MEM_LEN_DATA)
+            fd3=os.open('/dev/shm/NW_BUFFER_BOXES', os.O_RDWR)
+            self.shmem_boxes=mmap.mmap(fd3,MEM_LEN_BOXES)
+
+        bytez =np.array([CCD_PIXEL, PUPIL*2, BOX_UM], dtype='double').tobytes() 
+        fields = self.layout_boxes[1]
+        self.shmem_boxes.seek(fields['pixel_um']['bytenum_current'])
+        self.shmem_boxes.write(bytez)
+        self.shmem_boxes.flush()
+
     def make_searchboxes(self,cx,cy,img_max=1000,aperture=1.0):
         """
         Like the MATLAB code to make equally spaced boxes, but doesn't use loops.
@@ -334,41 +369,6 @@ class NextwaveEngineComm():
         self.engine.ref_x =  self.initial_x - delta[num_boxes:]
         self.update_zernike_svd()
 
-    def init(self):
-        self.layout=extract_memory.get_header_format('memory_layout.h')
-        self.layout_boxes=extract_memory.get_header_format('layout_boxes.h')
-
-        # Could be math in the defines for sizes, use eval
-        MEM_LEN=int( eval(self.layout[2]['SHMEM_HEADER_SIZE'] ) )
-        MEM_LEN_DATA=int(eval(self.layout[2]['SHMEM_BUFFER_SIZE'] ) )
-        #MEM_LEN_BOXES=int(eval(self.layout_boxes[2]['SHMEM_BUFFER_SIZE_BOXES'] ) )
-        #print( MEM_LEN_BOXES )
-        MEM_LEN_BOXES=self.layout_boxes[0]
-        print( MEM_LEN_BOXES)
-        if WINDOWS:
-            # TODO: Get these all from the .h defines
-            self.shmem_hdr=mmap.mmap(-1,MEM_LEN,"NW_SRC0_HDR")
-            self.shmem_data=mmap.mmap(-1,MEM_LEN_DATA,"NW_SRC0_BUFFER")
-            self.shmem_boxes=mmap.mmap(-1,MEM_LEN_BOXES,"NW_BUFFER_BOXES")
-
-            #from multiprocessing import shared_memory
-            #self.shmem_hdr = shared_memory.SharedMemory(name="NW_SRC0_HDR" ).buf
-            #self.shmem_data = shared_memory.SharedMemory(name="NW_SRC0_BUFFER" ).buf
-            #self.shmem_boxes = shared_memory.SharedMemory(name="NW_BUFFER2").buf
-        else:
-            fd1=os.open('/dev/shm/NW_SRC0_HDR', os.O_RDWR)
-            self.shmem_hdr=mmap.mmap(fd1, MEM_LEN)
-            fd2=os.open('/dev/shm/NW_SRC0_BUFFER', os.O_RDWR)
-            self.shmem_data=mmap.mmap(fd2,MEM_LEN_DATA)
-            fd3=os.open('/dev/shm/NW_BUFFER_BOXES', os.O_RDWR)
-            self.shmem_boxes=mmap.mmap(fd3,MEM_LEN_BOXES)
-
-        bytez =np.array([CCD_PIXEL, PUPIL*2, BOX_UM], dtype='double').tobytes() 
-        fields = self.layout_boxes[1]
-        self.shmem_boxes.seek(fields['pixel_um']['bytenum_current'])
-        self.shmem_boxes.write(bytez)
-        self.shmem_boxes.flush()
-
     def receive_image(self):
         # TODO: Wait until it's safe (unlocked)
         mem_header=self.shmem_hdr.seek(0)
@@ -413,3 +413,12 @@ class NextwaveEngineComm():
         self.shmem_boxes.seek(0)
         self.shmem_boxes.write(buf)
         self.shmem_boxes.flush()
+
+    def mode_init(self):
+        buf = ByteStream()
+        buf.append(1) # Status:Quitter
+        buf.append(1) # Status:Quitter
+        buf.append(1) # Status:Quitter
+        self.shmem_hdr.seek(0) #TODO: get address
+        self.shmem_hdr.write(buf)
+        self.shmem_hdr.flush()
