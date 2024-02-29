@@ -284,37 +284,55 @@ int main(int argc, char** argv)
   double times_total[10]; //TODO
 
   double ns[REP_LOG*4]; //TODO
-	char str_nothing[64] = ""; //.c_str();
+	char str_message[64] = " "; //.c_str();
+  long int pipeline_count=0;
+
   while ( pShmem1->mode!=MODE_QUIT ) {
-      for (int pipeline_count=0; pipeline_count<REPS; pipeline_count++)
-      {
-        high_resolution_clock::time_point time_total_before = high_resolution_clock::now();
 
-        int modnum=0;
-        for (struct module it: listModules) {
-            high_resolution_clock::time_point time_before = high_resolution_clock::now();
+    if (pShmem1->mode > MODE_READY ) {
+      //for (int pipeline_count=0; pipeline_count<REPS; pipeline_count++)
 
-            int result=(*it.fp_do_process)(str_nothing);
-            high_resolution_clock::time_point time_after = high_resolution_clock::now();
-            duration<double> time_span = duration_cast<duration<double>>(time_after-time_before);
-            int logidx=pipeline_count % REP_LOG;
-            ns[logidx*2+modnum] = time_span.count();
+      if (pShmem1->mode == MODE_RUNONCE_CENTROIDING)
+        str_message[0]='I';
+      else
+        str_message[0]=' ';
 
-            modnum++;
-          }
+      high_resolution_clock::time_point time_total_before = high_resolution_clock::now();
 
-          high_resolution_clock::time_point time_now = high_resolution_clock::now();
-          duration<double> time_span = duration_cast<duration<double>>(time_now - time_total_before);
-          times_total[pipeline_count % 10] = time_span.count();
-          pShmem1->fps[0]=(uint16_t)(1000*time_span.count()); // TODO: take mean
+      int modnum=0;
+      int logidx=pipeline_count % REP_LOG;
+      for (struct module it: listModules) {
+          high_resolution_clock::time_point time_before = high_resolution_clock::now();
 
-          if ( pShmem1->header_version==99 || pShmem1->mode==MODE_QUIT ) {
-            break;
-          };
+          int result=(*it.fp_do_process)((const char*)str_message);
+          high_resolution_clock::time_point time_after = high_resolution_clock::now();
+          duration<double> time_span = duration_cast<duration<double>>(time_after-time_before);
+          ns[logidx*2+modnum] = time_span.count();
 
-        // TODO: Get this from config file. Don't busy spin if we are just developing/testing.
-        std::this_thread::sleep_for(std::chrono::milliseconds(200));
-      };
+          modnum++;
+        }
+
+        high_resolution_clock::time_point time_now = high_resolution_clock::now();
+        duration<double> time_span = duration_cast<duration<double>>(time_now - time_total_before);
+        times_total[pipeline_count % 10] = time_span.count();
+        pShmem1->fps[0]=(uint16_t)(1000*time_span.count()); // TODO: take mean
+
+        pShmem1->fps[1]=(uint16_t)(1000*ns[logidx*2]);
+        pShmem1->fps[2]=(uint16_t)(1000*ns[logidx*2+1]);
+
+        if ( pShmem1->header_version==99 || pShmem1->mode==MODE_QUIT ) {
+          break;
+        };
+
+      // Ran once, unarm
+        if (pShmem1->mode == MODE_RUNONCE_CENTROIDING ) {
+          pShmem1->mode = MODE_READY;
+        }
+
+    } else { // don't do anything. Sleep a bit
+      std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+
   }
 
 	spdlog::info("Quit");

@@ -20,6 +20,15 @@ from nextwave_code import NextwaveEngineComm
 
 WINDOWS=(os.name == 'nt')
 
+# TODO: Configurable?
+QIMAGE_HEIGHT=1000
+QIMAGE_WIDTH=1000
+
+MAIN_HEIGHT_WIN=768
+MAIN_WIDTH_WIN=1800
+SPOTS_HEIGHT_WIN=768
+SPOTS_WIDTH_WIN=768
+
 class ZernikeDialog(QDialog):
     def createFormGroupBox(self,titl):
         formGroupBox = QGroupBox(titl)
@@ -47,15 +56,6 @@ class ZernikeDialog(QDialog):
         mainLayout.addWidget(self.createFormGroupBox(titl))
         mainLayout.addWidget(buttonBox)
         self.setLayout(mainLayout)
-
-# TODO: Configurable?
-QIMAGE_HEIGHT=1000
-QIMAGE_WIDTH=1000
-
-MAIN_HEIGHT_WIN=1000
-MAIN_WIDTH_WIN=1800
-SPOTS_HEIGHT_WIN=1024
-SPOTS_WIDTH_WIN=1024
 
 class ActuatorPlot(QLabel):
     def __init__(self, *args, **kwargs):
@@ -228,11 +228,26 @@ class NextWaveMainWindow(QMainWindow):
             {'name': 'gain', 'title':'Gain (%)', 'type': 'int', 'value': 0, 'limits':[0,100]},
             {'name': 'exposure', 'title':'Exposure time (ms)', 'type': 'int', 'value': 0, 'limits':[1,1000]} ]}
         ]
+
+    self.params_offline = [
+        {'name': 'system', 'type': 'group', 'title':'System Params', 'children': [
+            {'name': 'wavelength', 'type': 'int', 'value': 830, 'title':'Wavelength (nm)', 'limits':[50,2000]},
+            {'name': 'lenslet_f', 'type': 'float', 'value': 5.12, 'title':'Lenslet f', 'limits':[1,20]},
+            {'name': 'lenslet_pitch', 'type': 'float', 'value': 256, 'title':'Lenslet pitch'},
+            {'name': 'pixel_pitch', 'type': 'float', 'value': 6.4, 'title':'Pixel pitch (um)'},
+            {'name': 'pupil_diam', 'type': 'float', 'value': 6.4, 'title':'Pupil diameter (mm)'},
+            {'name': 'focal_length', 'type': 'float', 'value': 5.904, 'title':'Focal length'},
+        ]}
+        ]
+
     self.p = Parameter.create(name='params', type='group', children=self.params)
     self.params = self.p.saveState()
     self.apply_params()
 
-    self.engine = NextwaveEngineComm()
+    self.p_offline = Parameter.create(name='params_offline', type='group', children=self.params_offline)
+    self.params_offline = self.p_offline.saveState()
+
+    self.engine = NextwaveEngineComm(self)
     self.engine.init()
 
     box_x,box_y,box_norm_x,box_norm_y=self.engine.make_searchboxes(self.cx,self.cy)
@@ -240,6 +255,31 @@ class NextWaveMainWindow(QMainWindow):
  def apply_params(self):
     self.updater.start(self.get_param("UI","update_rate"))
     self.updater_dm.start(self.get_param("UI","update_rate_dm"))
+
+ def offline_load_image(self):
+    ffilt='Binary files (*.bin);; BMP Images (*.bmp);; All files (*.*)'
+    thedir = QFileDialog.getOpenFileNames(self, "Choose file in directory",
+                ".", ffilt );
+
+    if len(thedir)==0:
+        return
+    else:
+        print( thedir )
+
+    return
+
+ def offline_config(self):
+    ffilt='XML config files (*.xml);; JSON config files (*.json);; All files (*.*)'
+    thedir = QFileDialog.getOpenFileNames(self, "Choose file in directory",
+                ".", ffilt );
+
+    if len(thedir)==0:
+        return
+    else:
+        print( thedir )
+
+    return
+
 
  def update_ui(self):
 
@@ -360,7 +400,7 @@ class NextWaveMainWindow(QMainWindow):
     self.line_centerx.setText(str(self.cx) )
     self.line_centery.setText(str(self.cy) )
 
-    s="Running. %3.2f FPS (%3.0f ms)"%(1000/self.engine.fps,self.engine.fps)
+    s="Running. %3.2f FPS (%05.0f ms: %04.0f+%04.0f ms)"%(1000/self.engine.fps0,self.engine.fps0, self.engine.fps1, self.engine.fps2)
     self.label_status0.setText(s)
     self.label_status0.setStyleSheet("color: rgb(0, 255, 0); background-color: rgb(0,0,0);")
 
@@ -406,8 +446,10 @@ class NextWaveMainWindow(QMainWindow):
             itm=pg.ScatterPlotItem([ntrunc],[minval],symbol="arrow_down",size=40)
             self.bar_plot.addItem(itm)
 
-    self.bar_plot.setYRange(minval, maxval)
-
+    if not np.isnan(maxval):
+        self.bar_plot.setYRange(minval, maxval)
+    #self.bar_plot.getAxis('left').setTickSpacing(1, 0.1)
+    #self.bar_plot.getAxis('left').setTickDensity(2)
     #colr2=np.array(cmap.Spectral(0.8))*255
     #bg2 = pg.BarGraphItem(x=np.arange(4)+3, height=self.engine.zernikes[5:9], width=1.0, brush=colr2)
 
@@ -422,6 +464,7 @@ class NextWaveMainWindow(QMainWindow):
     self.shmem_boxes.seek(0)
     self.shmem_boxes.write(buf)
     self.shmem_boxes.flush()
+
  def showdialog(self,which,callback):
      dlg = ZernikeDialog(which, callback)
      dlg.exec()
@@ -437,11 +480,17 @@ class NextWaveMainWindow(QMainWindow):
             if node['name']==name:
                 return(node["value"])
 
- def get_param(self,name_parent,name):
-    return self.params["children"][name_parent]["children"][name]["value"] 
+ def get_param(self,name_parent,name,offline=False):
+    if offline:
+        return self.params_offline["children"][name_parent]["children"][name]["value"] 
+    else:
+        return self.params["children"][name_parent]["children"][name]["value"] 
 
- def set_param(self,name_parent,name,newval):
-    self.params["children"][name_parent]["children"][name]["value"] = newval
+ def set_param(self,name_parent,name,newval,offline=False):
+    if offline:
+        self.params["children"][name_parent]["children"][name]["value"] = newval
+    else:
+        self.params["children"][name_parent]["children"][name]["value"] = newval
 
  def params_apply_clicked(self):
      self.par= self.p.saveState()
@@ -456,6 +505,7 @@ class NextWaveMainWindow(QMainWindow):
      #self.param_tree.setParameters(self.p, showTop=False)
 
 
+ # PANELS/layouts, etc.
  def initUI(self):
 
      self.key_control = False 
@@ -483,7 +533,7 @@ class NextWaveMainWindow(QMainWindow):
      layout.addWidget(pixmap_label,15)
      self.bar_plot = MyBarWidget()
      self.bar_plot.app = self
-     layout.addWidget(self.bar_plot,3)
+     layout.addWidget(self.bar_plot,5)
      self.widget_centrals.setLayout(layout)
 
      self.widget_displays = QWidget()
@@ -539,16 +589,24 @@ class NextWaveMainWindow(QMainWindow):
      layout1 = QGridLayout(self.ops_pupil)
 
      ### Arrows pad 
+     self.m = 1
      btnL = QPushButton("\u2190") # l
      layout1.addWidget(btnL,1,4)
+     btnL.clicked.connect(lambda: self.move_center(-1,0) )
      btnU = QPushButton("\u2191") # u
      layout1.addWidget(btnU,0,5)
+     btnU.clicked.connect(lambda: self.move_center(0,-1) )
      btnR = QPushButton("\u2192") # r
      layout1.addWidget(btnR,1,6)
+     btnR.clicked.connect(lambda: self.move_center(1,0) )
      btnD = QPushButton("\u2193") # d
      layout1.addWidget(btnD,2,5)
      btnM = QPushButton() # d
-     layout1.addWidget(btnM,1,5)
+     self.chkMove = QCheckBox("")
+     layout1.addWidget(self.chkMove,1,5,alignment=Qt.AlignCenter)
+     btnD.clicked.connect(lambda: self.move_center(0,1) )
+
+     self.chkMove.clicked.connect(lambda: self.set_m(self.chkMove.isChecked()) )
 
      lbl = QLabel("Center X:")
      layout1.addWidget(lbl,0,0)
@@ -595,19 +653,26 @@ class NextWaveMainWindow(QMainWindow):
 
      self.widget_mode_buttons = QWidget()
      layoutStatusButtons = QHBoxLayout(self.widget_mode_buttons)
+
      self.mode_btn1 = QPushButton("Init")
      layoutStatusButtons.addWidget(self.mode_btn1)
      self.mode_btn1.clicked.connect(self.mode_init)
+
      self.mode_btn2 = QPushButton("Snap")
      layoutStatusButtons.addWidget(self.mode_btn2)
+     self.mode_btn2.clicked.connect(self.mode_snap)
+
      self.mode_btn3 = QPushButton("Run")
      layoutStatusButtons.addWidget(self.mode_btn3)
+     self.mode_btn3.clicked.connect(self.mode_run)
+
      self.mode_btn4 = QPushButton("Stop")
      layoutStatusButtons.addWidget(self.mode_btn4)
-     #elf.button.clicked.connect(self.count_clicks)
-     self.mode_btn2.setEnabled( False )
-     self.mode_btn3.setEnabled( False ) 
-     self.mode_btn4.setEnabled( False ) 
+     self.mode_btn4.clicked.connect(lambda: self.engine.mode_stop() )
+
+     self.mode_btn2.setEnabled( True )
+     self.mode_btn3.setEnabled( True ) 
+     self.mode_btn4.setEnabled( False )
 
      # Config
      layout1 = QGridLayout(pages[2])
@@ -656,9 +721,35 @@ class NextWaveMainWindow(QMainWindow):
 
      # OFFLINE
      layout1 = QGridLayout(pages[3])
-     btn1 = QPushButton("Load spot image")
-     btn1.setStyleSheet("color : orange")
-     layout1.addWidget(btn1,3,0)
+     #btn1 = QPushButton("Load spot image")
+     #btn1.setStyleSheet("color : orange")
+     #layout1.addWidget(btn1,3,0,0,-1)
+     #btn1.clicked.connect(self.offline_load_image)
+
+     lbl = QLabel("Spot image: ")
+     layout1.addWidget(lbl, 3,0)
+     self.offline_image = QLineEdit("spots.bin")
+     layout1.addWidget(self.offline_image, 3,1)
+     btn = QPushButton("...")
+     btn.clicked.connect(self.offline_load_image)
+     layout1.addWidget(btn, 3,2)
+     #btn = QPushButton("Edit+Reload")
+     #layout1.addWidget(btn, 3,3)
+
+     lbl = QLabel("XML Config: ")
+     layout1.addWidget(lbl, 0,0)
+     self.offline_edit_xml = QLineEdit("c:\\file\\ao\\offline_config.xml")
+     layout1.addWidget(self.offline_edit_xml, 0,1)
+     btn = QPushButton("...")
+     btn.clicked.connect(self.offline_config)
+     layout1.addWidget(btn, 0,2)
+     btn = QPushButton("Edit+Reload")
+     layout1.addWidget(btn, 0,3)
+
+     #os.system('c:/tmp/sample.txt') # <- on windows this will launch the defalut editor
+     self.param_tree_offline = ParameterTree()
+     self.param_tree_offline.setParameters(self.p_offline, showTop=False)
+     layout1.addWidget(self.param_tree_offline,1,0,2,-1)
 
      # Main Widget
      self.widget_main = QWidget()
@@ -679,6 +770,18 @@ class NextWaveMainWindow(QMainWindow):
      self.setGeometry(2,2,MAIN_WIDTH_WIN,MAIN_HEIGHT_WIN)
      self.show()
 
+ def set_m(self, doit):
+     if doit:
+         self.m=10
+     else:
+         self.m=1
+
+ def move_center(self, dx, dy, m=1, do_update=True):
+    m = self.m
+    self.cx += dx * m
+    self.cy += dy * m
+    if do_update:
+        self.engine.make_searchboxes(self.cx,self.cy)
 
  def butt(self, event):
     print("clicked:", event.pos() )
@@ -706,11 +809,9 @@ class NextWaveMainWindow(QMainWindow):
     elif event.key()==Qt.Key_Control:
         self.key_control = True
     elif event.key()==Qt.Key_Left:
-        self.cx -= 1 + 10 * self.key_control
-        update_search_boxes=True
+        self.move_center(-1,0,self.key_control)
     elif event.key()==Qt.Key_Right:
-        self.cx += 1 + 10 * self.key_control
-        update_search_boxes=True
+        self.move_center( 1,0,self.key_control)
     elif event.key()==Qt.Key_Up:
         self.cy -= 1 + 10 * self.key_control
         update_search_boxes=True
@@ -728,6 +829,10 @@ class NextWaveMainWindow(QMainWindow):
 
  def mode_init(self):
     self.engine.mode_init()
+ def mode_snap(self):
+    self.engine.mode_snap()
+ def mode_run(self):
+    self.engine.mode_run()
 
  def export(self):
     default_filename="centroids.dat"
@@ -755,7 +860,6 @@ class NextWaveMainWindow(QMainWindow):
     np.save('slope',self.slope)
     np.save('zterms',self.zterms)
     np.save('zterms_inv',self.zterms_inv)
-
 
  def close(self):
     self.engine.send_quit() # Send stop command to engine

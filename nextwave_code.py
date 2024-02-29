@@ -40,29 +40,13 @@ Zernike order, first mode in that order:
 #CCD_PIXEL=5.5 * 2
 #BOX_UM=328
 
-CCD_PIXEL=6.4
-BOX_UM=CCD_PIXEL * 40
+#CCD_PIXEL=6.4
+#BOX_UM=CCD_PIXEL * 40
 
-BOX_SIZE_PIXEL=BOX_UM/CCD_PIXEL # /2: down-sampling ?
-print(BOX_SIZE_PIXEL)
-
-MAIN_HEIGHT_WIN=1000
-MAIN_WIDTH_WIN=1800
-SPOTS_HEIGHT_WIN=1024
-SPOTS_WIDTH_WIN=1024
+#BOX_SIZE_PIXEL=BOX_UM/CCD_PIXEL # /2: down-sampling ?
 
 MEM_LEN=512
 MEM_LEN_DATA=2048*2048*4
-
-# TODO
-PUPIL=6.4/2.0
-PUPIL_RADIUS_MM=PUPIL
-PUPIL_RADIUS_PIXEL=PUPIL_RADIUS_MM*1000/CCD_PIXEL
-print(PUPIL_RADIUS_PIXEL)
-FOCAL=5.9041
-
-#RI_RATIO = PUPIL_RADIUS_PIXEL / BOX_SIZE_PIXEL
-#print(RI_RATIO)
 
 class ByteStream(bytearray):
     def append(self, v, fmt='B'):
@@ -74,12 +58,9 @@ class NextwaveEngineComm():
           - Communication with the realtime engine (comm. over shared memory)
           - Computation of Zernikes, matrices for SVD, etc.
     """
-    def __init__(self):
+    def __init__(self,ui):
         # TODO:
-        self.pupil_radius_pixel=PUPIL_RADIUS_PIXEL
-        self.pupil_radius_mm=PUPIL_RADIUS_MM
-        self.box_size_pixel=BOX_SIZE_PIXEL
-        self.ri_ratio = self.pupil_radius_pixel / self.box_size_pixel
+        self.ui = ui
 
     def init(self):
         self.layout=extract_memory.get_header_format('memory_layout.h')
@@ -88,10 +69,7 @@ class NextwaveEngineComm():
         # Could be math in the defines for sizes, use eval
         MEM_LEN=int( eval(self.layout[2]['SHMEM_HEADER_SIZE'] ) )
         MEM_LEN_DATA=int(eval(self.layout[2]['SHMEM_BUFFER_SIZE'] ) )
-        #MEM_LEN_BOXES=int(eval(self.layout_boxes[2]['SHMEM_BUFFER_SIZE_BOXES'] ) )
-        #print( MEM_LEN_BOXES )
         MEM_LEN_BOXES=self.layout_boxes[0]
-        print( MEM_LEN_BOXES)
         if WINDOWS:
             # TODO: Get these all from the .h defines
             self.shmem_hdr=mmap.mmap(-1,MEM_LEN,"NW_SRC0_HDR")
@@ -110,7 +88,20 @@ class NextwaveEngineComm():
             fd3=os.open('/dev/shm/NW_BUFFER_BOXES', os.O_RDWR)
             self.shmem_boxes=mmap.mmap(fd3,MEM_LEN_BOXES)
 
-        bytez =np.array([CCD_PIXEL, PUPIL*2, BOX_UM], dtype='double').tobytes() 
+        self.init_params() # MAYBE do this for defaults
+
+    def init_params(self):
+        self.ccd_pixel = self.ui.get_param("system","pixel_pitch",True)
+        self.pupil_diam = self.ui.get_param("system","pupil_diam",True)
+        self.box_um = self.ui.get_param("system","lenslet_pitch",True)
+        self.focal = self.ui.get_param("system","focal_length",True)
+
+        self.pupil_radius_mm=self.pupil_diam / 2.0
+        self.pupil_radius_pixel=self.pupil_radius_mm * 1000 / self.ccd_pixel
+        self.box_size_pixel=self.box_um / self.ccd_pixel
+        self.ri_ratio = self.pupil_radius_pixel / self.box_size_pixel
+
+        bytez =np.array([self.ccd_pixel, self.box_um, self.pupil_radius_mm], dtype='double').tobytes() 
         fields = self.layout_boxes[1]
         self.shmem_boxes.seek(fields['pixel_um']['bytenum_current'])
         self.shmem_boxes.write(bytez)
@@ -235,9 +226,9 @@ class NextwaveEngineComm():
         buf.append(1)
         buf.append(0)
         buf.append(num_boxes, 'H') # unsigned short
-        buf.append(CCD_PIXEL,'d')
-        buf.append(BOX_UM, 'd')
-        buf.append(self.pupil_radius_pixel*CCD_PIXEL, 'd')
+        buf.append(self.ccd_pixel,'d')
+        buf.append(self.box_um, 'd')
+        buf.append(self.pupil_radius_pixel*self.ccd_pixel, 'd')
         shmem_boxes.seek(0)
         shmem_boxes.write(buf)
         shmem_boxes.flush()
@@ -294,7 +285,7 @@ class NextwaveEngineComm():
         #spot_displace_y -= spot_displace_y.mean()
         #print( spot_displace_y.mean(), spot_displace_x.mean() )
 
-        slope = np.concatenate( (spot_displace_y, spot_displace_x)) * CCD_PIXEL/FOCAL;
+        slope = np.concatenate( (spot_displace_y, spot_displace_x)) * self.ccd_pixel/self.focal;
 
         self.spot_displace_x = spot_displace_x
         self.spot_displace_y = spot_displace_y
@@ -371,10 +362,14 @@ class NextwaveEngineComm():
 
     def receive_image(self):
         # TODO: Wait until it's safe (unlocked)
-        mem_header=self.shmem_hdr.seek(0)
+
+        self.fps0=extract_memory.get_array_item2(self.layout,self.shmem_hdr,'fps',0)
+        self.fps1=extract_memory.get_array_item2(self.layout,self.shmem_hdr,'fps',1)
+        self.fps2=extract_memory.get_array_item2(self.layout,self.shmem_hdr,'fps',2)
+
+        self.shmem_hdr.seek(0)
         mem_header=self.shmem_hdr.read(MEM_LEN)
-        #fps=extract_memory.get_item(self.layout,mem_header,'fps')
-        self.fps=extract_memory.get_array_item(self.layout,mem_header,'fps',0)
+
         self.height=extract_memory.get_array_item(self.layout,mem_header,'dimensions',0)
         self.width=extract_memory.get_array_item(self.layout,mem_header,'dimensions',1)
 
@@ -403,6 +398,14 @@ class NextwaveEngineComm():
         buf=self.shmem_boxes.read(self.num_boxes*4)
         self.centroids_y=struct.unpack_from(''.join((['f']*self.num_boxes)), buf)
 
+        DEBUGGING=False
+        if DEBUGGING:
+            print (self.num_boxes, np.min(self.centroids_x), np.max(self.centroids_x)  )
+            for n in np.arange(self.num_boxes):
+                if np.isnan(self.centroids_x[n]):
+                    print( n, end=' ')
+                    print (self.num_boxes, self.centroids_x[100], self.centroids_y[100]  )
+
     def send_quit(self):
         buf = ByteStream()
         buf.append(255) # TODO: MODE from file
@@ -415,8 +418,28 @@ class NextwaveEngineComm():
         self.shmem_hdr.flush()
 
     def mode_init(self):
+        self.mode_snap()
+
+    def mode_snap(self):
+        self.init_params()
         buf = ByteStream()
-        buf.append(1) # TODO: MODE_
+        buf.append(2) # TODO: MODE_CENTROIDING
+        self.shmem_hdr.seek(2) #TODO: get address
+        self.shmem_hdr.write(buf)
+        self.shmem_hdr.flush()
+
+    def mode_run(self):
+        self.init_params()
+        buf = ByteStream()
+        buf.append(9) # TODO: Greater than MODE_CEN_ONE
+        self.shmem_hdr.seek(2) #TODO: get address
+        self.shmem_hdr.write(buf)
+        self.shmem_hdr.flush()
+
+    def mode_stop(self):
+        self.init_params()
+        buf = ByteStream()
+        buf.append(255) # TODO: Back to ready
         self.shmem_hdr.seek(2) #TODO: get address
         self.shmem_hdr.write(buf)
         self.shmem_hdr.flush()

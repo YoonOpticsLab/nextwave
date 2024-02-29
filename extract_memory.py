@@ -1,4 +1,5 @@
 import numpy as np
+import struct
 
 numbytes={
     'uint8_t':1,
@@ -44,6 +45,20 @@ def get_array_item(layout,bytes,which_item, which_index):
     if 'int' in pytpe(entry['type']):
         data=int(data) # Make an untyped int size (in case we are in something like a multiply
     return data
+
+def get_array_item2(layout,shmem,which_item, which_index):
+    entry = layout[1][which_item]
+    array_start=entry['bytenum_current']
+    itemsize=numbytes[ entry['type'] ]
+    first=array_start+itemsize*which_index
+    shmem.seek(first)
+    buf = shmem.read(itemsize)
+    code=struct_codes[entry['type']]
+    if 'int16' in pytpe(entry['type']):
+        data= struct.unpack( '>'+code, buf )
+    else:
+        data= struct.unpack(code, buf )
+    return data[0]
 
 def get_header_format(filname):
     with open(filname) as f:

@@ -72,11 +72,11 @@ public:
   af::array seq1;
 
   af::dim4 new_dims;//(BOX_SIZE*BOX_SIZE,NBOXES); // AF stacks the boxes, so do this to reshape for easier sum reduction
-  
+
   // These are "temp" & overwritten each time in the loop, but put here to avoid GC, etc. :
   af::array im2;
   af::array sums;
-  
+
   af::array atemp;
   af::array x_reshape;
   af::array y_reshape;
@@ -143,10 +143,11 @@ void read_boxes(int width) {
 
   height = pShmem->dimensions[0];
   width = pShmem->dimensions[1];
+
   // TODO: this will be slow to do every time.
   init_buffers(width, height, box_size_int, num_boxes);
 
-	//spdlog::info("Info from: {} {} {} {} {}", num_boxes, pixel_um, box_size, pupil_radius_pixels, box_size_int);
+	spdlog::info("Info: {} {} {} {} {}", num_boxes, pixel_um, box_size, box_size_int, pupil_radius_pixels);
 #if 0
   // DEbugging
   //float x_ref0 = pShmemBoxes->reference_x[0];
@@ -215,9 +216,9 @@ PLUGIN_API(centroiding,init,char *params)
 
   plugin_access_shmem();
   gaf=new af_instance();
-  //init_buffers();
   return 0;
 }
+
 // https://stackoverflow.com/questions/49692531/transfer-data-from-arrayfire-arrays-to-armadillo-structures
 // https://github.com/arrayfire/arrayfire/issues/1405;
 int find_cendroids_af(unsigned char *buffer, int width, int height) {
@@ -235,7 +236,6 @@ int find_cendroids_af(unsigned char *buffer, int width, int height) {
 
 	gaf->weighted_x = gaf->im * gaf->im_xcoor;
 	gaf->weighted_y = gaf->im * gaf->im_ycoor;
-
 
 #if VERBOSE
   spdlog::info("mean={} min={} max={}",(float)af::mean<float>(weighted_x),
@@ -277,16 +277,17 @@ int find_cendroids_af(unsigned char *buffer, int width, int height) {
   float *host_x = gaf->sums_x.host<float>();
   float *host_y = gaf->sums_y.host<float>();
 
-  // TODO: Some weird transposes happening. Reverse here.
   struct shmem_boxes_header* pShmemBoxes = (struct shmem_boxes_header*) shmem_region3.get_address();
   memcpy(pShmemBoxes->centroid_x, host_x, sizeof(float)*num_boxes);
   memcpy(pShmemBoxes->centroid_y, host_y, sizeof(float)*num_boxes);
 
+#if 0
   if (pShmemBoxes->header_version & 2) //Follow
   {
     memcpy(pShmemBoxes->box_x, host_x, sizeof(float)*num_boxes);
     memcpy(pShmemBoxes->box_y, host_y, sizeof(float)*num_boxes);
   }
+#endif //0
 
 #if VERBOSE
   spdlog::info("Val0 x,y: {},{}",host_x[0],host_y[0]);
@@ -301,11 +302,16 @@ int find_cendroids_af(unsigned char *buffer, int width, int height) {
 		af_print( gaf->sums_y );
 	}
 
-#if VERBOSE
-	spdlog::info("Minsum: {}", (float)af::min<float>(sums));
-	spdlog::info("Maxsum: {}", (float)af::max<float>(sums));
-	spdlog::info("Maxx: {}", (float)af::max<float>(sums_x));
-	spdlog::info("Maxy: {}", (float)af::max<float>(sums_y));
+#if 1
+	spdlog::info("{}", num_boxes);
+	spdlog::info("Maxx: {}", (float)af::max<float>(gaf->sums_x));
+	spdlog::info("Minx: {}", (float)af::min<float>(gaf->sums_x));
+	spdlog::info("Mayy: {}", (float)af::max<float>(gaf->sums_y));
+	spdlog::info("Miny: {}", (float)af::min<float>(gaf->sums_y));
+	spdlog::info("Meanx: {}", (float)af::mean<float>(gaf->sums_x));
+	spdlog::info("Meany: {}", (float)af::mean<float>(gaf->sums_y));
+
+  spdlog::info("Val100 x,y: {},{}",host_x[2],host_y[2]);
 #endif
 
   return 0;
@@ -337,12 +343,11 @@ PLUGIN_API(centroiding,process,char *params)
 	memcpy((void*)buffer,
          ((const char *)(shmem_region2.get_address()))+height*width*nCurrRing, height*width);
 
-#if VERBOSE
-	spdlog::info("Centroiding Dims: {} {} {}", width, height, int(buffer[0])) ;
-#endif
-
-  // If we need to... TODO: only recompute idxs if needed; not every time
-  read_boxes(width);
+  if (params[0]=='I') {
+    read_boxes(width);
+    spdlog::info("Got boxes");
+    spdlog::info("Centroiding Dims: {} {} {}", width, height, int(buffer[0])) ;
+  }
 
   find_cendroids_af(buffer, width, height);
 
