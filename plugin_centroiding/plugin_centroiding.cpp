@@ -302,7 +302,7 @@ int find_cendroids_af(unsigned char *buffer, int width, int height) {
 		af_print( gaf->sums_y );
 	}
 
-#if 1
+#if 0
 	spdlog::info("{}", num_boxes);
 	spdlog::info("Maxx: {}", (float)af::max<float>(gaf->sums_x));
 	spdlog::info("Minx: {}", (float)af::min<float>(gaf->sums_x));

@@ -37,10 +37,12 @@ endif()
 # If you set any CMAKE_ variables, that can go here.
 # (But usually don't do this, except maybe for C++ standard)
 
+# Download this to include directory:
+# https://github.com/nlohmann/json/blob/develop/single_include/nlohmann/json.hpp
 
 #include_directories(common/include)
-#include_directories(d:/code/boost_1_83_0)
-include_directories(include/boost_1_83_0)
+include_directories(d:/code/boost_1_83_0)
+#include_directories(include/boost_1_83_0)
 include_directories(include)
 
 add_library(plugin_test1 SHARED plugin_test1.cpp nextwave_plugin.hpp)
@@ -63,7 +65,6 @@ if (WIN32)
 	#target_link_libraries(engine ${ArrayFire_Unified_LIBRARIES} )
 	target_link_libraries(engine ArrayFire::af)
 	#target_link_libraries(engine plugin_centroiding.lib) # TODO: need .lib?
-	
 else()
 	add_executable(engine engine.cpp)
 	target_link_libraries(engine plugin_rawplayer)

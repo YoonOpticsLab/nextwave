@@ -400,7 +400,11 @@ class NextWaveMainWindow(QMainWindow):
     self.line_centerx.setText(str(self.cx) )
     self.line_centery.setText(str(self.cy) )
 
-    s="Running. %3.2f FPS (%05.0f ms: %04.0f+%04.0f ms)"%(1000/self.engine.fps0,self.engine.fps0, self.engine.fps1, self.engine.fps2)
+    if self.engine.fps0!=0:
+        s="Running. %3.2f FPS (%04.1f ms: %04.1f+%04.1f ms)"%(1000/self.engine.fps0,self.engine.fps0, self.engine.fps1, self.engine.fps2)
+    else:
+        s="0 fps"
+        
     self.label_status0.setText(s)
     self.label_status0.setStyleSheet("color: rgb(0, 255, 0); background-color: rgb(0,0,0);")
 

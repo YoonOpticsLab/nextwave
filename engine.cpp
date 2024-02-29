@@ -315,11 +315,13 @@ int main(int argc, char** argv)
         high_resolution_clock::time_point time_now = high_resolution_clock::now();
         duration<double> time_span = duration_cast<duration<double>>(time_now - time_total_before);
         times_total[pipeline_count % 10] = time_span.count();
-        pShmem1->fps[0]=(uint16_t)(1000*time_span.count()); // TODO: take mean
+        pShmem1->fps[0]=(uint16_t)(1e4*time_span.count()); // TODO: take mean
 
-        pShmem1->fps[1]=(uint16_t)(1000*ns[logidx*2]);
-        pShmem1->fps[2]=(uint16_t)(1000*ns[logidx*2+1]);
+        pShmem1->fps[1]=(uint16_t)(1e4*ns[logidx*2]);
+        pShmem1->fps[2]=(uint16_t)(1e4*ns[logidx*2+1]);
 
+		spdlog::info("{} {}", ns[logidx*2], ns[logidx*2+1]);
+		
         if ( pShmem1->header_version==99 || pShmem1->mode==MODE_QUIT ) {
           break;
         };

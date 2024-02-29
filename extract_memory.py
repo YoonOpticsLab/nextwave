@@ -46,7 +46,7 @@ def get_array_item(layout,bytes,which_item, which_index):
         data=int(data) # Make an untyped int size (in case we are in something like a multiply
     return data
 
-def get_array_item2(layout,shmem,which_item, which_index):
+def get_array_item2(layout,shmem,which_item, which_index, endian):
     entry = layout[1][which_item]
     array_start=entry['bytenum_current']
     itemsize=numbytes[ entry['type'] ]
@@ -54,8 +54,8 @@ def get_array_item2(layout,shmem,which_item, which_index):
     shmem.seek(first)
     buf = shmem.read(itemsize)
     code=struct_codes[entry['type']]
-    if 'int16' in pytpe(entry['type']):
-        data= struct.unpack( '>'+code, buf )
+    if endian:
+        data= struct.unpack( ">"+code, buf )
     else:
         data= struct.unpack(code, buf )
     return data[0]
