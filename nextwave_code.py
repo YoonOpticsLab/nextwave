@@ -1,16 +1,18 @@
 import numpy as np
 import sys
 import os
+import time
 
 import matplotlib.cm as cmap
 #from numba import jit
+from numpy.linalg import svd,lstsq
 
 import mmap
 import struct
 import extract_memory
 
 import zernike_integrals
-from numpy.linalg import svd,lstsq
+import iterative
 
 WINDOWS=(os.name == 'nt')
 
@@ -37,14 +39,6 @@ Zernike order, first mode in that order:
 11 66
 '''
 
-#CCD_PIXEL=5.5 * 2
-#BOX_UM=328
-
-#CCD_PIXEL=6.4
-#BOX_UM=CCD_PIXEL * 40
-
-#BOX_SIZE_PIXEL=BOX_UM/CCD_PIXEL # /2: down-sampling ?
-
 MEM_LEN=512
 MEM_LEN_DATA=2048*2048*4
 
@@ -61,6 +55,7 @@ class NextwaveEngineComm():
     def __init__(self,ui):
         # TODO:
         self.ui = ui
+        self.mode = 0
 
     def init(self):
         self.layout=extract_memory.get_header_format('memory_layout.h')
@@ -90,16 +85,30 @@ class NextwaveEngineComm():
 
         self.init_params() # MAYBE do this for defaults
 
-    def init_params(self):
+    def init_params(self, overrides=None):
         self.ccd_pixel = self.ui.get_param("system","pixel_pitch",True)
         self.pupil_diam = self.ui.get_param("system","pupil_diam",True)
         self.box_um = self.ui.get_param("system","lenslet_pitch",True)
         self.focal = self.ui.get_param("system","focal_length",True)
 
+        if overrides:
+            self.pupil_diam=overrides['pupil_diam']
+
         self.pupil_radius_mm=self.pupil_diam / 2.0
         self.pupil_radius_pixel=self.pupil_radius_mm * 1000 / self.ccd_pixel
         self.box_size_pixel=self.box_um / self.ccd_pixel
         self.ri_ratio = self.pupil_radius_pixel / self.box_size_pixel
+        print( "Init:", self.ri_ratio, self.box_size_pixel, self.pupil_radius_pixel )
+
+        if overrides:
+            bytez =np.array([self.num_boxes], dtype="uint16").tobytes() 
+            fields = self.layout_boxes[1]
+            self.shmem_boxes.seek(fields['num_boxes']['bytenum_current'])
+            self.shmem_boxes.write(bytez)
+            self.shmem_boxes.flush()
+            print( self.num_boxes)
+        #except:
+            #pass
 
         bytez =np.array([self.ccd_pixel, self.box_um, self.pupil_radius_mm], dtype='double').tobytes() 
         fields = self.layout_boxes[1]
@@ -107,7 +116,64 @@ class NextwaveEngineComm():
         self.shmem_boxes.write(bytez)
         self.shmem_boxes.flush()
 
-    def make_searchboxes(self,cx,cy,img_max=1000,aperture=1.0):
+    def iterative_run(self, cx, cy, step):
+        return
+
+    def read_mode(self):
+        self.shmem_hdr.seek(2) #TODO: get address
+        buf=self.shmem_hdr.read(1)
+        mode= struct.unpack('B',buf)[0]
+        return mode
+
+    def iterative_step(self, cx, cy, step, start, stop):
+        if self.iterative_size>=stop:
+            self.iterative_size = start
+        elif self.iterative_size+step > stop:
+            self.iterative_size = stop
+        else:
+            self.iterative_size += step
+
+        self.make_searchboxes(cx,cy,pupil_radius_pixel=self.iterative_size/2.0*1000/self.ccd_pixel)
+        #self.update_zernike_svd() # TODO: maybe integrate into make_sb
+        #self.send_searchboxes(self.shmem_boxes, self.box_x, self.box_y, self.layout_boxes)
+
+        mode=self.read_mode()
+        print ( "MODE: %d"%mode, end='')
+        self.init_params( {'pupil_diam': self.iterative_size})
+        self.mode_snap(False)
+
+        mode=self.read_mode()
+        # TODO: don't wait forever; lokcup
+        while( mode>1 ):
+            mode=self.read_mode()
+            #print ( "MODE: %d"%mode, end='')
+            time.sleep(0.01)
+
+        self.receive_centroids()
+        self.compute_zernikes()
+        zs = self.zernikes
+
+        factor = self.iterative_size / (self.iterative_size+step)
+        z_new =  zs #iterative.extrapolate_zernikes(zs, factor)
+        #print( zs[5], zs[0:5] )
+        #print( z_new[0:5] )
+        self.shift_search_boxes(z_new,from_dialog=False)
+
+    def set_iterative_size(self,value):
+        self.iterative_size = value
+
+    def move_searchboxes(self,dx,dy):
+        self.box_x += dx
+        self.box_y += dy
+
+        self.update_zernike_svd() # Precompute
+        self.num_boxes= num_boxes
+
+        self.send_searchboxes(self.shmem_boxes, self.box_x, self.box_y, self.layout_boxes)
+        self.update_zernike_svd()
+
+
+    def make_searchboxes(self,cx,cy,img_max=1000,aperture=1.0,pupil_radius_pixel=None):
         """
         Like the MATLAB code to make equally spaced boxes, but doesn't use loops.
         Instead builds and filters arrays
@@ -124,13 +190,16 @@ class NextwaveEngineComm():
                     b_y += [y / ri_ratio]
 
         """
-
-
-        pupil_radius_pixel=self.pupil_radius_pixel
+        if pupil_radius_pixel is None:
+            pupil_radius_pixel=self.pupil_radius_pixel
         box_size_pixel=self.box_size_pixel
-        ri_ratio = self.ri_ratio
+
+        ri_ratio = pupil_radius_pixel / box_size_pixel
+
+        print( pupil_radius_pixel, box_size_pixel, ri_ratio )
+
         aperture = ri_ratio * aperture
-        #print( pupil_radius_pixel, box_size_pixel, ri_ratio)
+        print( "Make:", pupil_radius_pixel, box_size_pixel, ri_ratio)
 
         # The max number of boxes possible + or -
         max_boxes = np.ceil( pupil_radius_pixel/ box_size_pixel )
@@ -152,11 +221,11 @@ class NextwaveEngineComm():
         valid_y_norm=YY[valid_boxes]/ri_ratio
 
         num_boxes=valid_x_norm.shape[0]
+
+        print("NUM BOX:", num_boxes)
         box_zero = np.where(valid_x_norm**2+valid_y_norm**2==0)[0] # Index of zeroth (middle) element
 
-        # TODO: check this
-        #img_max = 992  # TODO
-        MULT = img_max / 2.0 # 1000 / 2.0
+        MULT = ri_ratio * box_size_pixel
         valid_x = valid_x_norm * MULT + cx
         valid_y = valid_y_norm * MULT + cy
 
@@ -181,6 +250,7 @@ class NextwaveEngineComm():
         self.update_zernike_svd()
 
         return valid_x,valid_y,valid_x_norm,valid_y_norm
+
 
     def rcv_searchboxes(self,shmem_boxes, layout, box_x, box_y, layout_boxes):
         fields=layout[1]
@@ -293,6 +363,7 @@ class NextwaveEngineComm():
 
         coeff=np.matmul(self.zterms,slope)
 
+        # TODO: only do this once
         # Copied from MATLAB code
         self.CVS_to_OSA_map = np.array([3,2, 5,4,6, 9,7,8,10, 15,13,11,12,14,
                                 21,19,17,16,18,20,
@@ -304,8 +375,12 @@ class NextwaveEngineComm():
         self.OSA_to_CVS_map += 2
         self.zernikes=coeff[self.CVS_to_OSA_map[START_ZC-1:NUM_ZCS-1]-START_ZC-1 ]
 
-    def calc_diopters(self):
+    def autoshift_searchboxes(self):
+        #shift_search_boxes(self,zs,from_dialog=True):
+        pass
+        #return
 
+    def calc_diopters(self):
         radius = self.pupil_radius_mm
         EPS=1e-10
         sqrt3=np.sqrt(3.0)
@@ -331,22 +406,28 @@ class NextwaveEngineComm():
 
         return rms,rms5p,cylinder,sphere,axis
 
-    def shift_search_boxes(self,zs):
+    def shift_search_boxes(self,zs,from_dialog=True):
         zern_new = np.zeros(NUM_ZERNIKES)
         #zern_new[self.OSA_to_CVS_map[0:NUM_ZERN_DIALOG]]=zs 
 
         #zern_new[0:NUM_ZERN_DIALOG]=zs 
         # TODO: What about term 0?
-        zern_new[self.CVS_to_OSA_map[0:NUM_ZERN_DIALOG-1]-START_ZC-1 ] = zs[1:]
+        if from_dialog:
+            zern_new[self.CVS_to_OSA_map[0:NUM_ZERN_DIALOG-1]-START_ZC-1 ] = zs[1:]
+        else:
+            zern_new[self.CVS_to_OSA_map[0:zs.shape[0]]-START_ZC-1 ] = zs
+
+        print( zern_new[0:9])
         #print(self.OSA_to_CVS_map)
         #print( zern_new[0:9] )
 
         delta=np.matmul(self.zterms_inv,zern_new) 
-        num_boxes = self.engine.box_x.shape[0] 
-        self.engine.box_y = self.initial_y + delta[0:num_boxes]
-        self.engine.box_x = self.initial_x - delta[num_boxes:]
+        num_boxes = self.box_x.shape[0] 
+        self.box_y = self.initial_y + delta[0:num_boxes]
+        self.box_x = self.initial_x - delta[num_boxes:]
 
-        send_searchboxes(self.shmem_boxes, self.box_x, self.box_y, self.layout_boxes)
+        self.send_searchboxes(self.shmem_boxes, self.box_x, self.box_y, self.layout_boxes)
+        self.update_zernike_svd()
 
     def shift_references(self,zs):
         zern_new = np.zeros(NUM_ZERNIKES)
@@ -418,18 +499,24 @@ class NextwaveEngineComm():
         self.shmem_hdr.flush()
 
     def mode_init(self):
+        self.mode=1
         self.mode_snap()
 
-    def mode_snap(self):
-        self.init_params()
+    def mode_snap(self, reinit=True):
+        self.mode=2
+        if reinit:
+            self.init_params()
+
         buf = ByteStream()
         buf.append(2) # TODO: MODE_CENTROIDING
         self.shmem_hdr.seek(2) #TODO: get address
         self.shmem_hdr.write(buf)
         self.shmem_hdr.flush()
 
-    def mode_run(self):
-        self.init_params()
+    def mode_run(self, reinit=True):
+        self.mode=3
+        if reinit:
+            self.init_params()
         buf = ByteStream()
         buf.append(9) # TODO: Greater than MODE_CEN_ONE
         self.shmem_hdr.seek(2) #TODO: get address
@@ -437,7 +524,6 @@ class NextwaveEngineComm():
         self.shmem_hdr.flush()
 
     def mode_stop(self):
-        self.init_params()
         buf = ByteStream()
         buf.append(255) # TODO: Back to ready
         self.shmem_hdr.seek(2) #TODO: get address

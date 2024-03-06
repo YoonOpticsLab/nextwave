@@ -87,8 +87,6 @@ void read_file(std::string filename)
   }
   fclose(fp);
 
-
-
   return; 
 }
 
@@ -98,7 +96,6 @@ DECL init(char *params)
   json jdata = json::parse(params);
   gfilename=jdata["filename"];
   
-  spdlog::info("Hi. Good");
   read_file(gfilename);
     
   return 0;

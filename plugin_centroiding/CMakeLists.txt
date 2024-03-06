@@ -13,8 +13,8 @@ list(APPEND SOURCES
 
 include_directories(../include)
 include_directories(..)
-include_directories(d:/code/boost_1_83_0)
 include_directories(include)
+include_directories(include/boost_1_83_0)
 include_directories(${ArrayFire_INCLUDE_DIRS})
 
 if(WIN32)

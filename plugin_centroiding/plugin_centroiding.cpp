@@ -147,7 +147,6 @@ void read_boxes(int width) {
   // TODO: this will be slow to do every time.
   init_buffers(width, height, box_size_int, num_boxes);
 
-	spdlog::info("Info: {} {} {} {} {}", num_boxes, pixel_um, box_size, box_size_int, pupil_radius_pixels);
 #if 0
   // DEbugging
   //float x_ref0 = pShmemBoxes->reference_x[0];
@@ -198,6 +197,8 @@ void read_boxes(int width) {
   printf("mx2: %f\n",(float)af::max<float>(gaf->seq1(af::span,2)) );
   printf("count1: %f\n",(float)af::count<float>(gaf->seq1(af::span,1)) );
 #endif
+
+	spdlog::info("CEN Init: {} {} {} {} {}", num_boxes, pixel_um, box_size, box_size_int, pupil_radius_pixels);
 }
 
 PLUGIN_API(centroiding,init,char *params)
