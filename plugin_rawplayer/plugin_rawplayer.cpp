@@ -87,43 +87,7 @@ void read_file(std::string filename)
   }
   fclose(fp);
 
-#if _WIN64
-    windows_shared_memory shmem(open_or_create, SHMEM_HEADER_NAME, read_write, (size_t)SHMEM_HEADER_SIZE);
-    windows_shared_memory shmem2(open_or_create, SHMEM_BUFFER_NAME, read_write, (size_t)SHMEM_BUFFER_SIZE);
-    //windows_shared_memory shmem3(open_or_create, SHMEM_BUFFER_NAME_BOXES, read_write, (size_t)SHMEM_BUFFER_SIZE_BOXES);
-#else
-    shared_memory_object shmem(open_or_create, SHMEM_HEADER_NAME, read_write);
-    shmem.truncate((size_t)SHMEM_HEADER_SIZE);
-    shared_memory_object shmem2(open_or_create, SHMEM_BUFFER_NAME, read_write);
-    shmem2.truncate((size_t)SHMEM_BUFFER_SIZE);
-    //shared_memory_object shmem3(open_or_create, SHMEM_BUFFER_NAME_BOXES, read_write);
-    //shmem3.truncate((size_t)SHMEM_BUFFER_SIZE_BOXES);
-#endif
 
-  // Common to both OSes:
-  mapped_region shmem_region{ shmem, read_write };
-  mapped_region shmem_region2{ shmem2, read_write };
-
-// DC NEW
-struct shmem_header* pShmem = (struct shmem_header*) shmem_region.get_address();
-
-pShmem->lock = (uint8_t)1; // Everyone keep out until we are done!
-
-// Don't need to write these each time:
-pShmem->header_version = (uint8_t)NW_HEADER_VERSION;
-pShmem->dimensions[0] = (uint16_t)height;
-pShmem->dimensions[1] = (uint16_t)width;
-pShmem->dimensions[2] = (uint16_t)0;
-pShmem->dimensions[3] = (uint16_t)0;
-pShmem->datatype_code = (uint8_t)7;
-pShmem->max_frames = (uint8_t)NW_MAX_FRAMES;
-
-// For current frame:
-pShmem->current_frame = (uint8_t)nCurrRing;
-pShmem->timestamps[nCurrRing] = (uint8_t)NW_STATUS_READ;
-pShmem->timestamps[nCurrRing] = time_highres();
-
-spdlog::info("Sent. {} {} {}", height, width, (int)buffer[0]);
 
   return; 
 }

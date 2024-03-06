@@ -225,7 +225,7 @@ int AcquireImages(CameraPtr pCam) //, INodeMap& nodeMap, INodeMap& nodeMapTLDevi
                     const size_t width = pResultImage->GetWidth();
                     const size_t height = pResultImage->GetHeight();
 
-                    //cout << "Grabbed image " << imageCnt << ", width = " << width << ", height = " << height << nCurrRing << endl;
+                    cout << "Grabbed image " << imageCnt << ", width = " << width << ", height = " << height << nCurrRing << endl;
 
                     //
                     // Convert image to mono 8
@@ -292,7 +292,7 @@ int AcquireImages(CameraPtr pCam) //, INodeMap& nodeMap, INodeMap& nodeMapTLDevi
                     pShmem->lock = (uint8_t)0; // Keep out until we are done!
 
                     nCurrRing += 1;
-                    if (nCurrRing >= 32) nCurrRing = 0;
+                    if (nCurrRing >= NW_MAX_FRAMES) nCurrRing = 0;
                 }
 
                 //

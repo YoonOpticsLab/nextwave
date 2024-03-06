@@ -41,8 +41,7 @@ endif()
 # https://github.com/nlohmann/json/blob/develop/single_include/nlohmann/json.hpp
 
 #include_directories(common/include)
-include_directories(d:/code/boost_1_83_0)
-#include_directories(include/boost_1_83_0)
+include_directories(include/boost_1_83_0)
 include_directories(include)
 
 add_library(plugin_test1 SHARED plugin_test1.cpp nextwave_plugin.hpp)
@@ -54,7 +53,7 @@ add_library(plugin_test2 SHARED plugin_test2.cpp nextwave_plugin.hpp)
 # add_subdirectory(plugin_fileplayer)
 add_subdirectory(plugin_rawplayer)
 
-#add_subdirectory(plugin_flir)
+add_subdirectory(plugin_flir)
 add_subdirectory(plugin_centroiding)
 
 if (WIN32)

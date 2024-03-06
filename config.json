@@ -1,8 +1,8 @@
 {
-    "plugin_rawplayer":
+    "plugin_flir":
     {"mode": "inline",
      "type": "generator",
-     "filename": "d:/code/nextwave/test.bin"},
+     "filename": "c:/nextwave/test.bin"},
 
     "plugin_centroiding":
     {"method": "single_pass"}
