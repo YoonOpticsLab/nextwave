@@ -123,7 +123,7 @@ pShmem->current_frame = (uint8_t)nCurrRing;
 pShmem->timestamps[nCurrRing] = (uint8_t)NW_STATUS_READ;
 pShmem->timestamps[nCurrRing] = time_highres();
 
-spdlog::info("Sent. {} {} {}", height, width, (int)buffer[0]);
+//spdlog::info("Sent. {} {} {}", height, width, (int)buffer[0]);
 
   return; 
 }
@@ -134,7 +134,6 @@ DECL init(char *params)
   json jdata = json::parse(params);
   gfilename=jdata["filename"];
   
-  spdlog::info("Hi. Good");
   read_file(gfilename);
     
   return 0;

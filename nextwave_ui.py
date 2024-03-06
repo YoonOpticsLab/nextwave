@@ -29,6 +29,8 @@ MAIN_WIDTH_WIN=1800
 SPOTS_HEIGHT_WIN=768
 SPOTS_WIDTH_WIN=768
 
+NUM_ZERN_DIALOG=14 # TODO
+
 class ZernikeDialog(QDialog):
     def createFormGroupBox(self,titl):
         formGroupBox = QGroupBox(titl)
@@ -205,10 +207,12 @@ class NextWaveMainWindow(QMainWindow):
     self.updater_dm.timeout.connect(self.update_ui_dm)
 
     self.draw_refs = True
-    self.draw_boxes = False
+    self.draw_boxes = True
     self.draw_centroids = True
     self.draw_arrows = False
     self.draw_crosshair = True
+    self.iterative_first=True
+
     #self.cx=518 # TODO
     #self.cy=488 # TODO
     self.cx=501 # TODO
@@ -218,7 +222,7 @@ class NextWaveMainWindow(QMainWindow):
         {'name': 'UI', 'type': 'group', 'title':'User interface', 'children': [
             {'name': 'update_rate', 'type': 'int', 'value': 500, 'title':'Display update rate (ms)', 'limits':[50,2000]},
             {'name': 'update_rate_dm', 'type': 'int', 'value': 100, 'title':'DM Display update rate (ms)', 'limits':[50,2000]},
-            {'name': 'show_boxes', 'type': 'bool', 'value': False, 'title':'Show search boxes'}
+            {'name': 'show_boxes', 'type': 'bool', 'value': True, 'title':'Show search boxes'}
         ]},
         {'name': 'WF Camera', 'type': 'group', 'children': [
             {'name': 'Offset (%)', 'type': 'int', 'value': 0, 'limits':[0,100]},
@@ -227,6 +231,17 @@ class NextWaveMainWindow(QMainWindow):
             {'name': 'offset', 'title': 'Offset (%)', 'type': 'int', 'value': 0, 'limits':[0,100]},
             {'name': 'gain', 'title':'Gain (%)', 'type': 'int', 'value': 0, 'limits':[0,100]},
             {'name': 'exposure', 'title':'Exposure time (ms)', 'type': 'int', 'value': 0, 'limits':[1,1000]} ]}
+        ]
+
+    self.params_offline_testbed = [
+        {'name': 'system', 'type': 'group', 'title':'System Params', 'children': [
+            {'name': 'wavelength', 'type': 'int', 'value': 830, 'title':'Wavelength (nm)', 'limits':[50,2000]},
+            {'name': 'lenslet_f', 'type': 'float', 'value': 24, 'title':'Lenslet f', 'limits':[1,20]},
+            {'name': 'lenslet_pitch', 'type': 'float', 'value': 328.0, 'title':'Lenslet pitch'},
+            {'name': 'pixel_pitch', 'type': 'float', 'value': 5.5*2, 'title':'Pixel pitch (um)'},
+            {'name': 'pupil_diam', 'type': 'float', 'value': 7.168, 'title':'Pupil diameter (mm)'},
+            {'name': 'focal_length', 'type': 'float', 'value': 24, 'title':'Focal length'},
+        ]}
         ]
 
     self.params_offline = [
@@ -287,6 +302,7 @@ class NextWaveMainWindow(QMainWindow):
 
     image_pixels = self.engine.receive_image()
     self.engine.receive_centroids()
+    self.engine.compute_zernikes()
 
     qimage = QImage(image_pixels, image_pixels.shape[1], image_pixels.shape[0],
                  QImage.Format_Grayscale8)
@@ -309,15 +325,15 @@ class NextWaveMainWindow(QMainWindow):
                        self.engine.centroids_y[n]) for n in np.arange(0,self.engine.num_boxes)]
         painter.drawLines(arrows)
 
-    if self.draw_refs:
+    if self.draw_refs and self.engine.mode>1:
         pen = QPen(Qt.red, 2)
         painter.setPen(pen)
         points_ref=[QPointF(self.engine.ref_x[n],self.engine.ref_y[n]) for n in np.arange(self.engine.ref_x.shape[0])]
         painter.drawPoints(points_ref)
 
-    #if self.draw_boxes:
-    if self.get_param("UI","show_boxes"):
-        pen = QPen(Qt.blue, 1, Qt.DotLine)
+    if self.draw_boxes and self.engine.mode>1:
+    #if self.get_param("UI","show_boxes"):
+        pen = QPen(Qt.blue, 2.00, Qt.SolidLine)
         painter.setPen(pen)
         BOX_BORDER=2
         box_size_pixel = self.engine.box_size_pixel
@@ -343,8 +359,20 @@ class NextWaveMainWindow(QMainWindow):
                        self.engine.box_y[n]+box_size_pixel//2-BOX_BORDER) for n in np.arange(self.engine.box_x.shape[0])]
         painter.drawLines(boxes1)
 
+        idx_bads=np.where(np.isnan(self.engine.centroids_x))[0]
+        bad_boxes=[QLineF(self.engine.box_x[n]-box_size_pixel//2-BOX_BORDER,
+                       self.engine.box_y[n]-box_size_pixel//2+BOX_BORDER,
+                       self.engine.box_x[n]+box_size_pixel//2-BOX_BORDER,
+                       self.engine.box_y[n]+box_size_pixel//2-BOX_BORDER) for n in idx_bads]
+        painter.drawLines(bad_boxes)
+        bad_boxes=[QLineF(self.engine.box_x[n]-box_size_pixel//2-BOX_BORDER,
+                       self.engine.box_y[n]+box_size_pixel//2+BOX_BORDER,
+                       self.engine.box_x[n]+box_size_pixel//2-BOX_BORDER,
+                       self.engine.box_y[n]-box_size_pixel//2-BOX_BORDER) for n in idx_bads]
+        painter.drawLines(bad_boxes)
+
     # Centroids:
-    if self.draw_centroids:
+    if self.draw_centroids and self.engine.mode>1:
         #for ncen,cen in enumerate(self.centroids_x):
             #if np.isnan(cen):
                 #print(ncen,end=' ')
@@ -370,7 +398,7 @@ class NextWaveMainWindow(QMainWindow):
 
         painter.drawLines(xlines)
 
-    #im_buf=self.shmem_data.read(width*height)
+        #im_buf=self.shmem_data.read(width*height)
     #bytez =np.frombuffer(im_buf, dtype='uint8', count=width*height )
     #ql1=[QLineF(100,100,150,150)]
     #painter.drawLines(ql1)
@@ -380,7 +408,6 @@ class NextWaveMainWindow(QMainWindow):
     self.pixmap_label.setPixmap(pixmap)
     #print ('%0.2f'%bytez.mean(),end=' ', flush=True);
 
-    self.engine.compute_zernikes()
     s=""
     for n in np.arange(13):
         s += 'Z%2d=%+0.4f\n'%(n+1,self.engine.zernikes[n])
@@ -425,8 +452,6 @@ class NextWaveMainWindow(QMainWindow):
     MAX_BAR_ORDERS=11 # TODO: Or could be based on displayed
     order_colors=[np.array(cmap.tab10(norder))*255 for norder in np.linspace(0.0,1,MAX_BAR_ORDERS)]
 
-    zernikes_bar=self.engine.zernikes
-
     for norder,order in enumerate(orders_list):
         colrx=order_colors[norder]
         zterms1=np.arange(first_term,first_term+nterms)
@@ -451,7 +476,8 @@ class NextWaveMainWindow(QMainWindow):
             self.bar_plot.addItem(itm)
 
     if not np.isnan(maxval):
-        self.bar_plot.setYRange(minval, maxval)
+        lim = np.max( (np.abs(minval), np.abs(maxval)) )
+        self.bar_plot.setYRange(-lim, lim)
     #self.bar_plot.getAxis('left').setTickSpacing(1, 0.1)
     #self.bar_plot.getAxis('left').setTickDensity(2)
     #colr2=np.array(cmap.Spectral(0.8))*255
@@ -565,7 +591,7 @@ class NextWaveMainWindow(QMainWindow):
      l1.addWidget(self.chkFollow)
 
      btn = QPushButton("Search box shift")
-     btn.clicked.connect(lambda: self.showdialog("Shift search boxes", self.shift_search_boxes ) )
+     btn.clicked.connect(lambda: self.showdialog("Shift search boxes", self.engine.shift_search_boxes ) )
      l1.addWidget(btn)
 
      btn = QPushButton("Reference shift")
@@ -627,9 +653,27 @@ class NextWaveMainWindow(QMainWindow):
      btnFind.setStyleSheet("color : orange")
      layout1.addWidget(btnFind,2,1)
 
-     btnIt1 = QPushButton("Run Iterative")
-     btnIt1.setStyleSheet("color : orange")
-     layout1.addWidget(btnIt1,3,1)
+     self.it_start = QLineEdit("3")
+     layout1.addWidget(self.it_start,4,0)
+     self.it_step = QLineEdit("0.5")
+     layout1.addWidget(self.it_step,4,1)
+     self.it_stop = QLineEdit("6.4")
+     layout1.addWidget(self.it_stop,4,2)
+
+     btn = QPushButton("Run")
+     layout1.addWidget(btn,4,3)
+     btn.clicked.connect(lambda: self.iterative_run() )
+
+     btn = QPushButton("Step")
+     layout1.addWidget(btn,4,4)
+     btn.clicked.connect(lambda: self.iterative_step() )
+
+     #btnIt1 = QPushButton("Step It+=0.5")
+     #layout1.addWidget(btnIt1,3,1)
+     #btnIt1.clicked.connect(self.run_iterative)
+
+     self.lblIt = QLabel("3.2")
+     layout1.addWidget(self.lblIt,4,5)
 
      ### Camera Ops
      layout1 = QGridLayout(self.ops_source)
@@ -654,6 +698,10 @@ class NextWaveMainWindow(QMainWindow):
      layout1 = QGridLayout(self.ops_dm)
      self.chkLoop = QCheckBox("Close AO Loop")
      layout1.addWidget(self.chkLoop,0,0)
+
+     btn = QPushButton("Search box shift")
+     btn.clicked.connect(lambda: self.showdialog("Shift search boxes", self.engine.shift_search_boxes ) )
+     layout1.addWidget(btn, 1,0 )
 
      self.widget_mode_buttons = QWidget()
      layoutStatusButtons = QHBoxLayout(self.widget_mode_buttons)
@@ -774,6 +822,28 @@ class NextWaveMainWindow(QMainWindow):
      self.setGeometry(2,2,MAIN_WIDTH_WIN,MAIN_HEIGHT_WIN)
      self.show()
 
+ def iterative_step(self):
+     try:
+         self.engine.iterative_size
+     except:
+         self.engine.iterative_size = float(self.it_start.text())
+
+     self.engine.iterative_step(self.cx, self.cy,
+                                float(self.it_step.text()), float(self.it_start.text()), float(self.it_stop.text()) )
+
+     self.lblIt.setText('%2.2f'%self.engine.iterative_size)
+
+ def iterative_run(self):
+     self.engine.iterative_size = float(self.it_start.text())
+
+     while (self.engine.iterative_size != float(self.it_stop.text())):
+         self.iterative_step()
+         self.update_ui()
+         self.repaint()
+
+ def autoshift_search_boxes(self):
+     self.engine.autoshift_search_boxes()
+
  def set_m(self, doit):
      if doit:
          self.m=10
@@ -785,7 +855,7 @@ class NextWaveMainWindow(QMainWindow):
     self.cx += dx * m
     self.cy += dy * m
     if do_update:
-        self.engine.make_searchboxes(self.cx,self.cy)
+        self.engine.move_searchboxes(dx*m, dy*m)
 
  def butt(self, event):
     print("clicked:", event.pos() )

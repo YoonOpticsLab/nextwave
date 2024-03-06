@@ -320,7 +320,7 @@ int main(int argc, char** argv)
         pShmem1->fps[1]=(uint16_t)(1e4*ns[logidx*2]);
         pShmem1->fps[2]=(uint16_t)(1e4*ns[logidx*2+1]);
 
-		spdlog::info("{} {}", ns[logidx*2], ns[logidx*2+1]);
+        //spdlog::info("{} {}", ns[logidx*2], ns[logidx*2+1]);
 		
         if ( pShmem1->header_version==99 || pShmem1->mode==MODE_QUIT ) {
           break;
@@ -332,7 +332,7 @@ int main(int argc, char** argv)
         }
 
     } else { // don't do anything. Sleep a bit
-      std::this_thread::sleep_for(std::chrono::milliseconds(10));
+      std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
 
   }
