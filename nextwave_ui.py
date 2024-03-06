@@ -1,6 +1,6 @@
 from PyQt5.QtWidgets import (QMainWindow, QLabel, QSizePolicy, QApplication, QPushButton,
                              QHBoxLayout, QVBoxLayout, QGridLayout,
-                             QWidget, QGroupBox, QTabWidget, QTextEdit, QSpinBox,
+                             QWidget, QGroupBox, QTabWidget, QTextEdit, QSpinBox, QDoubleSpinBox, QSlider,
                              QFileDialog, QCheckBox, QDialog, QFormLayout, QDialogButtonBox, QLineEdit)
 from PyQt5.QtGui import QPixmap, QImage, QPainter, QPen, QFont
 from PyQt5.QtCore import Qt, QTimer, QEvent, QLineF, QPointF, pyqtSignal 
@@ -30,6 +30,12 @@ SPOTS_HEIGHT_WIN=768
 SPOTS_WIDTH_WIN=768
 
 NUM_ZERN_DIALOG=14 # TODO
+
+# TODO
+CAM_EXPO_MIN = 32./1000.0 # TODO
+CAM_EXPO_MAX = 100000 # TODO
+CAM_GAIN_MIN = 0
+CAM_GAIN_MAX = 9.83
 
 class ZernikeDialog(QDialog):
     def createFormGroupBox(self,titl):
@@ -677,22 +683,43 @@ class NextWaveMainWindow(QMainWindow):
 
      ### Camera Ops
      layout1 = QGridLayout(self.ops_source)
+
+     self.chkBackSubtract = QCheckBox("Subtract background")
+     layout1.addWidget(self.chkBackSubtract,0,0)
      btnBackSet = QPushButton("Set background")
-     layout1.addWidget(btnBackSet,0,0)
+     layout1.addWidget(btnBackSet,0,1)
      btnBackReset = QPushButton("Reset Background") # d
-     btnBackReset.setStyleSheet("color : orange")
-     layout1.addWidget(btnBackReset,0,1)
+     #btnBackReset.setStyleSheet("color : orange")
         # adding action to a button 
         #button.clicked.connect(self.clickme) 
-     self.exposure = QSpinBox()
-     layout1.addWidget(self.exposure,1,1)
      lbl = QLabel("Exposure time (ms)")
      layout1.addWidget(lbl,1,0)
 
-     self.gain = QSpinBox()
-     layout1.addWidget(self.gain,2,1)
-     lbl = QLabel("Gain (%)")
+     self.slider_exposure = QSlider(orientation=Qt.Horizontal)
+     self.slider_exposure.setMinimum(0) # TODO: Get from camera
+     self.slider_exposure.setMaximum(100) # TODO: Get from camera
+     layout1.addWidget(self.slider_exposure,1,1)
+     self.slider_exposure.valueChanged.connect(self.slider_exposure_changed)
+
+     self.exposure = QDoubleSpinBox()
+     layout1.addWidget(self.exposure,1,2)
+     self.exposure.setDecimals(4)
+     self.exposure.setMinimum(CAM_EXPO_MIN)
+     self.exposure.setMaximum(CAM_EXPO_MAX)
+
+     lbl = QLabel("Gain (dB)")
      layout1.addWidget(lbl,2,0)
+
+     self.slider_gain = QSlider(orientation=Qt.Horizontal)
+     self.slider_gain.setMinimum(0) # TODO: Get from camera
+     self.slider_gain.setMaximum(100) # TODO: Get from camera
+     layout1.addWidget(self.slider_gain,2,1)
+     self.slider_gain.valueChanged.connect(self.slider_gain_changed)
+
+     self.gain = QDoubleSpinBox()
+     layout1.addWidget(self.gain,2,2)
+     self.gain.setMinimum(CAM_GAIN_MIN)
+     self.gain.setMaximum(CAM_GAIN_MAX)
 
      ### DM Ops
      layout1 = QGridLayout(self.ops_dm)
@@ -821,6 +848,15 @@ class NextWaveMainWindow(QMainWindow):
 
      self.setGeometry(2,2,MAIN_WIDTH_WIN,MAIN_HEIGHT_WIN)
      self.show()
+
+ def slider_exposure_changed(self):
+     scaled = 10**( float( self.slider_exposure.value())/100.0*np.log10(CAM_EXPO_MAX/CAM_EXPO_MIN)+np.log10(CAM_EXPO_MIN))
+     self.exposure.setValue(scaled)
+
+ def slider_gain_changed(self):
+     scaled = self.slider_gain.value()/100.0*CAM_GAIN_MAX
+     self.gain.setValue(scaled)
+
 
  def iterative_step(self):
      try:
