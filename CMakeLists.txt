@@ -40,9 +40,7 @@ endif()
 # Download this to include directory:
 # https://github.com/nlohmann/json/blob/develop/single_include/nlohmann/json.hpp
 
-#include_directories(common/include)
-include_directories(d:/code/boost_1_83_0)
-#include_directories(include/boost_1_83_0)
+include_directories(include/boost_1_83_0)
 include_directories(include)
 
 add_library(plugin_test1 SHARED plugin_test1.cpp nextwave_plugin.hpp)
