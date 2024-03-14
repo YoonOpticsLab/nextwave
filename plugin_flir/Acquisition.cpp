@@ -65,6 +65,14 @@ using namespace Spinnaker::GenApi;
 using namespace Spinnaker::GenICam;
 using namespace std;
 
+#include <cstdlib>
+#include <utility>
+#include <boost/asio.hpp>
+
+using boost::asio::ip::tcp;
+
+const int max_length = 1024;
+
 // Disables or enables heartbeat on GEV cameras so debugging does not incur timeout errors
 int ConfigureGVCPHeartbeat(CameraPtr pCam, bool enable)
 {
@@ -157,6 +165,11 @@ CameraList camList;
 unsigned int numCameras;
 SystemPtr mySystem;
 ImageProcessor processor;
+
+INodeMap& nodeMapTLDevice;
+// Retrieve GenICam nodemap
+INodeMap& nodeMap;
+
 
 uint16_t nCurrRing = 0; //persist across calls
 		
@@ -563,10 +576,10 @@ DECL init(void)
 		RunSingleCamera( pCam );
 
 		// Retrieve TL device nodemap
-		INodeMap& nodeMapTLDevice = pCam->GetTLDeviceNodeMap();
+		nodeMapTLDevice = pCam->GetTLDeviceNodeMap();
 
 		// Retrieve GenICam nodemap
-		INodeMap& nodeMap = pCam->GetNodeMap();
+		nodeMap = pCam->GetNodeMap();
 
         //
         // Set acquisition mode to continuous
@@ -615,7 +628,7 @@ DECL init(void)
 
         //cout << "Acquisition mode set to continuous..." << endl;
 
-		ConfigureExposure(nodeMap, 50);
+        //ConfigureExposure(nodeMap, 50);
 
         //
         // Begin acquiring images
@@ -659,7 +672,7 @@ DECL init(void)
         // By default, if no specific color processing algorithm is set, the image
         // processor will default to NEAREST_NEIGHBOR method.
         //
-        processor.SetColorProcessing(SPINNAKER_COLOR_PROCESSING_ALGORITHM_HQ_LINEAR);
+        //processor.SetColorProcessing(SPINNAKER_COLOR_PROCESSING_ALGORITHM_HQ_LINEAR);
 	}
     catch (Spinnaker::Exception& e)
     {
@@ -667,6 +680,15 @@ DECL init(void)
         result = -1;
     }
 	
+
+    // SOCKET Things
+    boost::asio::io_context io_context;
+    server(io_context, CAMERA_SOCKET);
+    tcp::acceptor a(io_context, tcp::endpoint(tcp::v4(), port));
+    a.accept();
+
+    cout << "FLIR returning";
+
 	return 0;
 }
 
@@ -683,6 +705,10 @@ DECL process(void) {
 
         result = result | AcquireImages(pCam);
     }
+
+
+
+
 	return 0;
 }
 

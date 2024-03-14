@@ -260,9 +260,6 @@ int find_cendroids_af(unsigned char *buffer, int width, int height) {
 		af_print(gaf->atemp );
 	gaf->x_reshape = moddims( gaf->atemp, gaf->new_dims );
 
-	if (doprint*0)
-		af_print(gaf->x_reshape );
-
 	gaf->atemp = gaf->weighted_y(gaf->seq1);
 	gaf->y_reshape = af::moddims( gaf->atemp, gaf->new_dims );
 	if (doprint*0)
@@ -334,6 +331,7 @@ PLUGIN_API(centroiding,process,char *params)
 
   // TODO: is dynamically changing the size allowed?
 	struct shmem_header* pShmem = (struct shmem_header*) shmem_region1.get_address();
+
 	uint16_t nCurrRing = pShmem->current_frame;
 	uint16_t height = pShmem->dimensions[0];
 	uint16_t width = pShmem->dimensions[1];

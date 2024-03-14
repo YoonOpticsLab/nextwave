@@ -14,9 +14,9 @@ using json=nlohmann::json;
 
 // For NextWave Plugin
 #include "nextwave_plugin.hpp"
-#pragma pack(push,1)
-#include "memory_layout.h"
-#pragma pack(pop) // restore previous setting
+//#pragma pack(push,1)
+//#include "memory_layout.h"
+//#pragma pack(pop) // restore previous setting
 
 #include <chrono>
 #include <thread>
@@ -31,6 +31,8 @@ using json=nlohmann::json;
 #include <dlfcn.h>
 #endif
 
+#include "nextwave_plugin.cpp"
+
 #include "boost/interprocess/mapped_region.hpp"
 using namespace boost::interprocess;
 
@@ -42,6 +44,10 @@ unsigned int nCurrRing=0;
 unsigned int width=0; // TODO: force square images for raw files
 unsigned int height=0; // TODO: force square images for raw files
 
+#define CAMERA_SOCKET 50007
+#include "socket.cpp"
+
+// TODO: Replace with code in engine
 inline uint64_t time_highres() {
 #if _WIN64
   LARGE_INTEGER freq, now;
@@ -87,25 +93,7 @@ void read_file(std::string filename)
   }
   fclose(fp);
 
-#if _WIN64
-    windows_shared_memory shmem(open_or_create, SHMEM_HEADER_NAME, read_write, (size_t)SHMEM_HEADER_SIZE);
-    windows_shared_memory shmem2(open_or_create, SHMEM_BUFFER_NAME, read_write, (size_t)SHMEM_BUFFER_SIZE);
-    //windows_shared_memory shmem3(open_or_create, SHMEM_BUFFER_NAME_BOXES, read_write, (size_t)SHMEM_BUFFER_SIZE_BOXES);
-#else
-    shared_memory_object shmem(open_or_create, SHMEM_HEADER_NAME, read_write);
-    shmem.truncate((size_t)SHMEM_HEADER_SIZE);
-    shared_memory_object shmem2(open_or_create, SHMEM_BUFFER_NAME, read_write);
-    shmem2.truncate((size_t)SHMEM_BUFFER_SIZE);
-    //shared_memory_object shmem3(open_or_create, SHMEM_BUFFER_NAME_BOXES, read_write);
-    //shmem3.truncate((size_t)SHMEM_BUFFER_SIZE_BOXES);
-#endif
-
-  // Common to both OSes:
-  mapped_region shmem_region{ shmem, read_write };
-  mapped_region shmem_region2{ shmem2, read_write };
-
-// DC NEW
-struct shmem_header* pShmem = (struct shmem_header*) shmem_region.get_address();
+struct shmem_header* pShmem = (struct shmem_header*) shmem_region1.get_address();
 
 pShmem->lock = (uint8_t)1; // Everyone keep out until we are done!
 
@@ -128,44 +116,29 @@ pShmem->timestamps[nCurrRing] = time_highres();
   return; 
 }
 
-
 DECL init(char *params)
 {
+  plugin_access_shmem();
+
   json jdata = json::parse(params);
   gfilename=jdata["filename"];
-  
+
   read_file(gfilename);
-    
+
+  spdlog::info("raw OK");
+
   return 0;
 }
 
 DECL process(char *params)
 {
-#if _WIN64
-    windows_shared_memory shmem(open_or_create, SHMEM_HEADER_NAME, read_write, (size_t)SHMEM_HEADER_SIZE);
-    windows_shared_memory shmem2(open_or_create, SHMEM_BUFFER_NAME, read_write, (size_t)SHMEM_BUFFER_SIZE);
-    //windows_shared_memory shmem3(open_or_create, SHMEM_BUFFER_NAME_BOXES, read_write, (size_t)SHMEM_BUFFER_SIZE_BOXES);
-#else
-    shared_memory_object shmem(open_or_create, SHMEM_HEADER_NAME, read_write);
-    shmem.truncate((size_t)SHMEM_HEADER_SIZE);
-    shared_memory_object shmem2(open_or_create, SHMEM_BUFFER_NAME, read_write);
-    shmem2.truncate((size_t)SHMEM_BUFFER_SIZE);
-    //shared_memory_object shmem3(open_or_create, SHMEM_BUFFER_NAME_BOXES, read_write);
-    //shmem3.truncate((size_t)SHMEM_BUFFER_SIZE_BOXES);
-#endif
-
-  // Common to both OSes:
-  mapped_region shmem_region{ shmem, read_write };
-  mapped_region shmem_region2{ shmem2, read_write };
-  //mapped_region shmem_region3{ shmem3, read_write };
-
+  char *msg=socket_check(CAMERA_SOCKET);
+  if (msg!=NULL)
+    spdlog::info("RAW: {}",msg);
   read_file(gfilename);
 
-  //const size_t width = 2048;
-  //const size_t height = 2048;
-
 	// DC NEW
-	struct shmem_header* pShmem = (struct shmem_header*) shmem_region.get_address();
+	struct shmem_header* pShmem = (struct shmem_header*) shmem_region1.get_address();
 
 	pShmem->lock = (uint8_t)1; // Everyone keep out until we are done!
 
@@ -192,7 +165,7 @@ DECL process(char *params)
 	nCurrRing += 1;
 	if (nCurrRing >= 1) nCurrRing = 0;
 
-  //spdlog::info("Sent. {} {} {}", height, width, (int)buffer[0]);
+//spdlog::info("Sent. {} {} {}", height, width, (int)buffer[0]);
 
 	return 0;
 };
@@ -214,6 +187,3 @@ DECL get_info(char* which_info)
   std::cout <<"P1 get_info";
   return 0;
 };
-
-
-

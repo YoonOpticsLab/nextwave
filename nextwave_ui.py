@@ -17,6 +17,9 @@ import os
 import matplotlib.cm as cmap
 
 from nextwave_code import NextwaveEngineComm
+from nextwave_sockets import NextwaveSocketComm
+
+from threading import Thread
 
 WINDOWS=(os.name == 'nt')
 
@@ -270,6 +273,7 @@ class NextWaveMainWindow(QMainWindow):
 
     self.engine = NextwaveEngineComm(self)
     self.engine.init()
+    self.sockets = NextwaveSocketComm(self)
 
     box_x,box_y,box_norm_x,box_norm_y=self.engine.make_searchboxes(self.cx,self.cy)
 
@@ -747,11 +751,11 @@ class NextWaveMainWindow(QMainWindow):
 
      self.mode_btn4 = QPushButton("Stop")
      layoutStatusButtons.addWidget(self.mode_btn4)
-     self.mode_btn4.clicked.connect(lambda: self.engine.mode_stop() )
+     self.mode_btn4.clicked.connect(self.mode_stop)
 
      self.mode_btn2.setEnabled( True )
-     self.mode_btn3.setEnabled( True ) 
-     self.mode_btn4.setEnabled( False )
+     self.mode_btn3.setEnabled( True )
+     #self.mode_btn4.setEnabled( False )
 
      # Config
      layout1 = QGridLayout(pages[2])
@@ -938,11 +942,15 @@ class NextWaveMainWindow(QMainWindow):
         #elif event.key() == QtCore.Qt.Key_Enter:
 
  def mode_init(self):
-    self.engine.mode_init()
+    #self.engine.mode_init()
+    self.sockets.init()
  def mode_snap(self):
     self.engine.mode_snap()
  def mode_run(self):
     self.engine.mode_run()
+ def mode_stop(self):
+    #self.engine.mode_stop()
+    self.sockets.camera.send(b"HI")
 
  def export(self):
     default_filename="centroids.dat"
@@ -981,6 +989,7 @@ def main():
   win.app = app
   win.initUI()
   sys.exit(app.exec_())
+
 
 if __name__=="__main__":
   main()
