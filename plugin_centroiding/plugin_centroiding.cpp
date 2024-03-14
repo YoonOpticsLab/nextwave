@@ -17,12 +17,22 @@ using json=nlohmann::json;
 
 #include "nextwave_plugin.cpp"
 
+// UI Socket communication
+#include <cstring>
+#define CENTROIDING_SOCKET 50008
+#include "socket.cpp"
+
 #define VERBOSE 0
 
 // Globals
 #define BUF_SIZE (2048*2048)
 
 unsigned char buffer[BUF_SIZE];
+
+uint8_t bDoSubtractBackground=0;
+uint8_t bDoSetBackground=0;
+uint8_t bDoReplaceSubtracted=0;
+
 unsigned int nCurrRing=0;
 //LARGE_INTEGER t2, t1;
 
@@ -53,13 +63,16 @@ public:
   ~af_instance() {
   };
 
+  af::array im;
+  af::array im_background;
+  af::array im_temp;
+
   af::array im_xcoor;
   af::array im_ycoor;
 
   af::array box_x;
   af::array box_y;
 
-  af::array im;
   af::array cen_x;
   af::array cen_y;
 
@@ -89,9 +102,11 @@ int nbuffer[BUF_SIZE];
 
 uint16_t num_boxes;
 double pixel_um;
-double box_size;
+double box_size_float;
+int box_size; 
+int box_size_int; // TODO remove me
+
 double pupil_radius_pixels;
-int box_size_int;
 
 int width;
 int height;
@@ -137,8 +152,10 @@ void read_boxes(int width) {
 
   num_boxes = pShmemBoxes->num_boxes;
   pixel_um = pShmemBoxes->pixel_um;
-  box_size = pShmemBoxes->box_um/pixel_um;
-  box_size_int = (int)(box_size+0.5); // round up to nearest integer
+  box_size_float = pShmemBoxes->box_um/pixel_um;
+  box_size = (int)(box_size_float+0.5); // round up to nearest integer
+  box_size_int = box_size; // TODO:remove me
+
   pupil_radius_pixels = pShmemBoxes->pupil_radius_um/pixel_um;
 
   height = pShmem->dimensions[0];
@@ -224,10 +241,31 @@ PLUGIN_API(centroiding,init,char *params)
 // https://github.com/arrayfire/arrayfire/issues/1405;
 int find_cendroids_af(unsigned char *buffer, int width, int height) {
 
-	gaf->im=af::array(width, height, buffer).as(f32);
+	gaf->im = af::array(width, height, buffer).as(f32);
   gaf->im = af::transpose( gaf->im );
-
 	gaf->im /= 255.0;
+
+  if (bDoSetBackground) {
+    gaf->im_background = af::array(width, height, buffer).as(f32);
+    gaf->im_background= af::transpose( gaf->im_background );
+    gaf->im_background/= 255.0;
+    bDoSetBackground=0;
+  }
+
+  if (bDoSubtractBackground)
+    gaf->im -= gaf->im_background;
+
+  if (bDoReplaceSubtracted) {
+    gaf->im_temp = gaf->im.copy();
+    gaf->im_temp *= 255.0;
+    gaf->im_temp = af::transpose(gaf->im_temp).as(u8);
+
+    uint8_t *host = gaf->im_temp.host<uint8_t>();
+
+    struct shmem_boxes_header* pShmemBoxes = (struct shmem_boxes_header*) shmem_region3.get_address();
+    memcpy((void*)((char *)(shmem_region2.get_address())+height*width*nCurrRing), host,
+           height*width);
+  }
 
 #if VERBOSE
   spdlog::info("mean={} min={} max={}",(float)af::mean<float>(im),
@@ -328,6 +366,34 @@ void unlock(uint8_t *lock) {
 
 PLUGIN_API(centroiding,process,char *params)
 {
+  char *msg=socket_check(CENTROIDING_SOCKET);
+  if (msg!=NULL) {
+    //spdlog::info("CEN: {}",msg);
+    switch (msg[0]) {
+    case 'B':
+      spdlog::info("B!");
+      bDoSubtractBackground=1;
+      break;
+    case 'b':
+      spdlog::info("b!");
+      bDoSubtractBackground=0;
+      break;
+    case 'S':
+      spdlog::info("S!");
+      bDoSetBackground=1;
+      break;
+    case 'R':
+      spdlog::info("R!");
+      bDoReplaceSubtracted=1;
+      break;
+    case 'r':
+      spdlog::info("r!");
+      bDoReplaceSubtracted=0;
+      break;
+    default:
+      spdlog::error("CEN unknown");
+    }
+  }
 
   // TODO: is dynamically changing the size allowed?
 	struct shmem_header* pShmem = (struct shmem_header*) shmem_region1.get_address();

@@ -27,7 +27,7 @@ WINDOWS=(os.name == 'nt')
 QIMAGE_HEIGHT=1000
 QIMAGE_WIDTH=1000
 
-MAIN_HEIGHT_WIN=768
+MAIN_HEIGHT_WIN=1024
 MAIN_WIDTH_WIN=1800
 SPOTS_HEIGHT_WIN=768
 SPOTS_WIDTH_WIN=768
@@ -689,13 +689,16 @@ class NextWaveMainWindow(QMainWindow):
      layout1 = QGridLayout(self.ops_source)
 
      self.chkBackSubtract = QCheckBox("Subtract background")
+     self.chkBackSubtract.stateChanged.connect(self.sub_background)
      layout1.addWidget(self.chkBackSubtract,0,0)
      btnBackSet = QPushButton("Set background")
      layout1.addWidget(btnBackSet,0,1)
-     btnBackReset = QPushButton("Reset Background") # d
-     #btnBackReset.setStyleSheet("color : orange")
-        # adding action to a button 
-        #button.clicked.connect(self.clickme) 
+     btnBackSet.clicked.connect(self.set_background) 
+
+     self.chkReplaceSubtract = QCheckBox("Replace subtracted")
+     self.chkReplaceSubtract.stateChanged.connect(self.replace_background)
+     layout1.addWidget(self.chkReplaceSubtract,0,2)
+
      lbl = QLabel("Exposure time (ms)")
      layout1.addWidget(lbl,1,0)
 
@@ -856,6 +859,7 @@ class NextWaveMainWindow(QMainWindow):
  def slider_exposure_changed(self):
      scaled = 10**( float( self.slider_exposure.value())/100.0*np.log10(CAM_EXPO_MAX/CAM_EXPO_MIN)+np.log10(CAM_EXPO_MIN))
      self.exposure.setValue(scaled)
+     self.sockets.camera.send(b"E=%f\x00"%(scaled*1000) ) # Convert to usec
 
  def slider_gain_changed(self):
      scaled = self.slider_gain.value()/100.0*CAM_GAIN_MAX
@@ -889,6 +893,20 @@ class NextWaveMainWindow(QMainWindow):
          self.m=10
      else:
          self.m=1
+
+ def sub_background(self):
+    # TODO: Don't allow subtract if it hasn't been set once
+    if (self.chkBackSubtract.isChecked()):
+        self.sockets.centroiding.send(b"B\x00")
+    else:
+        self.sockets.centroiding.send(b"b\x00")
+ def set_background(self):
+    self.sockets.centroiding.send(b"S\x00")
+ def replace_background(self):
+    if (self.chkBackSubtract.isChecked()):
+        self.sockets.centroiding.send(b"R\x00")
+    else:
+        self.sockets.centroiding.send(b"r\x00")
 
  def move_center(self, dx, dy, m=1, do_update=True):
     m = self.m
@@ -950,7 +968,7 @@ class NextWaveMainWindow(QMainWindow):
     self.engine.mode_run()
  def mode_stop(self):
     #self.engine.mode_stop()
-    self.sockets.camera.send(b"HI")
+    self.sockets.camera.send(b"E=3.14")
 
  def export(self):
     default_filename="centroids.dat"

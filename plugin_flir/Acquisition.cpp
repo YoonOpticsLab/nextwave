@@ -448,7 +448,7 @@ int ConfigureExposure(INodeMap& nodeMap, double exposureTimeToSet)
             if (IsReadable(ptrExposureAutoOff))
             {
                 ptrExposureAuto->SetIntValue(ptrExposureAutoOff->GetValue());
-                cout << "Automatic exposure disabled..." << endl;
+                //cout << "Automatic exposure disabled..." << endl;
             }
         }
         else 

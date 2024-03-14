@@ -4,11 +4,13 @@
 from threading import Thread
 import socket
 import os
+import time
 
 WINDOWS=(os.name == 'nt')
 
 # Make sure these match the C++ Code
 SOCKET_CAMERA=50007
+SOCKET_CENTROIDING=50008
 
 class SocketComponent():
     def __init__(self,port):
@@ -36,6 +38,10 @@ class NextwaveSocketComm():
     def init(self):
         self.camera = SocketComponent(SOCKET_CAMERA)
         self.camera.init()
+        time.sleep(0.5)
+        self.centroiding = SocketComponent(SOCKET_CENTROIDING)
+        self.centroiding.init()
+        #os.sleep(0.5)
 
 def do_listen(fn_callback, port):
    #fn_callback=args[0]

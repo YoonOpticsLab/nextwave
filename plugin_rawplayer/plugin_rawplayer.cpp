@@ -21,6 +21,7 @@ using json=nlohmann::json;
 #include <chrono>
 #include <thread>
 
+
 #if _WIN64
 #include <windows.h>
 #include <strsafe.h>
@@ -44,6 +45,8 @@ unsigned int nCurrRing=0;
 unsigned int width=0; // TODO: force square images for raw files
 unsigned int height=0; // TODO: force square images for raw files
 
+// UI Socket communication
+#include <cstring>
 #define CAMERA_SOCKET 50007
 #include "socket.cpp"
 
@@ -133,8 +136,14 @@ DECL init(char *params)
 DECL process(char *params)
 {
   char *msg=socket_check(CAMERA_SOCKET);
-  if (msg!=NULL)
+  if (msg!=NULL) {
     spdlog::info("RAW: {}",msg);
+    if (msg[0]=='E'){
+        //if !strcmp(msg,"EXPO"){
+        double dVal = atof(msg+2);
+        spdlog::info("exposure: {}",dVal);
+      }
+  }
   read_file(gfilename);
 
 	// DC NEW
