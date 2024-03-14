@@ -167,7 +167,7 @@ class NextwaveEngineComm():
         self.box_y += dy
 
         self.update_zernike_svd() # Precompute
-        self.num_boxes= num_boxes
+        #self.num_boxes= num_boxes
 
         self.send_searchboxes(self.shmem_boxes, self.box_x, self.box_y, self.layout_boxes)
         self.update_zernike_svd()
