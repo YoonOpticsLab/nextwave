@@ -225,7 +225,7 @@ class NextWaveMainWindow(QMainWindow):
     #self.cx=518 # TODO
     #self.cy=488 # TODO
     self.cx=501 # TODO
-    self.cy=499.5 # TODO
+    self.cy=499 # TODO
 
     self.params = [
         {'name': 'UI', 'type': 'group', 'title':'User interface', 'children': [
@@ -242,18 +242,18 @@ class NextWaveMainWindow(QMainWindow):
             {'name': 'exposure', 'title':'Exposure time (ms)', 'type': 'int', 'value': 0, 'limits':[1,1000]} ]}
         ]
 
-    self.params_offline_testbed = [
+    self.params_offline = [
         {'name': 'system', 'type': 'group', 'title':'System Params', 'children': [
             {'name': 'wavelength', 'type': 'int', 'value': 830, 'title':'Wavelength (nm)', 'limits':[50,2000]},
-            {'name': 'lenslet_f', 'type': 'float', 'value': 24, 'title':'Lenslet f', 'limits':[1,20]},
+            {'name': 'lenslet_f', 'type': 'float', 'value': 24, 'title':'Lenslet f', 'limits':[1,25]},
             {'name': 'lenslet_pitch', 'type': 'float', 'value': 328.0, 'title':'Lenslet pitch'},
             {'name': 'pixel_pitch', 'type': 'float', 'value': 5.5*2, 'title':'Pixel pitch (um)'},
-            {'name': 'pupil_diam', 'type': 'float', 'value': 7.168, 'title':'Pupil diameter (mm)'},
+            {'name': 'pupil_diam', 'type': 'float', 'value': 10.0, 'title':'Pupil diameter (mm)'},
             {'name': 'focal_length', 'type': 'float', 'value': 24, 'title':'Focal length'},
         ]}
         ]
 
-    self.params_offline = [
+    self.params_offline_matlab = [
         {'name': 'system', 'type': 'group', 'title':'System Params', 'children': [
             {'name': 'wavelength', 'type': 'int', 'value': 830, 'title':'Wavelength (nm)', 'limits':[50,2000]},
             {'name': 'lenslet_f', 'type': 'float', 'value': 5.12, 'title':'Lenslet f', 'limits':[1,20]},
@@ -393,9 +393,9 @@ class NextWaveMainWindow(QMainWindow):
         painter.drawPoints(points_centroids)
 
     if self.draw_crosshair:
-        pen = QPen(Qt.red, 2)
+        pen = QPen(Qt.red, 1.5)
         painter.setPen(pen)
-        CROSSHAIR_SIZE=20
+        CROSSHAIR_SIZE=30
         xlines=[QLineF(self.cx+0, # right
                        self.cy-CROSSHAIR_SIZE,
                        self.cx-0, # right
@@ -910,8 +910,8 @@ class NextWaveMainWindow(QMainWindow):
 
  def move_center(self, dx, dy, m=1, do_update=True):
     m = self.m
-    self.cx += dx * m
-    self.cy += dy * m
+    self.cx += (dx * m)
+    self.cy += (dy * m)
     if do_update:
         self.engine.move_searchboxes(dx*m, dy*m)
 
@@ -968,7 +968,8 @@ class NextWaveMainWindow(QMainWindow):
     self.engine.mode_run()
  def mode_stop(self):
     #self.engine.mode_stop()
-    self.sockets.camera.send(b"E=3.14")
+    #self.sockets.camera.send(b"E=3.14")
+    self.engine.update_searchboxes()
 
  def export(self):
     default_filename="centroids.dat"
@@ -978,34 +979,54 @@ class NextWaveMainWindow(QMainWindow):
     if filename:
         fil = open(filename,'wt')
 
-        fil.writelines( '[image size = %dx%d]\n'%(QIMAGE_WIDTH,QIMAGE_HEIGHT)) # TODO
-        fil.writelines( '[pupil = %f,%d,%d]\n'%(PUPIL,self.cx,self.cy)) # TODO
+        fil.writelines( '[image size = %dx%d]\n'%(self.engine.width,self.engine.height))
+        fil.writelines( '[pupil = %f,%d,%d]\n'%(self.engine.pupil_diam,self.cx,self.cy))
         for nbox in np.arange( len(self.engine.ref_x)):
             # TODO: Valid or invalid
-            fil.writelines('%d\t%f\t%f\t%f\t%f\t\n'%(1,self.engine.ref_x[nbox], self.engine.ref_y[nbox], self.centroids_x[nbox], self.centroids_y[nbox] ) )
+            fil.writelines('%d\t%.12f\t%.12f\t%.12f\t%.12f\t\n'%(1,self.engine.ref_x[nbox], self.engine.ref_y[nbox],
+                                                     self.engine.centroids_x[nbox], self.engine.centroids_y[nbox] ) )
         fil.close()
 
     filename="zernikes.txt"
     fil = open(filename,'wt')
-    for val in self.zernikes:
+    for val in self.engine.zernikes:
         fil.writelines('%f\n'%val)
     fil.close()
 
-    np.save('dx',self.spot_displace_x)
-    np.save('dy',self.spot_displace_y)
-    np.save('slope',self.slope)
-    np.save('zterms',self.zterms)
-    np.save('zterms_inv',self.zterms_inv)
+    np.save('dx',self.engine.spot_displace_x)
+    np.save('dy',self.engine.spot_displace_y)
+    np.save('slope',self.engine.slope)
+    np.save('zterms',self.engine.zterms)
+    np.save('zterms_inv',self.engine.zterms_inv)
 
  def close(self):
     self.engine.send_quit() # Send stop command to engine
     self.app.exit()
+
+# rpyc servic definition
+# Doesn't let you access member variables, so seems kind of pointless
+import rpyc
+class MyService(rpyc.Service):
+    def exposed_get_nextwave(self):
+        return self.win
+def start_backdoor(win):
+    # start the rpyc server
+    from rpyc.utils.server import ThreadedServer
+    from threading import Thread
+    server = ThreadedServer(MyService, port = 12345)
+    MyService.win = win
+    t = Thread(target = server.start)
+    t.daemon = True
+    t.start()
 
 def main():
   app = QApplication(sys.argv)
   win = NextWaveMainWindow()
   win.app = app
   win.initUI()
+
+  start_backdoor(win)
+
   sys.exit(app.exec_())
 
 

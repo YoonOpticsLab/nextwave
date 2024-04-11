@@ -46,6 +46,17 @@ class ByteStream(bytearray):
     def append(self, v, fmt='B'):
         self.extend(struct.pack(fmt, v))
 
+class Params():
+    def __init__(self,ccd_pixel,pupil_diam,box_um,focal):
+        self.ccd_pixel = ccd_pixel
+        self.pupil_diam = pupil_diam
+        self.box_um = box_um
+        self.focal = focal
+        self.pupil_radius_mm=self.pupil_diam / 2.0
+        self.pupil_radius_pixel=self.pupil_radius_mm * 1000 / self.ccd_pixel
+        self.box_size_pixel=self.box_um / self.ccd_pixel
+        self.ri_ratio = self.pupil_radius_pixel / self.box_size_pixel
+
 class NextwaveEngineComm():
     """ Class to manage:
           - Structures needed for realtime engine (boxes/refs, computed centroids, etc.)
@@ -90,6 +101,9 @@ class NextwaveEngineComm():
         self.pupil_diam = self.ui.get_param("system","pupil_diam",True)
         self.box_um = self.ui.get_param("system","lenslet_pitch",True)
         self.focal = self.ui.get_param("system","focal_length",True)
+
+        # New method, not globall used yet:
+        self.params = Params(self.ccd_pixel, self.pupil_diam, self.box_um, self.focal)
 
         if overrides:
             self.pupil_diam=overrides['pupil_diam']
@@ -165,15 +179,14 @@ class NextwaveEngineComm():
     def move_searchboxes(self,dx,dy):
         self.box_x += dx
         self.box_y += dy
+        self.ref_x += dx
+        self.ref_y += dy
 
-        self.update_zernike_svd() # Precompute
-        #self.num_boxes= num_boxes
+        #print( self.ref_x[0], self.ui.cx )
 
-        self.send_searchboxes(self.shmem_boxes, self.box_x, self.box_y, self.layout_boxes)
-        self.update_zernike_svd()
+        #self.update_searchboxes()
 
-
-    def make_searchboxes(self,cx,cy,img_max=1000,aperture=1.0,pupil_radius_pixel=None):
+    def make_searchboxes(self,cx,cy,aperture=1.0,pupil_radius_pixel=None):
         """
         Like the MATLAB code to make equally spaced boxes, but doesn't use loops.
         Instead builds and filters arrays
@@ -236,21 +249,23 @@ class NextwaveEngineComm():
 
         self.box_x = valid_x
         self.box_y = valid_y
-        self.ref_x = self.box_x
-        self.ref_y = self.box_y
+        self.ref_x = valid_x.copy()
+        self.ref_y = valid_y.copy()
         self.norm_x = valid_x_norm
         self.norm_y = valid_y_norm
-        self.initial_x = valid_x
-        self.initial_y = valid_y
+        self.initial_x = valid_x.copy()
+        self.initial_y = valid_y.copy()
         self.update_zernike_svd() # Precompute
 
         self.num_boxes= num_boxes
 
+        self.update_searchboxes()
+
+        return self.ref_x,self.ref_y,self.norm_x,self.norm_y
+
+    def update_searchboxes(self):
         self.send_searchboxes(self.shmem_boxes, self.box_x, self.box_y, self.layout_boxes)
         self.update_zernike_svd()
-
-        return valid_x,valid_y,valid_x_norm,valid_y_norm
-
 
     def rcv_searchboxes(self,shmem_boxes, layout, box_x, box_y, layout_boxes):
         fields=layout[1]
