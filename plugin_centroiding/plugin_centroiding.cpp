@@ -107,6 +107,7 @@ int box_size;
 int box_size_int; // TODO remove me
 
 double pupil_radius_pixels;
+double pupil_radius_um;
 
 int width;
 int height;
@@ -152,11 +153,12 @@ void read_boxes(int width) {
 
   num_boxes = pShmemBoxes->num_boxes;
   pixel_um = pShmemBoxes->pixel_um;
+  pupil_radius_um = pShmemBoxes->pupil_radius_um;
   box_size_float = pShmemBoxes->box_um/pixel_um;
   box_size = (int)(box_size_float+0.5); // round up to nearest integer
   box_size_int = box_size; // TODO:remove me
 
-  pupil_radius_pixels = pShmemBoxes->pupil_radius_um/pixel_um;
+  pupil_radius_pixels = pupil_radius_um/pixel_um*1000.0;
 
   height = pShmem->dimensions[0];
   width = pShmem->dimensions[1];
@@ -215,7 +217,7 @@ void read_boxes(int width) {
   printf("count1: %f\n",(float)af::count<float>(gaf->seq1(af::span,1)) );
 #endif
 
-	spdlog::info("CEN Init: {} {} {} {} {}", num_boxes, pixel_um, box_size, box_size_int, pupil_radius_pixels);
+	spdlog::info("CEN Init: {} {} {} {} {} {}", num_boxes, pixel_um, box_size, box_size_int, pupil_radius_um, pupil_radius_pixels);
 }
 
 PLUGIN_API(centroiding,init,char *params)
