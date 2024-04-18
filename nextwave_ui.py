@@ -224,8 +224,10 @@ class NextWaveMainWindow(QMainWindow):
 
     #self.cx=518 # TODO
     #self.cy=488 # TODO
-    self.cx=501 # TODO
-    self.cy=499 # TODO
+    self.cx=515 # TODO
+    self.cy=518 # TODO
+    #self.cx=500 # TODO
+    #self.cy=510 # TODO
 
     self.params = [
         {'name': 'UI', 'type': 'group', 'title':'User interface', 'children': [
@@ -242,7 +244,7 @@ class NextWaveMainWindow(QMainWindow):
             {'name': 'exposure', 'title':'Exposure time (ms)', 'type': 'int', 'value': 0, 'limits':[1,1000]} ]}
         ]
 
-    self.params_offline = [
+    self.params_offline= [
         {'name': 'system', 'type': 'group', 'title':'System Params', 'children': [
             {'name': 'wavelength', 'type': 'int', 'value': 830, 'title':'Wavelength (nm)', 'limits':[50,2000]},
             {'name': 'lenslet_f', 'type': 'float', 'value': 24, 'title':'Lenslet f', 'limits':[1,25]},
@@ -253,7 +255,7 @@ class NextWaveMainWindow(QMainWindow):
         ]}
         ]
 
-    self.params_offline_matlab = [
+    self.params_offline_matlab= [
         {'name': 'system', 'type': 'group', 'title':'System Params', 'children': [
             {'name': 'wavelength', 'type': 'int', 'value': 830, 'title':'Wavelength (nm)', 'limits':[50,2000]},
             {'name': 'lenslet_f', 'type': 'float', 'value': 5.12, 'title':'Lenslet f', 'limits':[1,20]},
@@ -697,34 +699,48 @@ class NextWaveMainWindow(QMainWindow):
 
      self.chkReplaceSubtract = QCheckBox("Replace subtracted")
      self.chkReplaceSubtract.stateChanged.connect(self.replace_background)
-     layout1.addWidget(self.chkReplaceSubtract,0,2)
+     #layout1.addWidget(self.chkReplaceSubtract,0,2)
+
+     self.slider_threshold = QSlider(orientation=Qt.Horizontal)
+     self.slider_threshold.setMinimum(0) # TODO: Get from camera
+     self.slider_threshold.setMaximum(100) # TODO: Get from camera
+     layout1.addWidget(self.slider_threshold,1,1)
+     self.slider_threshold.valueChanged.connect(self.slider_threshold_changed) # TODO
+
+     self.chkApplyThreshold = QCheckBox("Apply Thresholding")
+     self.chkApplyThreshold.stateChanged.connect(self.click_apply_threshold)
+     layout1.addWidget(self.chkApplyThreshold,1,0)
+
+     self.threshold_val = QDoubleSpinBox()
+     layout1.addWidget(self.threshold_val,1,2)
+     self.threshold_val.setDecimals(2)
 
      lbl = QLabel("Exposure time (ms)")
-     layout1.addWidget(lbl,1,0)
+     layout1.addWidget(lbl,2,0)
 
      self.slider_exposure = QSlider(orientation=Qt.Horizontal)
      self.slider_exposure.setMinimum(0) # TODO: Get from camera
      self.slider_exposure.setMaximum(100) # TODO: Get from camera
-     layout1.addWidget(self.slider_exposure,1,1)
+     layout1.addWidget(self.slider_exposure,2,1)
      self.slider_exposure.valueChanged.connect(self.slider_exposure_changed)
 
      self.exposure = QDoubleSpinBox()
-     layout1.addWidget(self.exposure,1,2)
+     layout1.addWidget(self.exposure,2,2)
      self.exposure.setDecimals(4)
      self.exposure.setMinimum(CAM_EXPO_MIN)
      self.exposure.setMaximum(CAM_EXPO_MAX)
 
      lbl = QLabel("Gain (dB)")
-     layout1.addWidget(lbl,2,0)
+     layout1.addWidget(lbl,3,0)
 
      self.slider_gain = QSlider(orientation=Qt.Horizontal)
      self.slider_gain.setMinimum(0) # TODO: Get from camera
      self.slider_gain.setMaximum(100) # TODO: Get from camera
-     layout1.addWidget(self.slider_gain,2,1)
+     layout1.addWidget(self.slider_gain,3,1)
      self.slider_gain.valueChanged.connect(self.slider_gain_changed)
 
      self.gain = QDoubleSpinBox()
-     layout1.addWidget(self.gain,2,2)
+     layout1.addWidget(self.gain,3,2)
      self.gain.setMinimum(CAM_GAIN_MIN)
      self.gain.setMaximum(CAM_GAIN_MAX)
 
@@ -856,6 +872,10 @@ class NextWaveMainWindow(QMainWindow):
      self.setGeometry(2,2,MAIN_WIDTH_WIN,MAIN_HEIGHT_WIN)
      self.show()
 
+ def slider_threshold_changed(self):
+     scaled = self.slider_threshold.value()/100.0
+     self.threshold_val.setValue(scaled)
+
  def slider_exposure_changed(self):
      scaled = 10**( float( self.slider_exposure.value())/100.0*np.log10(CAM_EXPO_MAX/CAM_EXPO_MIN)+np.log10(CAM_EXPO_MIN))
      self.exposure.setValue(scaled)
@@ -864,7 +884,6 @@ class NextWaveMainWindow(QMainWindow):
  def slider_gain_changed(self):
      scaled = self.slider_gain.value()/100.0*CAM_GAIN_MAX
      self.gain.setValue(scaled)
-
 
  def iterative_step(self):
      try:
@@ -907,6 +926,12 @@ class NextWaveMainWindow(QMainWindow):
         self.sockets.centroiding.send(b"R\x00")
     else:
         self.sockets.centroiding.send(b"r\x00")
+
+ def click_apply_threshold(self):
+    if (self.chkApplyThreshold.isChecked()):
+        self.sockets.centroiding.send(b"T%f\x00"%(self.slider_threshold.value()/100.0) )
+    else:
+        self.sockets.centroiding.send(b"t\x00")
 
  def move_center(self, dx, dy, m=1, do_update=True):
     m = self.m

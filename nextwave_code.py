@@ -259,13 +259,26 @@ class NextwaveEngineComm():
 
         self.num_boxes= num_boxes
 
+
         self.update_searchboxes()
 
         return self.ref_x,self.ref_y,self.norm_x,self.norm_y
 
+    def dump_vars(self):
+        fil=open("dump_vars.py","wt")
+        for var1 in dir(self):
+            if var1[0:2]=="__":
+                continue
+            else:
+                s="%s=%s\n"%(var1,eval("self.%s"%var1) )
+                fil.writelines(s)
+        fil.close()
+
     def update_searchboxes(self):
         self.send_searchboxes(self.shmem_boxes, self.box_x, self.box_y, self.layout_boxes)
         self.update_zernike_svd()
+        print("Sent Searchboxes")
+        self.dump_vars()
 
     def rcv_searchboxes(self,shmem_boxes, layout, box_x, box_y, layout_boxes):
         fields=layout[1]
@@ -441,8 +454,7 @@ class NextwaveEngineComm():
         self.box_y = self.initial_y + delta[0:num_boxes]
         self.box_x = self.initial_x - delta[num_boxes:]
 
-        self.send_searchboxes(self.shmem_boxes, self.box_x, self.box_y, self.layout_boxes)
-        self.update_zernike_svd()
+        self.update_searchboxes()
 
     def shift_references(self,zs):
         zern_new = np.zeros(NUM_ZERNIKES)
