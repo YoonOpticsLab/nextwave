@@ -46,7 +46,7 @@ class ByteStream(bytearray):
     def append(self, v, fmt='B'):
         self.extend(struct.pack(fmt, v))
 
-class Params():
+class OpticsParams():
     def __init__(self,ccd_pixel,pupil_diam,box_um,focal):
         self.ccd_pixel = ccd_pixel
         self.pupil_diam = pupil_diam
@@ -103,7 +103,7 @@ class NextwaveEngineComm():
         self.focal = self.ui.get_param("system","focal_length",True)
 
         # New method, not globall used yet:
-        self.params = Params(self.ccd_pixel, self.pupil_diam, self.box_um, self.focal)
+        self.params = OpticsParams(self.ccd_pixel, self.pupil_diam, self.box_um, self.focal)
 
         if overrides:
             self.pupil_diam=overrides['pupil_diam']

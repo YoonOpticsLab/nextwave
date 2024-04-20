@@ -21,6 +21,8 @@ from nextwave_sockets import NextwaveSocketComm
 
 from threading import Thread
 
+import xml.etree.ElementTree as ET
+
 WINDOWS=(os.name == 'nt')
 
 # TODO: Configurable?
@@ -247,19 +249,17 @@ class NextWaveMainWindow(QMainWindow):
     self.params_offline= [
         {'name': 'system', 'type': 'group', 'title':'System Params', 'children': [
             {'name': 'wavelength', 'type': 'int', 'value': 830, 'title':'Wavelength (nm)', 'limits':[50,2000]},
-            {'name': 'lenslet_f', 'type': 'float', 'value': 24, 'title':'Lenslet f', 'limits':[1,25]},
-            {'name': 'lenslet_pitch', 'type': 'float', 'value': 328.0, 'title':'Lenslet pitch'},
+            {'name': 'lenslet_pitch', 'type': 'float', 'value': 328.0, 'title':'Lenslet pitch (um)'},
             {'name': 'pixel_pitch', 'type': 'float', 'value': 5.5*2, 'title':'Pixel pitch (um)'},
             {'name': 'pupil_diam', 'type': 'float', 'value': 10.0, 'title':'Pupil diameter (mm)'},
             {'name': 'focal_length', 'type': 'float', 'value': 24, 'title':'Focal length'},
         ]}
         ]
 
-    self.params_offline_matlab= [
+    self.params_offline_matlab = [
         {'name': 'system', 'type': 'group', 'title':'System Params', 'children': [
             {'name': 'wavelength', 'type': 'int', 'value': 830, 'title':'Wavelength (nm)', 'limits':[50,2000]},
-            {'name': 'lenslet_f', 'type': 'float', 'value': 5.12, 'title':'Lenslet f', 'limits':[1,20]},
-            {'name': 'lenslet_pitch', 'type': 'float', 'value': 256, 'title':'Lenslet pitch'},
+            {'name': 'lenslet_pitch', 'type': 'float', 'value': 256, 'title':'Lenslet pitch (um)'},
             {'name': 'pixel_pitch', 'type': 'float', 'value': 6.4, 'title':'Pixel pitch (um)'},
             {'name': 'pupil_diam', 'type': 'float', 'value': 6.4, 'title':'Pupil diameter (mm)'},
             {'name': 'focal_length', 'type': 'float', 'value': 5.904, 'title':'Focal length'},
@@ -522,6 +522,11 @@ class NextWaveMainWindow(QMainWindow):
             if node['name']==name:
                 return(node["value"])
 
+ def get_param_new(self,name):
+     print( self.params_new)
+     print( self.params_params)
+     return self.params_new["children"][name]["value"] 
+
  def get_param(self,name_parent,name,offline=False):
     if offline:
         return self.params_offline["children"][name_parent]["children"][name]["value"] 
@@ -533,6 +538,44 @@ class NextWaveMainWindow(QMainWindow):
         self.params["children"][name_parent]["children"][name]["value"] = newval
     else:
         self.params["children"][name_parent]["children"][name]["value"] = newval
+
+ def reload_config(self):
+     filename = self.edit_xml.text()
+     tree = ET.parse(filename)
+     root = tree.getroot()
+     all_params={}
+     processed=[]
+     params_params=[]
+
+     for child in root:
+        # Make groupname unique by adding ones if necessary
+        groupname=child.tag
+        if groupname in processed:
+            groupname += "1"
+        processed += [groupname]
+
+        for attrib1 in child.attrib:
+            item_name="%s_%s"%(groupname,attrib1)
+            value1=child.attrib[attrib1]
+            all_params[item_name]=value1
+
+            params1={'name':item_name, 'type':'str', 'value': str(value1), 'title':item_name}
+            params_params += [params1]
+
+     self.xml_params = all_params
+     self.params_params = params_params
+     #print(all_params)
+     self.xml_p = Parameter.create(name='xml_params', type='group', children=self.params_params)
+     self.params_new = self.xml_p.saveState()
+
+     self.xml_param_tree = ParameterTree()
+     self.xml_param_tree.setParameters(self.xml_p, showTop=False)
+     self.layout_config.addWidget(self.xml_param_tree,1,0)
+
+
+     print (self.xml_params['OPTICS_PupilDiameter'])
+     self.box_um = self.get_param_new("LENSLETS_LensletPitch")
+     print(self.box_um)
 
  def params_apply_clicked(self):
      self.par= self.p.saveState()
@@ -780,13 +823,15 @@ class NextWaveMainWindow(QMainWindow):
      layout1 = QGridLayout(pages[2])
      lbl = QLabel("XML Config: ")
      layout1.addWidget(lbl, 0,0)
-     self.edit_xml = QLineEdit("c:\\file\\ao\\test.xml")
+     self.edit_xml = QLineEdit('/home/dcoates/projects/yoon/MiniWaveConfiguration/aoCoatesTestbed.xml')
      layout1.addWidget(self.edit_xml, 0,1)
      btn = QPushButton("...")
      layout1.addWidget(btn, 0,2)
      btn = QPushButton("Edit+Reload")
      layout1.addWidget(btn, 0,3)
+     btn.clicked.connect(self.reload_config)
      #os.system('c:/tmp/sample.txt') # <- on windows this will launch the defalut editor
+     self.layout_config = layout1
 
      # Settings
      layout1 = QGridLayout(pages[1])
