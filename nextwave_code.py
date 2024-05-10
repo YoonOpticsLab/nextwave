@@ -410,12 +410,16 @@ class NextwaveEngineComm():
 
     def calc_diopters(self):
         radius = self.pupil_radius_mm
+        radius2 = radius*radius
         EPS=1e-10
         sqrt3=np.sqrt(3.0)
         sqrt6=np.sqrt(6.0)
         z3=self.zernikes[3-1]
         z4=self.zernikes[4-1]
         z5=self.zernikes[5-1]
+
+        J45 =  (-2.0 * sqrt6 / radius2) * z3
+        J180 = (-2.0 * sqrt6 / radius2) * z5
         cylinder = (4.0 * sqrt6 / (radius * radius)) * np.sqrt((z3 * z3) + (z5 * z5))
         sphere = (-4.0 * sqrt3 * z4 / (radius * radius)) - 0.5 * cylinder
 
@@ -423,14 +427,14 @@ class NextwaveEngineComm():
             thetaRad = 1.0 if (np.abs(z3) > EPS) else -1.0
             thetaRad *= float(np.pi) / 4.0
         else:
-            thetaRad = 0.5 * np.arctan(z3 / z5)
+            thetaRad = 0.5 * np.arctan(J45 / J180)
 
         axis = thetaRad * 180.0 / float(np.pi)
         if (axis < 0.0):
             axis += 180.0
 
         rms=np.sqrt( np.nansum(self.zernikes[(3-1):]**2 ) )
-        rms5p=np.sqrt( np.nansum(self.zernikes[(5-1):]**2 ) )
+        rms5p=np.sqrt( np.nansum(self.zernikes[(6-1):]**2 ) )
 
         return rms,rms5p,cylinder,sphere,axis
 
@@ -527,7 +531,9 @@ class NextwaveEngineComm():
 
     def mode_init(self):
         self.mode=1
+        self.init_params(False)
         self.mode_snap()
+        time.sleep(0.1)
 
     def mode_snap(self, reinit=True):
         self.mode=2

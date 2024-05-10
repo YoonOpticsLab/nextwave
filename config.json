@@ -2,7 +2,7 @@
     "plugin_rawplayer":
     {"mode": "inline",
      "type": "generator",
-     "filename": "/home/dcoates/projects/yoon/nextwave/ao_testbed_flat.bin"},
+     "filename": "/home/dcoates/projects/yoon/nextwave/testbed_subtracted.bin"},
 
     "plugin_centroiding":
     {"method": "single_pass"}

@@ -45,21 +45,48 @@ CAM_GAIN_MAX = 9.83
 class ZernikeDialog(QDialog):
     def createFormGroupBox(self,titl):
         formGroupBox = QGroupBox(titl)
-        layout = QFormLayout()
+        #layout = QFormLayout()
+        layout = QGridLayout()
         self.lines = [QLineEdit() for n in np.arange(NUM_ZERN_DIALOG)]
+        self.chks = [QCheckBox() for n in np.arange(NUM_ZERN_DIALOG)]
+        self.chk0 = QCheckBox()
+        self.chk0.stateChanged.connect(self.chk0_changed)
+        self.chk0.setChecked(True)
+
+        layout.addWidget(self.chk0, 0, 2)
         for nZernike,le in enumerate(self.lines):
-            layout.addRow(QLabel("Z%2d"%(nZernike)) , le)
+            #chk = QCsjeckBox()
+            #layout.addRow(QLabel("Z%2d"%(nZernike)) , le)
+            layout.addWidget(QLabel("Z%2d"%(nZernike+1)), nZernike+1, 0) #, le)
+            layout.addWidget(QLabel("%+0.2f"%self.ui_parent.engine.zernikes[nZernike]), nZernike+1, 1) #, le)
+            layout.addWidget(self.chks[nZernike], nZernike+1, 2)
+            layout.addWidget(self.lines[nZernike], nZernike+1, 3)
+
+            self.chks[nZernike].setChecked(True)
+
+        btnR = QPushButton("\u2192") # r
+        layout.addWidget(btnR,nZernike+1+1,2)
+        btnR.clicked.connect(self.use_current )
+
         formGroupBox.setLayout(layout)
         return formGroupBox
+
+    def use_current(self):
+        for nZernike,le in enumerate(self.lines):
+            le.setText("%f"%self.ui_parent.engine.zernikes[nZernike])
+
+    def chk0_changed(self):
+        print(self.ui_parent.engine.zernikes[4] )
 
     def mycall(self,callback):
         zs = [str( l1.text()) for l1 in self.lines]
         zs = [0 if z1=='' else float(z1) for z1 in zs]
         callback(zs)
 
-    def __init__(self,titl,callback):
+    def __init__(self,titl,callback,ui_parent):
         super().__init__()
         self.setWindowTitle(titl)
+        self.ui_parent = ui_parent
         buttonBox = QDialogButtonBox(QDialogButtonBox.Ok) # | QDialogButtonBox.Cancel)
         buttonBox.accepted.connect(lambda: self.mycall(callback) )
 
@@ -69,6 +96,7 @@ class ZernikeDialog(QDialog):
         mainLayout.addWidget(self.createFormGroupBox(titl))
         mainLayout.addWidget(buttonBox)
         self.setLayout(mainLayout)
+
 
 class ActuatorPlot(QLabel):
     def __init__(self, *args, **kwargs):
@@ -338,7 +366,7 @@ class NextWaveMainWindow(QMainWindow):
         painter.drawLines(arrows)
 
     if self.draw_refs and self.engine.mode>1:
-        pen = QPen(Qt.red, 2)
+        pen = QPen(Qt.green, 2.0)
         painter.setPen(pen)
         points_ref=[QPointF(self.engine.ref_x[n],self.engine.ref_y[n]) for n in np.arange(self.engine.ref_x.shape[0])]
         painter.drawPoints(points_ref)
@@ -389,7 +417,7 @@ class NextWaveMainWindow(QMainWindow):
             #if np.isnan(cen):
                 #print(ncen,end=' ')
 
-        pen = QPen(Qt.blue, 2)
+        pen = QPen(Qt.red, 2.0)
         painter.setPen(pen)
         points_centroids=[QPointF(self.engine.centroids_x[n],self.engine.centroids_y[n]) for n in np.arange(self.engine.num_boxes)]
         painter.drawPoints(points_centroids)
@@ -425,14 +453,14 @@ class NextWaveMainWindow(QMainWindow):
         s += 'Z%2d=%+0.4f\n'%(n+1,self.engine.zernikes[n])
     self.text_status.setText(s)
 
-    rms,rms5p,cylinder,sphere,axes=self.engine.calc_diopters()
+    rms,rms5p,cylinder,sphere,axis=self.engine.calc_diopters()
     left_chars=15
-    str_stats=f"{'RMS':<15}= {rms:3.4f}\n"
-    str_stats+=f"{'RMS(Z5+)':<15}= {rms5p:3.4f}\n"
-    str_stats+=f"{'Sphere(+cyl)':<15}= {sphere:3.4f}\n"
-    str_stats+=f"{'Sphere(-cyl)':<15}= {sphere:3.4f}\n"
-    str_stats+=f"{'Cylinder':<15}= {cylinder:3.4f}\n"
-    str_stats+=f"{'Axes(-cyl)':<15}= {axes:3.4f}\n"
+    str_stats=f"{'RMS':<15}= {rms:3.2f}\n"
+    str_stats+=f"{'HORMS':<15}= {rms5p:3.2f}\n"
+    str_stats+=f"{'Sphere(+cyl)':<15}= {sphere:3.2f}\n"
+    #str_stats+=f"{'Sphere(-cyl)':<15}= {sphere:3.2f}\n"
+    str_stats+=f"{'Cylinder':<15}= {cylinder:3.2f}\n"
+    str_stats+=f"{'Axis(-cyl)':<15}= {axis:3.2f}\n"
     self.text_stats.setText(str_stats)
     #self.text_stats.setHtml(str_stats) # TODO: To get other colors, can embed <font color="red">TEXT</font><br>, etc.
 
@@ -496,6 +524,8 @@ class NextWaveMainWindow(QMainWindow):
     #bg2 = pg.BarGraphItem(x=np.arange(4)+3, height=self.engine.zernikes[5:9], width=1.0, brush=colr2)
 
     #self.bar_plot.addItem(bg3)
+    self.bar_plot.showGrid(x=False,y=True)
+
  def update_ui_dm(self):
     if self.chkLoop.isChecked():
         self.actuator_plot.paintEvent_manual()
@@ -508,7 +538,7 @@ class NextWaveMainWindow(QMainWindow):
     self.shmem_boxes.flush()
 
  def showdialog(self,which,callback):
-     dlg = ZernikeDialog(which, callback)
+     dlg = ZernikeDialog(which, callback,self)
      dlg.exec()
 
  def get_paramX(self,name_parent,name,level=None):
@@ -564,18 +594,17 @@ class NextWaveMainWindow(QMainWindow):
 
      self.xml_params = all_params
      self.params_params = params_params
-     #print(all_params)
      self.xml_p = Parameter.create(name='xml_params', type='group', children=self.params_params)
      self.params_new = self.xml_p.saveState()
 
      self.xml_param_tree = ParameterTree()
      self.xml_param_tree.setParameters(self.xml_p, showTop=False)
-     self.layout_config.addWidget(self.xml_param_tree,1,0)
+     self.layout_config.addWidget(self.xml_param_tree,1,0,-1,4)
 
-
-     print (self.xml_params['OPTICS_PupilDiameter'])
+     #print (self.xml_params['OPTICS_PupilDiameter'])
      self.box_um = self.get_param_new("LENSLETS_LensletPitch")
-     print(self.box_um)
+
+     self.setWindowTitle('NextWave: %s'%(self.xml_params["SessionName_name"]))
 
  def params_apply_clicked(self):
      self.par= self.p.saveState()
@@ -638,6 +667,7 @@ class NextWaveMainWindow(QMainWindow):
      tabs = QTabWidget()
      tabs.setTabPosition(QTabWidget.North)
      tabs.setMovable(True)
+     self.tabs = tabs
 
      l1 = QHBoxLayout()
 
@@ -908,6 +938,12 @@ class NextWaveMainWindow(QMainWindow):
 
      self.setCentralWidget(self.widget_main)
 
+     # Initial Setup, startup behavior
+     self.reload_config() # Load last selected XML
+     #self.tabs.setCurrentIndex(2) # Doesn't allocate enough space: first tab is better
+     self.engine.mode_init()
+     self.sockets.init()
+
      menu=self.menuBar().addMenu('&File')
      menu.addAction('&Export Centroids & Zernikes', self.export)
      menu.addAction('e&Xit', self.close)
@@ -942,12 +978,12 @@ class NextWaveMainWindow(QMainWindow):
      self.lblIt.setText('%2.2f'%self.engine.iterative_size)
 
  def iterative_run(self):
-     self.engine.iterative_size = float(self.it_start.text())
+    self.engine.iterative_size = float(self.it_start.text())
 
-     while (self.engine.iterative_size != float(self.it_stop.text())):
-         self.iterative_step()
-         self.update_ui()
-         self.repaint()
+    while (self.engine.iterative_size != float(self.it_stop.text())):
+        self.iterative_step()
+        self.update_ui()
+        self.repaint()
 
  def autoshift_search_boxes(self):
      self.engine.autoshift_search_boxes()
@@ -987,6 +1023,8 @@ class NextWaveMainWindow(QMainWindow):
 
  def butt(self, event):
     print("clicked:", event.pos() )
+    print("scx:", event.pos().x() / SPOTS_WIDTH_WIN*992) # TODO: Image win
+    print("scy:", event.pos().y() / SPOTS_HEIGHT_WIN*992) # TODO
     return 
 
  def keyReleaseEvent(self, event):
