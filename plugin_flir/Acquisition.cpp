@@ -65,13 +65,12 @@ using namespace Spinnaker::GenApi;
 using namespace Spinnaker::GenICam;
 using namespace std;
 
-#include <cstdlib>
-#include <utility>
-#include <boost/asio.hpp>
+#include "../include/spdlog/spdlog.h"
 
-using boost::asio::ip::tcp;
-
-const int max_length = 1024;
+// UI Socket communication
+#include <cstring>
+#define CAMERA_SOCKET 50007
+#include "socket.cpp"
 
 // Disables or enables heartbeat on GEV cameras so debugging does not incur timeout errors
 int ConfigureGVCPHeartbeat(CameraPtr pCam, bool enable)
@@ -166,11 +165,6 @@ unsigned int numCameras;
 SystemPtr mySystem;
 ImageProcessor processor;
 
-INodeMap& nodeMapTLDevice;
-// Retrieve GenICam nodemap
-INodeMap& nodeMap;
-
-
 uint16_t nCurrRing = 0; //persist across calls
 		
 // This function acquires and saves 10 images from a device.
@@ -238,7 +232,7 @@ int AcquireImages(CameraPtr pCam) //, INodeMap& nodeMap, INodeMap& nodeMapTLDevi
                     const size_t width = pResultImage->GetWidth();
                     const size_t height = pResultImage->GetHeight();
 
-                    cout << "Grabbed image " << imageCnt << ", width = " << width << ", height = " << height << nCurrRing << endl;
+                    //cout << "Grabbed image " << imageCnt << ", width = " << width << ", height = " << height << nCurrRing << endl;
 
                     //
                     // Convert image to mono 8
@@ -448,7 +442,7 @@ int ConfigureExposure(INodeMap& nodeMap, double exposureTimeToSet)
             if (IsReadable(ptrExposureAutoOff))
             {
                 ptrExposureAuto->SetIntValue(ptrExposureAutoOff->GetValue());
-                //cout << "Automatic exposure disabled..." << endl;
+                cout << "Automatic exposure disabled..." << endl;
             }
         }
         else 
@@ -488,6 +482,7 @@ int ConfigureExposure(INodeMap& nodeMap, double exposureTimeToSet)
         {
             exposureTimeToSet = exposureTimeMax;
         }
+		        //CFloatPtr ptrExposureTime = nodeMap.GetNode("ExposureTime");
         ptrExposureTime->SetValue(exposureTimeToSet);
         cout << std::fixed << "Exposure time set to " << exposureTimeToSet << " us..." << endl << endl;
     }
@@ -576,10 +571,10 @@ DECL init(void)
 		RunSingleCamera( pCam );
 
 		// Retrieve TL device nodemap
-		nodeMapTLDevice = pCam->GetTLDeviceNodeMap();
+		INodeMap& nodeMapTLDevice = pCam->GetTLDeviceNodeMap();
 
 		// Retrieve GenICam nodemap
-		nodeMap = pCam->GetNodeMap();
+		INodeMap& nodeMap = pCam->GetNodeMap();
 
         //
         // Set acquisition mode to continuous
@@ -628,7 +623,7 @@ DECL init(void)
 
         //cout << "Acquisition mode set to continuous..." << endl;
 
-        //ConfigureExposure(nodeMap, 50);
+		ConfigureExposure(nodeMap, 50);
 
         //
         // Begin acquiring images
@@ -672,7 +667,7 @@ DECL init(void)
         // By default, if no specific color processing algorithm is set, the image
         // processor will default to NEAREST_NEIGHBOR method.
         //
-        //processor.SetColorProcessing(SPINNAKER_COLOR_PROCESSING_ALGORITHM_HQ_LINEAR);
+        processor.SetColorProcessing(SPINNAKER_COLOR_PROCESSING_ALGORITHM_HQ_LINEAR);
 	}
     catch (Spinnaker::Exception& e)
     {
@@ -680,15 +675,6 @@ DECL init(void)
         result = -1;
     }
 	
-
-    // SOCKET Things
-    boost::asio::io_context io_context;
-    server(io_context, CAMERA_SOCKET);
-    tcp::acceptor a(io_context, tcp::endpoint(tcp::v4(), port));
-    a.accept();
-
-    cout << "FLIR returning";
-
 	return 0;
 }
 
@@ -706,13 +692,33 @@ DECL process(void) {
         result = result | AcquireImages(pCam);
     }
 
+  pCam=camList.GetByIndex(0);
+INodeMap& nodeMapTLDevice = pCam->GetTLDeviceNodeMap();
 
+// Retrieve GenICam nodemap
+INodeMap& nodeMap = pCam->GetNodeMap();
+  
+  char *msg=socket_check(CAMERA_SOCKET);
+  if (msg!=NULL) {
+    spdlog::info("RAW: {}",msg);
+    if (msg[0]=='E'){
+        double dVal = atof(msg+2);
+        //spdlog::info("exposure: {}",dVal);
+		CFloatPtr ptrExposureTime = nodeMap.GetNode("ExposureTime");
+        ptrExposureTime->SetValue(dVal);
+      }
 
-
+    if (msg[0]=='G'){
+        double dVal = atof(msg+2);
+		CFloatPtr ptrExposureTime = nodeMap.GetNode("Gain");
+        ptrExposureTime->SetValue(dVal);
+      }	  
+	};
+  
 	return 0;
 }
 
-DECL close(void)
+DECL closex(void)
 {
 	int result=0;
 	try {
