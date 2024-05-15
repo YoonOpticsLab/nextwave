@@ -55,9 +55,9 @@ def get_array_item2(layout,shmem,which_item, which_index, endian):
     buf = shmem.read(itemsize)
     code=struct_codes[entry['type']]
     if endian:
-        data= struct.unpack( ">"+code, buf )
+        data= struct.unpack("<"+code, buf ) # Little endian
     else:
-        data= struct.unpack(code, buf )
+        data= struct.unpack("="+code, buf ) # Native endian
     return data[0]
 
 def get_header_format(filname):

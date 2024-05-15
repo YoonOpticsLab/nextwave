@@ -21,6 +21,8 @@ from nextwave_sockets import NextwaveSocketComm
 
 from threading import Thread
 
+import xml.etree.ElementTree as ET
+
 WINDOWS=(os.name == 'nt')
 
 # TODO: Configurable?
@@ -43,30 +45,72 @@ CAM_GAIN_MAX = 9.83
 class ZernikeDialog(QDialog):
     def createFormGroupBox(self,titl):
         formGroupBox = QGroupBox(titl)
-        layout = QFormLayout()
+        #layout = QFormLayout()
+        layout = QGridLayout()
         self.lines = [QLineEdit() for n in np.arange(NUM_ZERN_DIALOG)]
+        self.chks = [QCheckBox() for n in np.arange(NUM_ZERN_DIALOG)]
+        self.chk0 = QCheckBox()
+        self.chk0.stateChanged.connect(self.chk0_changed)
+        self.chk0.setChecked(True)
+
+        layout.addWidget(self.chk0, 0, 1)
         for nZernike,le in enumerate(self.lines):
-            layout.addRow(QLabel("Z%2d"%(nZernike)) , le)
+            #chk = QCsjeckBox()
+            #layout.addRow(QLabel("Z%2d"%(nZernike)) , le)
+            layout.addWidget(QLabel("Z%2d"%(nZernike+1)), nZernike+1, 0) #, le)
+            layout.addWidget(QLabel("%+0.2f"%self.ui_parent.engine.zernikes[nZernike]), nZernike+1, 1) #, le)
+            layout.addWidget(self.chks[nZernike], nZernike+1, 2)
+            layout.addWidget(self.lines[nZernike], nZernike+1, 3)
+
+            self.chks[nZernike].setChecked(True)
+
+        btnR = QPushButton("\u2192") # r
+        layout.addWidget(btnR,0,2)
+        btnR.clicked.connect(self.use_current )
+
+        btnReset = QPushButton("\u21ba") # reset spinning arrow
+        #btnReset = QPushButton("\u1f5d1") # trash can.. doesn't work
+        layout.addWidget(btnReset,0,3)
+        btnReset.clicked.connect(self.reset )
+
         formGroupBox.setLayout(layout)
         return formGroupBox
 
-    def mycall(self,callback):
+    def use_current(self):
+        for nZernike,le in enumerate(self.lines):
+            le.setText("%f"%self.ui_parent.engine.zernikes[nZernike])
+
+    def reset(self):
+        for nZernike,le in enumerate(self.lines):
+            le.setText("")
+
+    def chk0_changed(self):
+        print(self.ui_parent.engine.zernikes[4] )
+
+    def mycall(self):
         zs = [str( l1.text()) for l1 in self.lines]
         zs = [0 if z1=='' else float(z1) for z1 in zs]
-        callback(zs)
+        self.callback(zs)
 
-    def __init__(self,titl,callback):
+    def handleClick(self,button):
+        role=self.buttonBox.buttonRole(button)
+        if role==QDialogButtonBox.ApplyRole:
+            self.mycall()
+
+    def __init__(self,titl,callback,ui_parent):
         super().__init__()
         self.setWindowTitle(titl)
-        buttonBox = QDialogButtonBox(QDialogButtonBox.Ok) # | QDialogButtonBox.Cancel)
-        buttonBox.accepted.connect(lambda: self.mycall(callback) )
-
-        buttonBox.setWindowModality(Qt.ApplicationModal)
+        self.ui_parent = ui_parent
+        self.callback = callback
+        self.buttonBox = QDialogButtonBox(QDialogButtonBox.Apply) # | QDialogButtonBox.Cancel)
+        self.buttonBox.clicked.connect(self.handleClick) #lambda: self.mycall(callback) )
+        self.buttonBox.setWindowModality(Qt.ApplicationModal)
 
         mainLayout = QVBoxLayout()
         mainLayout.addWidget(self.createFormGroupBox(titl))
-        mainLayout.addWidget(buttonBox)
+        mainLayout.addWidget(self.buttonBox)
         self.setLayout(mainLayout)
+
 
 class ActuatorPlot(QLabel):
     def __init__(self, *args, **kwargs):
@@ -215,7 +259,7 @@ class NextWaveMainWindow(QMainWindow):
     self.updater_dm = QTimer(self);
     self.updater_dm.timeout.connect(self.update_ui_dm)
 
-    self.draw_refs = True
+    self.draw_refs = False
     self.draw_boxes = True
     self.draw_centroids = True
     self.draw_arrows = False
@@ -224,8 +268,10 @@ class NextWaveMainWindow(QMainWindow):
 
     #self.cx=518 # TODO
     #self.cy=488 # TODO
-    self.cx=501 # TODO
-    self.cy=499.5 # TODO
+    self.cx=515 # TODO
+    self.cy=518 # TODO
+    #self.cx=1000 # TODO
+    #self.cy=1000 # TODO
 
     self.params = [
         {'name': 'UI', 'type': 'group', 'title':'User interface', 'children': [
@@ -242,24 +288,22 @@ class NextWaveMainWindow(QMainWindow):
             {'name': 'exposure', 'title':'Exposure time (ms)', 'type': 'int', 'value': 0, 'limits':[1,1000]} ]}
         ]
 
-    self.params_offline_testbed = [
+    self.params_offline= [
         {'name': 'system', 'type': 'group', 'title':'System Params', 'children': [
             {'name': 'wavelength', 'type': 'int', 'value': 830, 'title':'Wavelength (nm)', 'limits':[50,2000]},
-            {'name': 'lenslet_f', 'type': 'float', 'value': 24, 'title':'Lenslet f', 'limits':[1,20]},
-            {'name': 'lenslet_pitch', 'type': 'float', 'value': 328.0, 'title':'Lenslet pitch'},
+            {'name': 'lenslet_pitch', 'type': 'float', 'value': 328.0, 'title':'Lenslet pitch (um)'},
             {'name': 'pixel_pitch', 'type': 'float', 'value': 5.5*2, 'title':'Pixel pitch (um)'},
-            {'name': 'pupil_diam', 'type': 'float', 'value': 7.168, 'title':'Pupil diameter (mm)'},
+            {'name': 'pupil_diam', 'type': 'float', 'value': 10.0, 'title':'Pupil diameter (mm)'},
             {'name': 'focal_length', 'type': 'float', 'value': 24, 'title':'Focal length'},
         ]}
         ]
 
-    self.params_offline = [
+    self.params_offline_matlab = [
         {'name': 'system', 'type': 'group', 'title':'System Params', 'children': [
             {'name': 'wavelength', 'type': 'int', 'value': 830, 'title':'Wavelength (nm)', 'limits':[50,2000]},
-            {'name': 'lenslet_f', 'type': 'float', 'value': 5.12, 'title':'Lenslet f', 'limits':[1,20]},
-            {'name': 'lenslet_pitch', 'type': 'float', 'value': 256, 'title':'Lenslet pitch'},
+            {'name': 'lenslet_pitch', 'type': 'float', 'value': 256*2, 'title':'Lenslet pitch (um)'},
             {'name': 'pixel_pitch', 'type': 'float', 'value': 6.4, 'title':'Pixel pitch (um)'},
-            {'name': 'pupil_diam', 'type': 'float', 'value': 6.4, 'title':'Pupil diameter (mm)'},
+            {'name': 'pupil_diam', 'type': 'float', 'value': 6.4*2, 'title':'Pupil diameter (mm)'},
             {'name': 'focal_length', 'type': 'float', 'value': 5.904, 'title':'Focal length'},
         ]}
         ]
@@ -336,7 +380,7 @@ class NextWaveMainWindow(QMainWindow):
         painter.drawLines(arrows)
 
     if self.draw_refs and self.engine.mode>1:
-        pen = QPen(Qt.red, 2)
+        pen = QPen(Qt.green, 2.0)
         painter.setPen(pen)
         points_ref=[QPointF(self.engine.ref_x[n],self.engine.ref_y[n]) for n in np.arange(self.engine.ref_x.shape[0])]
         painter.drawPoints(points_ref)
@@ -387,15 +431,15 @@ class NextWaveMainWindow(QMainWindow):
             #if np.isnan(cen):
                 #print(ncen,end=' ')
 
-        pen = QPen(Qt.blue, 2)
+        pen = QPen(Qt.red, 2.0)
         painter.setPen(pen)
         points_centroids=[QPointF(self.engine.centroids_x[n],self.engine.centroids_y[n]) for n in np.arange(self.engine.num_boxes)]
         painter.drawPoints(points_centroids)
 
     if self.draw_crosshair:
-        pen = QPen(Qt.red, 2)
+        pen = QPen(Qt.red, 1.5)
         painter.setPen(pen)
-        CROSSHAIR_SIZE=20
+        CROSSHAIR_SIZE=30
         xlines=[QLineF(self.cx+0, # right
                        self.cy-CROSSHAIR_SIZE,
                        self.cx-0, # right
@@ -423,14 +467,14 @@ class NextWaveMainWindow(QMainWindow):
         s += 'Z%2d=%+0.4f\n'%(n+1,self.engine.zernikes[n])
     self.text_status.setText(s)
 
-    rms,rms5p,cylinder,sphere,axes=self.engine.calc_diopters()
+    rms,rms5p,cylinder,sphere,axis=self.engine.calc_diopters()
     left_chars=15
-    str_stats=f"{'RMS':<15}= {rms:3.4f}\n"
-    str_stats+=f"{'RMS(Z5+)':<15}= {rms5p:3.4f}\n"
-    str_stats+=f"{'Sphere(+cyl)':<15}= {sphere:3.4f}\n"
-    str_stats+=f"{'Sphere(-cyl)':<15}= {sphere:3.4f}\n"
-    str_stats+=f"{'Cylinder':<15}= {cylinder:3.4f}\n"
-    str_stats+=f"{'Axes(-cyl)':<15}= {axes:3.4f}\n"
+    str_stats=f"{'RMS':<15}= {rms:3.2f}\n"
+    str_stats+=f"{'HORMS':<15}= {rms5p:3.2f}\n"
+    str_stats+=f"{'Sphere(+cyl)':<15}= {sphere:3.2f}\n"
+    #str_stats+=f"{'Sphere(-cyl)':<15}= {sphere:3.2f}\n"
+    str_stats+=f"{'Cylinder':<15}= {cylinder:3.2f}\n"
+    str_stats+=f"{'Axis(-cyl)':<15}= {axis:3.2f}\n"
     self.text_stats.setText(str_stats)
     #self.text_stats.setHtml(str_stats) # TODO: To get other colors, can embed <font color="red">TEXT</font><br>, etc.
 
@@ -494,6 +538,8 @@ class NextWaveMainWindow(QMainWindow):
     #bg2 = pg.BarGraphItem(x=np.arange(4)+3, height=self.engine.zernikes[5:9], width=1.0, brush=colr2)
 
     #self.bar_plot.addItem(bg3)
+    self.bar_plot.showGrid(x=False,y=True)
+
  def update_ui_dm(self):
     if self.chkLoop.isChecked():
         self.actuator_plot.paintEvent_manual()
@@ -506,7 +552,7 @@ class NextWaveMainWindow(QMainWindow):
     self.shmem_boxes.flush()
 
  def showdialog(self,which,callback):
-     dlg = ZernikeDialog(which, callback)
+     dlg = ZernikeDialog(which, callback,self)
      dlg.exec()
 
  def get_paramX(self,name_parent,name,level=None):
@@ -520,17 +566,74 @@ class NextWaveMainWindow(QMainWindow):
             if node['name']==name:
                 return(node["value"])
 
+ def get_param_new(self,name):
+     print( self.params_new)
+     print( self.params_params)
+     return self.params_new["children"][name]["value"]
+
  def get_param(self,name_parent,name,offline=False):
-    if offline:
-        return self.params_offline["children"][name_parent]["children"][name]["value"] 
-    else:
-        return self.params["children"][name_parent]["children"][name]["value"] 
+     if name=="pupil_diam":
+         try:
+             val=float( self.line_pupil_diam.text() )
+             print("From UI: %s"%val)
+             if val>0:
+                 return val
+         except:
+             pass # If UI not ready, get from the parameters
+
+     if offline:
+         return self.params_offline["children"][name_parent]["children"][name]["value"]
+     else:
+         return self.params["children"][name_parent]["children"][name]["value"]
 
  def set_param(self,name_parent,name,newval,offline=False):
     if offline:
         self.params["children"][name_parent]["children"][name]["value"] = newval
     else:
         self.params["children"][name_parent]["children"][name]["value"] = newval
+
+ def pupil_changed(self):
+     #val=float( self.line_pupil_diam.text() )
+     #print("From UI: %s"%val)
+     self.engine.init_params() # will read from UI
+     self.engine.make_searchboxes(self.cx,self.cy)
+
+ def reload_config(self):
+     filename = self.edit_xml.text()
+     tree = ET.parse(filename)
+     root = tree.getroot()
+     all_params={}
+     processed=[]
+     params_params=[]
+
+     for child in root:
+        # Make groupname unique by adding ones if necessary
+        groupname=child.tag
+        if groupname in processed:
+            groupname += "1"
+        processed += [groupname]
+
+        for attrib1 in child.attrib:
+            item_name="%s_%s"%(groupname,attrib1)
+            value1=child.attrib[attrib1]
+            all_params[item_name]=value1
+
+            params1={'name':item_name, 'type':'str', 'value': str(value1), 'title':item_name}
+            params_params += [params1]
+
+     self.xml_params = all_params
+     self.params_params = params_params
+     self.xml_p = Parameter.create(name='xml_params', type='group', children=self.params_params)
+     self.params_new = self.xml_p.saveState()
+
+     self.xml_param_tree = ParameterTree()
+     self.xml_param_tree.setParameters(self.xml_p, showTop=False)
+     self.layout_config.addWidget(self.xml_param_tree,1,0,-1,4)
+
+     #print (self.xml_params['OPTICS_PupilDiameter'])
+     self.box_um = self.get_param_new("LENSLETS_LensletPitch")
+
+     self.setWindowTitle('NextWave: %s'%(self.xml_params["SessionName_name"]))
 
  def params_apply_clicked(self):
      self.par= self.p.saveState()
@@ -593,6 +696,7 @@ class NextWaveMainWindow(QMainWindow):
      tabs = QTabWidget()
      tabs.setTabPosition(QTabWidget.North)
      tabs.setMovable(True)
+     self.tabs = tabs
 
      l1 = QHBoxLayout()
 
@@ -652,16 +756,22 @@ class NextWaveMainWindow(QMainWindow):
      layout1.addWidget(lbl,0,0)
      lbl = QLabel("Center Y:")
      layout1.addWidget(lbl,1,0)
+     lbl = QLabel("Diameter (mm):")
+     layout1.addWidget(lbl,2,0)
      self.line_centerx = QLineEdit()
-     self.line_centerx.setMaxLength(5)
+     self.line_centerx.setMaxLength(6)
      layout1.addWidget(self.line_centerx,0,1)
      self.line_centery = QLineEdit()
-     self.line_centery.setMaxLength(5)
+     self.line_centery.setMaxLength(6)
      layout1.addWidget(self.line_centery,1,1)
+     self.line_pupil_diam = QLineEdit()
+     self.line_pupil_diam.setMaxLength(6)
+     layout1.addWidget(self.line_pupil_diam,2,1)
 
-     btnFind = QPushButton("Find center")
-     btnFind.setStyleSheet("color : orange")
-     layout1.addWidget(btnFind,2,1)
+     self.line_pupil_diam.textChanged.connect(self.pupil_changed)
+     #btnFind = QPushButton("Find center")
+     #btnFind.setStyleSheet("color : orange")
+     #layout1.addWidget(btnFind,2,1)
 
      self.it_start = QLineEdit("3")
      layout1.addWidget(self.it_start,4,0)
@@ -697,34 +807,48 @@ class NextWaveMainWindow(QMainWindow):
 
      self.chkReplaceSubtract = QCheckBox("Replace subtracted")
      self.chkReplaceSubtract.stateChanged.connect(self.replace_background)
-     layout1.addWidget(self.chkReplaceSubtract,0,2)
+     #layout1.addWidget(self.chkReplaceSubtract,0,2)
+
+     self.slider_threshold = QSlider(orientation=Qt.Horizontal)
+     self.slider_threshold.setMinimum(0) # TODO: Get from camera
+     self.slider_threshold.setMaximum(100) # TODO: Get from camera
+     layout1.addWidget(self.slider_threshold,1,1)
+     self.slider_threshold.valueChanged.connect(self.slider_threshold_changed) # TODO
+
+     self.chkApplyThreshold = QCheckBox("Apply Thresholding")
+     self.chkApplyThreshold.stateChanged.connect(self.click_apply_threshold)
+     layout1.addWidget(self.chkApplyThreshold,1,0)
+
+     self.threshold_val = QDoubleSpinBox()
+     layout1.addWidget(self.threshold_val,1,2)
+     self.threshold_val.setDecimals(2)
 
      lbl = QLabel("Exposure time (ms)")
-     layout1.addWidget(lbl,1,0)
+     layout1.addWidget(lbl,2,0)
 
      self.slider_exposure = QSlider(orientation=Qt.Horizontal)
      self.slider_exposure.setMinimum(0) # TODO: Get from camera
      self.slider_exposure.setMaximum(100) # TODO: Get from camera
-     layout1.addWidget(self.slider_exposure,1,1)
+     layout1.addWidget(self.slider_exposure,2,1)
      self.slider_exposure.valueChanged.connect(self.slider_exposure_changed)
 
      self.exposure = QDoubleSpinBox()
-     layout1.addWidget(self.exposure,1,2)
+     layout1.addWidget(self.exposure,2,2)
      self.exposure.setDecimals(4)
      self.exposure.setMinimum(CAM_EXPO_MIN)
      self.exposure.setMaximum(CAM_EXPO_MAX)
 
      lbl = QLabel("Gain (dB)")
-     layout1.addWidget(lbl,2,0)
+     layout1.addWidget(lbl,3,0)
 
      self.slider_gain = QSlider(orientation=Qt.Horizontal)
      self.slider_gain.setMinimum(0) # TODO: Get from camera
      self.slider_gain.setMaximum(100) # TODO: Get from camera
-     layout1.addWidget(self.slider_gain,2,1)
+     layout1.addWidget(self.slider_gain,3,1)
      self.slider_gain.valueChanged.connect(self.slider_gain_changed)
 
      self.gain = QDoubleSpinBox()
-     layout1.addWidget(self.gain,2,2)
+     layout1.addWidget(self.gain,3,2)
      self.gain.setMinimum(CAM_GAIN_MIN)
      self.gain.setMaximum(CAM_GAIN_MAX)
 
@@ -736,6 +860,10 @@ class NextWaveMainWindow(QMainWindow):
      btn = QPushButton("Search box shift")
      btn.clicked.connect(lambda: self.showdialog("Shift search boxes", self.engine.shift_search_boxes ) )
      layout1.addWidget(btn, 1,0 )
+
+     btn = QPushButton("Reference shift")
+     btn.clicked.connect(lambda: self.showdialog("Shift references", self.engine.shift_references ) )
+     layout1.addWidget(btn, 1,1 )
 
      self.widget_mode_buttons = QWidget()
      layoutStatusButtons = QHBoxLayout(self.widget_mode_buttons)
@@ -764,13 +892,16 @@ class NextWaveMainWindow(QMainWindow):
      layout1 = QGridLayout(pages[2])
      lbl = QLabel("XML Config: ")
      layout1.addWidget(lbl, 0,0)
-     self.edit_xml = QLineEdit("c:\\file\\ao\\test.xml")
+     self.edit_xml = QLineEdit('/home/dcoates/projects/yoon/MiniWaveConfiguration/aoCoatesTestbed.xml')
+     #self.edit_xml = QLineEdit('/home/dcoates/projects/yoon/MiniWaveConfiguration/aoMatlab.xml')
      layout1.addWidget(self.edit_xml, 0,1)
      btn = QPushButton("...")
      layout1.addWidget(btn, 0,2)
      btn = QPushButton("Edit+Reload")
      layout1.addWidget(btn, 0,3)
+     btn.clicked.connect(self.reload_config)
      #os.system('c:/tmp/sample.txt') # <- on windows this will launch the defalut editor
+     self.layout_config = layout1
 
      # Settings
      layout1 = QGridLayout(pages[1])
@@ -847,6 +978,12 @@ class NextWaveMainWindow(QMainWindow):
 
      self.setCentralWidget(self.widget_main)
 
+     # Initial Setup, startup behavior
+     self.reload_config() # Load last selected XML
+     #self.tabs.setCurrentIndex(2) # Doesn't allocate enough space: first tab is better
+     self.engine.mode_init()
+     self.sockets.init()
+
      menu=self.menuBar().addMenu('&File')
      menu.addAction('&Export Centroids & Zernikes', self.export)
      menu.addAction('e&Xit', self.close)
@@ -856,6 +993,10 @@ class NextWaveMainWindow(QMainWindow):
      self.setGeometry(2,2,MAIN_WIDTH_WIN,MAIN_HEIGHT_WIN)
      self.show()
 
+ def slider_threshold_changed(self):
+     scaled = self.slider_threshold.value()/100.0
+     self.threshold_val.setValue(scaled)
+
  def slider_exposure_changed(self):
      scaled = 10**( float( self.slider_exposure.value())/100.0*np.log10(CAM_EXPO_MAX/CAM_EXPO_MIN)+np.log10(CAM_EXPO_MIN))
      self.exposure.setValue(scaled)
@@ -864,7 +1005,6 @@ class NextWaveMainWindow(QMainWindow):
  def slider_gain_changed(self):
      scaled = self.slider_gain.value()/100.0*CAM_GAIN_MAX
      self.gain.setValue(scaled)
-
 
  def iterative_step(self):
      try:
@@ -878,12 +1018,12 @@ class NextWaveMainWindow(QMainWindow):
      self.lblIt.setText('%2.2f'%self.engine.iterative_size)
 
  def iterative_run(self):
-     self.engine.iterative_size = float(self.it_start.text())
+    self.engine.iterative_size = float(self.it_start.text())
 
-     while (self.engine.iterative_size != float(self.it_stop.text())):
-         self.iterative_step()
-         self.update_ui()
-         self.repaint()
+    while (self.engine.iterative_size != float(self.it_stop.text())):
+        self.iterative_step()
+        self.update_ui()
+        self.repaint()
 
  def autoshift_search_boxes(self):
      self.engine.autoshift_search_boxes()
@@ -908,15 +1048,23 @@ class NextWaveMainWindow(QMainWindow):
     else:
         self.sockets.centroiding.send(b"r\x00")
 
+ def click_apply_threshold(self):
+    if (self.chkApplyThreshold.isChecked()):
+        self.sockets.centroiding.send(b"T%f\x00"%(self.slider_threshold.value()/100.0) )
+    else:
+        self.sockets.centroiding.send(b"t\x00")
+
  def move_center(self, dx, dy, m=1, do_update=True):
     m = self.m
-    self.cx += dx * m
-    self.cy += dy * m
+    self.cx += (dx * m)
+    self.cy += (dy * m)
     if do_update:
         self.engine.move_searchboxes(dx*m, dy*m)
 
  def butt(self, event):
     print("clicked:", event.pos() )
+    print("scx:", event.pos().x() / SPOTS_WIDTH_WIN*992) # TODO: Image win
+    print("scy:", event.pos().y() / SPOTS_HEIGHT_WIN*992) # TODO
     return 
 
  def keyReleaseEvent(self, event):
@@ -968,7 +1116,8 @@ class NextWaveMainWindow(QMainWindow):
     self.engine.mode_run()
  def mode_stop(self):
     #self.engine.mode_stop()
-    self.sockets.camera.send(b"E=3.14")
+    #self.sockets.camera.send(b"E=3.14")
+    self.engine.update_searchboxes()
 
  def export(self):
     default_filename="centroids.dat"
@@ -978,34 +1127,54 @@ class NextWaveMainWindow(QMainWindow):
     if filename:
         fil = open(filename,'wt')
 
-        fil.writelines( '[image size = %dx%d]\n'%(QIMAGE_WIDTH,QIMAGE_HEIGHT)) # TODO
-        fil.writelines( '[pupil = %f,%d,%d]\n'%(PUPIL,self.cx,self.cy)) # TODO
+        fil.writelines( '[image size = %dx%d]\n'%(self.engine.width,self.engine.height))
+        fil.writelines( '[pupil = %f,%d,%d]\n'%(self.engine.pupil_diam,self.cx,self.cy))
         for nbox in np.arange( len(self.engine.ref_x)):
             # TODO: Valid or invalid
-            fil.writelines('%d\t%f\t%f\t%f\t%f\t\n'%(1,self.engine.ref_x[nbox], self.engine.ref_y[nbox], self.centroids_x[nbox], self.centroids_y[nbox] ) )
+            fil.writelines('%d\t%.12f\t%.12f\t%.12f\t%.12f\t\n'%(1,self.engine.ref_x[nbox], self.engine.ref_y[nbox],
+                                                     self.engine.centroids_x[nbox], self.engine.centroids_y[nbox] ) )
         fil.close()
 
     filename="zernikes.txt"
     fil = open(filename,'wt')
-    for val in self.zernikes:
+    for val in self.engine.zernikes:
         fil.writelines('%f\n'%val)
     fil.close()
 
-    np.save('dx',self.spot_displace_x)
-    np.save('dy',self.spot_displace_y)
-    np.save('slope',self.slope)
-    np.save('zterms',self.zterms)
-    np.save('zterms_inv',self.zterms_inv)
+    np.save('dx',self.engine.spot_displace_x)
+    np.save('dy',self.engine.spot_displace_y)
+    np.save('slope',self.engine.slope)
+    np.save('zterms',self.engine.zterms)
+    np.save('zterms_inv',self.engine.zterms_inv)
 
  def close(self):
     self.engine.send_quit() # Send stop command to engine
     self.app.exit()
+
+# rpyc servic definition
+# Doesn't let you access member variables, so seems kind of pointless
+import rpyc
+class MyService(rpyc.Service):
+    def exposed_get_nextwave(self):
+        return self.win
+def start_backdoor(win):
+    # start the rpyc server
+    from rpyc.utils.server import ThreadedServer
+    from threading import Thread
+    server = ThreadedServer(MyService, port = 12345)
+    MyService.win = win
+    t = Thread(target = server.start)
+    t.daemon = True
+    t.start()
 
 def main():
   app = QApplication(sys.argv)
   win = NextWaveMainWindow()
   win.app = app
   win.initUI()
+
+  start_backdoor(win)
+
   sys.exit(app.exec_())
 
 

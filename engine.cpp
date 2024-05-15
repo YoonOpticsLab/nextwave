@@ -276,7 +276,7 @@ int main(int argc, char** argv)
 
   while ( pShmem1->mode==MODE_OFF || pShmemBoxes->num_boxes==0 ) {
     // sleep until the UI is ready to tell us to do something
-    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
   }
 
   // TODO: Call proper init here somehow?

@@ -144,6 +144,7 @@ DECL process(char *params)
         spdlog::info("exposure: {}",dVal);
       }
   }
+
   read_file(gfilename);
 
 	// DC NEW

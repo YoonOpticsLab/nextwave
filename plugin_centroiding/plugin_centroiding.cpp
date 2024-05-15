@@ -32,6 +32,9 @@ unsigned char buffer[BUF_SIZE];
 uint8_t bDoSubtractBackground=0;
 uint8_t bDoSetBackground=0;
 uint8_t bDoReplaceSubtracted=0;
+uint8_t bDoThreshold=0;
+
+float fThreshold=0.0;
 
 unsigned int nCurrRing=0;
 //LARGE_INTEGER t2, t1;
@@ -104,9 +107,9 @@ uint16_t num_boxes;
 double pixel_um;
 double box_size_float;
 int box_size; 
-int box_size_int; // TODO remove me
 
 double pupil_radius_pixels;
+double pupil_radius_um;
 
 int width;
 int height;
@@ -152,17 +155,17 @@ void read_boxes(int width) {
 
   num_boxes = pShmemBoxes->num_boxes;
   pixel_um = pShmemBoxes->pixel_um;
+  pupil_radius_um = pShmemBoxes->pupil_radius_um;
   box_size_float = pShmemBoxes->box_um/pixel_um;
   box_size = (int)(box_size_float+0.5); // round up to nearest integer
-  box_size_int = box_size; // TODO:remove me
 
-  pupil_radius_pixels = pShmemBoxes->pupil_radius_um/pixel_um;
+  pupil_radius_pixels = pupil_radius_um/pixel_um*1000.0;
 
   height = pShmem->dimensions[0];
   width = pShmem->dimensions[1];
 
   // TODO: this will be slow to do every time.
-  init_buffers(width, height, box_size_int, num_boxes);
+  init_buffers(width, height, box_size, num_boxes);
 
 #if 0
   // DEbugging
@@ -184,21 +187,28 @@ void read_boxes(int width) {
 	spdlog::info("RB1");
 #endif //0
 
+	spdlog::info("init: {}x{} {} {} {}\n", width,height,pShmemBoxes->box_x[0], pShmemBoxes->box_y[0]-box_size,
+               pShmemBoxes->box_y[0]-box_size/2);
+
   // Each box will have a set of 1D indices into its members
 	for (int ibox=0; ibox<num_boxes; ibox++) {
+    spdlog::info("{} {}\n", pShmemBoxes->box_x[ibox], pShmemBoxes->box_y[ibox]);
 		int ibox_x = pShmemBoxes->box_x[ibox]-box_size/2;
 		int ibox_y = pShmemBoxes->box_y[ibox]-box_size/2;
 		for (int y=0; y<box_size; y++)  {
 			for (int x=0; x<box_size; x++) {
         int posx=ibox_x+x;
         int posy=ibox_y+y;
-        int idx_1d=posx*width+posy; // Column major // TODO: height
-        //if (ibox==0) {
-        //printf("%d ",idx_1d);
-        //}
-				//nbuffer[ibox*box_size_int*box_size_int+x*box_size_int+y]=idx_1d;
-				nbuffer[ibox*box_size_int*box_size_int+x*box_size_int+y]=idx_1d;
+        int idx_1d=posx*height+posy; // Column major // TODO: height
+        if (ibox==0 && y<0) { // change y< for debugging
+          printf("%d %d %d\n",idx_1d, posx, posy);
+        }
+				//nbuffer[ibox*box_size*box_size+x*box_size+y]=idx_1d;
+				nbuffer[ibox*box_size*box_size+x*box_size+y]=idx_1d;
 			}
+      if (ibox==0 && y<0) { // change y< for debugging
+        printf("\n");
+      }
 		}
 	}
 	gaf->seq1 = af::array(box_size*box_size, num_boxes, nbuffer );
@@ -215,7 +225,8 @@ void read_boxes(int width) {
   printf("count1: %f\n",(float)af::count<float>(gaf->seq1(af::span,1)) );
 #endif
 
-	spdlog::info("CEN Init: {} {} {} {} {}", num_boxes, pixel_um, box_size, box_size_int, pupil_radius_pixels);
+	spdlog::info("CEN Init: {} {} {} {} {} {} {}x{}", num_boxes, pixel_um, box_size, box_size_float,
+               pupil_radius_um, pupil_radius_pixels, width, height);
 }
 
 PLUGIN_API(centroiding,init,char *params)
@@ -242,8 +253,14 @@ PLUGIN_API(centroiding,init,char *params)
 int find_cendroids_af(unsigned char *buffer, int width, int height) {
 
 	gaf->im = af::array(width, height, buffer).as(f32);
-  gaf->im = af::transpose( gaf->im );
+	gaf->im = af::transpose( gaf->im );
 	gaf->im /= 255.0;
+
+  // Threshold pixels: (could also binarize )
+  if (bDoThreshold) {
+    //float thresholdValue = 60.0/255.0;
+    gaf->im = (gaf->im < fThreshold) * 0 + gaf->im * (gaf->im >= fThreshold);
+  }
 
   if (bDoSetBackground) {
     gaf->im_background = af::array(width, height, buffer).as(f32);
@@ -283,8 +300,8 @@ int find_cendroids_af(unsigned char *buffer, int width, int height) {
 #endif
 
 	int doprint=0;
-	if (doprint)
-		af_print(gaf->seq1);
+	if (0)
+    af_print(gaf->seq1(af::span,0));
 
 	gaf->atemp = gaf->weighted_x(gaf->seq1); //weighted_x or im_xcoor for debug
 
@@ -296,7 +313,7 @@ int find_cendroids_af(unsigned char *buffer, int width, int height) {
 
 	if (doprint*0)
 		af_print(gaf->atemp );
-	gaf->x_reshape = moddims( gaf->atemp, gaf->new_dims );
+	gaf->x_reshape = af::moddims( gaf->atemp, gaf->new_dims );
 
 	gaf->atemp = gaf->weighted_y(gaf->seq1);
 	gaf->y_reshape = af::moddims( gaf->atemp, gaf->new_dims );
@@ -305,6 +322,8 @@ int find_cendroids_af(unsigned char *buffer, int width, int height) {
 
 	gaf->im2 = gaf->im(gaf->seq1);
 	gaf->im2 = af::moddims( gaf->im2, gaf->new_dims );
+
+  //af_print(af::transpose(gaf->im2(af::span,0) ));
 
 	gaf->sums = af::sum( gaf->im2, 0);
 	gaf->sums_x = af::sum( gaf->x_reshape, 0) / gaf->sums;
@@ -378,10 +397,12 @@ PLUGIN_API(centroiding,process,char *params)
       spdlog::info("b!");
       bDoSubtractBackground=0;
       break;
+
     case 'S':
       spdlog::info("S!");
       bDoSetBackground=1;
       break;
+
     case 'R':
       spdlog::info("R!");
       bDoReplaceSubtracted=1;
@@ -390,6 +411,17 @@ PLUGIN_API(centroiding,process,char *params)
       spdlog::info("r!");
       bDoReplaceSubtracted=0;
       break;
+
+    case 'T':
+      fThreshold=atof(msg+1);
+      spdlog::info("T={}",fThreshold);
+      bDoThreshold=1;
+      break;
+    case 't':
+      spdlog::info("t!");
+      bDoThreshold=0;
+      break;
+
     default:
       spdlog::error("CEN unknown");
     }

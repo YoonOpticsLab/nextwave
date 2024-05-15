@@ -46,6 +46,17 @@ class ByteStream(bytearray):
     def append(self, v, fmt='B'):
         self.extend(struct.pack(fmt, v))
 
+class OpticsParams():
+    def __init__(self,ccd_pixel,pupil_diam,box_um,focal):
+        self.ccd_pixel = ccd_pixel
+        self.pupil_diam = pupil_diam
+        self.pupil_radius_mm=self.pupil_diam / 2.0
+        self.pupil_radius_pixel=self.pupil_radius_mm * 1000 / self.ccd_pixel
+        self.box_um = box_um
+        self.focal = focal
+        self.box_size_pixel=self.box_um / self.ccd_pixel
+        self.ri_ratio = self.pupil_radius_pixel / self.box_size_pixel
+
 class NextwaveEngineComm():
     """ Class to manage:
           - Structures needed for realtime engine (boxes/refs, computed centroids, etc.)
@@ -90,6 +101,9 @@ class NextwaveEngineComm():
         self.pupil_diam = self.ui.get_param("system","pupil_diam",True)
         self.box_um = self.ui.get_param("system","lenslet_pitch",True)
         self.focal = self.ui.get_param("system","focal_length",True)
+
+        # New method, not globall used yet:
+        self.params = OpticsParams(self.ccd_pixel, self.pupil_diam, self.box_um, self.focal)
 
         if overrides:
             self.pupil_diam=overrides['pupil_diam']
@@ -165,15 +179,14 @@ class NextwaveEngineComm():
     def move_searchboxes(self,dx,dy):
         self.box_x += dx
         self.box_y += dy
+        self.ref_x += dx
+        self.ref_y += dy
 
-        self.update_zernike_svd() # Precompute
-        #self.num_boxes= num_boxes
+        #print( self.ref_x[0], self.ui.cx )
 
-        self.send_searchboxes(self.shmem_boxes, self.box_x, self.box_y, self.layout_boxes)
-        self.update_zernike_svd()
+        #self.update_searchboxes()
 
-
-    def make_searchboxes(self,cx,cy,img_max=1000,aperture=1.0,pupil_radius_pixel=None):
+    def make_searchboxes(self,cx,cy,aperture=1.0,pupil_radius_pixel=None):
         """
         Like the MATLAB code to make equally spaced boxes, but doesn't use loops.
         Instead builds and filters arrays
@@ -236,21 +249,35 @@ class NextwaveEngineComm():
 
         self.box_x = valid_x
         self.box_y = valid_y
-        self.ref_x = self.box_x
-        self.ref_y = self.box_y
+        self.ref_x = valid_x.copy()
+        self.ref_y = valid_y.copy()
         self.norm_x = valid_x_norm
         self.norm_y = valid_y_norm
-        self.initial_x = valid_x
-        self.initial_y = valid_y
+        self.initial_x = valid_x.copy()
+        self.initial_y = valid_y.copy()
         self.update_zernike_svd() # Precompute
 
         self.num_boxes= num_boxes
 
+        self.update_searchboxes()
+
+        return self.ref_x,self.ref_y,self.norm_x,self.norm_y
+
+    def dump_vars(self):
+        fil=open("dump_vars.py","wt")
+        for var1 in dir(self):
+            if var1[0:2]=="__":
+                continue
+            else:
+                s="%s=%s\n"%(var1,eval("self.%s"%var1) )
+                fil.writelines(s)
+        fil.close()
+
+    def update_searchboxes(self):
         self.send_searchboxes(self.shmem_boxes, self.box_x, self.box_y, self.layout_boxes)
         self.update_zernike_svd()
-
-        return valid_x,valid_y,valid_x_norm,valid_y_norm
-
+        print("Sent Searchboxes")
+        self.dump_vars()
 
     def rcv_searchboxes(self,shmem_boxes, layout, box_x, box_y, layout_boxes):
         fields=layout[1]
@@ -382,12 +409,16 @@ class NextwaveEngineComm():
 
     def calc_diopters(self):
         radius = self.pupil_radius_mm
+        radius2 = radius*radius
         EPS=1e-10
         sqrt3=np.sqrt(3.0)
         sqrt6=np.sqrt(6.0)
         z3=self.zernikes[3-1]
         z4=self.zernikes[4-1]
         z5=self.zernikes[5-1]
+
+        J45 =  (-2.0 * sqrt6 / radius2) * z3
+        J180 = (-2.0 * sqrt6 / radius2) * z5
         cylinder = (4.0 * sqrt6 / (radius * radius)) * np.sqrt((z3 * z3) + (z5 * z5))
         sphere = (-4.0 * sqrt3 * z4 / (radius * radius)) - 0.5 * cylinder
 
@@ -395,50 +426,40 @@ class NextwaveEngineComm():
             thetaRad = 1.0 if (np.abs(z3) > EPS) else -1.0
             thetaRad *= float(np.pi) / 4.0
         else:
-            thetaRad = 0.5 * np.arctan(z3 / z5)
+            thetaRad = 0.5 * np.arctan(J45 / J180)
 
         axis = thetaRad * 180.0 / float(np.pi)
         if (axis < 0.0):
             axis += 180.0
 
         rms=np.sqrt( np.nansum(self.zernikes[(3-1):]**2 ) )
-        rms5p=np.sqrt( np.nansum(self.zernikes[(5-1):]**2 ) )
+        rms5p=np.sqrt( np.nansum(self.zernikes[(6-1):]**2 ) )
 
         return rms,rms5p,cylinder,sphere,axis
 
-    def shift_search_boxes(self,zs,from_dialog=True):
+    def get_deltas(self,zs,from_dialog):
         zern_new = np.zeros(NUM_ZERNIKES)
-        #zern_new[self.OSA_to_CVS_map[0:NUM_ZERN_DIALOG]]=zs 
-
-        #zern_new[0:NUM_ZERN_DIALOG]=zs 
-        # TODO: What about term 0?
         if from_dialog:
-            zern_new[self.CVS_to_OSA_map[0:NUM_ZERN_DIALOG-1]-START_ZC-1 ] = zs[1:]
+            zern_new[self.CVS_to_OSA_map[0:NUM_ZERN_DIALOG]-START_ZC-1 ] = zs
         else:
             zern_new[self.CVS_to_OSA_map[0:zs.shape[0]]-START_ZC-1 ] = zs
+        delta=np.matmul(self.zterms_inv,zern_new)
+        num_boxes = self.box_x.shape[0]
+        delta_y = delta[0:num_boxes]/(self.ccd_pixel/self.focal)
+        delta_x = -delta[num_boxes:]/(self.ccd_pixel/self.focal)
+        return delta_x,delta_y
 
-        print( zern_new[0:9])
-        #print(self.OSA_to_CVS_map)
-        #print( zern_new[0:9] )
 
-        delta=np.matmul(self.zterms_inv,zern_new) 
-        num_boxes = self.box_x.shape[0] 
-        self.box_y = self.initial_y + delta[0:num_boxes]
-        self.box_x = self.initial_x - delta[num_boxes:]
+    def shift_search_boxes(self,zs,from_dialog=True):
+        dx,dy = self.get_deltas(zs,from_dialog)
+        self.box_x = self.initial_x + dx
+        self.box_y = self.initial_y + dy
+        self.update_searchboxes()
 
-        self.send_searchboxes(self.shmem_boxes, self.box_x, self.box_y, self.layout_boxes)
-        self.update_zernike_svd()
-
-    def shift_references(self,zs):
-        zern_new = np.zeros(NUM_ZERNIKES)
-        #zern_new[self.OSA_to_CVS_map[0:NUM_ZERN_DIALOG]]=zs 
-        #zern_new[0:NUM_ZERN_DIALOG]=zs 
-        # TODO: What about term 0?
-        zern_new[self.CVS_to_OSA_map[0:NUM_ZERN_DIALOG-1]-START_ZC-1 ] = zs[1:]
-        delta=np.matmul(self.zterms_inv,zern_new) 
-        num_boxes = self.box_x.shape[0] 
-        self.engine.ref_y = (self.initial_y + delta[0:num_boxes])
-        self.engine.ref_x =  self.initial_x - delta[num_boxes:]
+    def shift_references(self,zs,from_dialog=True):
+        dx,dy = self.get_deltas(zs,from_dialog)
+        self.ref_x = self.initial_x + dx
+        self.ref_y = self.initial_y + dy
         self.update_zernike_svd()
 
     def receive_image(self):
@@ -500,7 +521,9 @@ class NextwaveEngineComm():
 
     def mode_init(self):
         self.mode=1
+        self.init_params(False)
         self.mode_snap()
+        time.sleep(0.1)
 
     def mode_snap(self, reinit=True):
         self.mode=2
