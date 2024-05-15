@@ -437,38 +437,29 @@ class NextwaveEngineComm():
 
         return rms,rms5p,cylinder,sphere,axis
 
-    def shift_search_boxes(self,zs,from_dialog=True):
+    def get_deltas(self,zs,from_dialog):
         zern_new = np.zeros(NUM_ZERNIKES)
-        #zern_new[self.OSA_to_CVS_map[0:NUM_ZERN_DIALOG]]=zs 
-
-        #zern_new[0:NUM_ZERN_DIALOG]=zs 
-        # TODO: What about term 0?
         if from_dialog:
             zern_new[self.CVS_to_OSA_map[0:NUM_ZERN_DIALOG]-START_ZC-1 ] = zs
         else:
             zern_new[self.CVS_to_OSA_map[0:zs.shape[0]]-START_ZC-1 ] = zs
+        delta=np.matmul(self.zterms_inv,zern_new)
+        num_boxes = self.box_x.shape[0]
+        delta_y = delta[0:num_boxes]/(self.ccd_pixel/self.focal)
+        delta_x = -delta[num_boxes:]/(self.ccd_pixel/self.focal)
+        return delta_x,delta_y
 
-        print( zern_new[0:9])
-        #print(self.OSA_to_CVS_map)
-        #print( zern_new[0:9] )
 
-        delta=np.matmul(self.zterms_inv,zern_new) 
-        num_boxes = self.box_x.shape[0] 
-        self.box_y = self.initial_y + delta[0:num_boxes]/(self.ccd_pixel/self.focal)
-        self.box_x = self.initial_x - delta[num_boxes:]/(self.ccd_pixel/self.focal)
-
+    def shift_search_boxes(self,zs,from_dialog=True):
+        dx,dy = self.get_deltas(zs,from_dialog)
+        self.box_x = self.initial_x + dx
+        self.box_y = self.initial_y + dy
         self.update_searchboxes()
 
-    def shift_references(self,zs):
-        zern_new = np.zeros(NUM_ZERNIKES)
-        #zern_new[self.OSA_to_CVS_map[0:NUM_ZERN_DIALOG]]=zs 
-        #zern_new[0:NUM_ZERN_DIALOG]=zs 
-        # TODO: What about term 0?
-        zern_new[self.CVS_to_OSA_map[0:NUM_ZERN_DIALOG-1]-START_ZC-1 ] = zs[1:]
-        delta=np.matmul(self.zterms_inv,zern_new) 
-        num_boxes = self.box_x.shape[0] 
-        self.engine.ref_y = (self.initial_y + delta[0:num_boxes])
-        self.engine.ref_x =  self.initial_x - delta[num_boxes:]
+    def shift_references(self,zs,from_dialog=True):
+        dx,dy = self.get_deltas(zs,from_dialog)
+        self.ref_x = self.initial_x + dx
+        self.ref_y = self.initial_y + dy
         self.update_zernike_svd()
 
     def receive_image(self):

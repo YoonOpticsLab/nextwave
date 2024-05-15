@@ -53,7 +53,7 @@ class ZernikeDialog(QDialog):
         self.chk0.stateChanged.connect(self.chk0_changed)
         self.chk0.setChecked(True)
 
-        layout.addWidget(self.chk0, 0, 2)
+        layout.addWidget(self.chk0, 0, 1)
         for nZernike,le in enumerate(self.lines):
             #chk = QCsjeckBox()
             #layout.addRow(QLabel("Z%2d"%(nZernike)) , le)
@@ -65,12 +65,12 @@ class ZernikeDialog(QDialog):
             self.chks[nZernike].setChecked(True)
 
         btnR = QPushButton("\u2192") # r
-        layout.addWidget(btnR,nZernike+1+1,2)
+        layout.addWidget(btnR,0,2)
         btnR.clicked.connect(self.use_current )
 
         btnReset = QPushButton("\u21ba") # reset spinning arrow
         #btnReset = QPushButton("\u1f5d1") # trash can.. doesn't work
-        layout.addWidget(btnReset,nZernike+1+1,3)
+        layout.addWidget(btnReset,0,3)
         btnReset.clicked.connect(self.reset )
 
         formGroupBox.setLayout(layout)
@@ -860,6 +860,10 @@ class NextWaveMainWindow(QMainWindow):
      btn = QPushButton("Search box shift")
      btn.clicked.connect(lambda: self.showdialog("Shift search boxes", self.engine.shift_search_boxes ) )
      layout1.addWidget(btn, 1,0 )
+
+     btn = QPushButton("Reference shift")
+     btn.clicked.connect(lambda: self.showdialog("Shift references", self.engine.shift_references ) )
+     layout1.addWidget(btn, 1,1 )
 
      self.widget_mode_buttons = QWidget()
      layoutStatusButtons = QHBoxLayout(self.widget_mode_buttons)
