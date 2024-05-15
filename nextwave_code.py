@@ -50,10 +50,10 @@ class OpticsParams():
     def __init__(self,ccd_pixel,pupil_diam,box_um,focal):
         self.ccd_pixel = ccd_pixel
         self.pupil_diam = pupil_diam
-        self.box_um = box_um
-        self.focal = focal
         self.pupil_radius_mm=self.pupil_diam / 2.0
         self.pupil_radius_pixel=self.pupil_radius_mm * 1000 / self.ccd_pixel
+        self.box_um = box_um
+        self.focal = focal
         self.box_size_pixel=self.box_um / self.ccd_pixel
         self.ri_ratio = self.pupil_radius_pixel / self.box_size_pixel
 

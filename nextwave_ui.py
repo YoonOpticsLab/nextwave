@@ -569,19 +569,34 @@ class NextWaveMainWindow(QMainWindow):
  def get_param_new(self,name):
      print( self.params_new)
      print( self.params_params)
-     return self.params_new["children"][name]["value"] 
+     return self.params_new["children"][name]["value"]
 
  def get_param(self,name_parent,name,offline=False):
-    if offline:
-        return self.params_offline["children"][name_parent]["children"][name]["value"] 
-    else:
-        return self.params["children"][name_parent]["children"][name]["value"] 
+     if name=="pupil_diam":
+         try:
+             val=float( self.line_pupil_diam.text() )
+             print("From UI: %s"%val)
+             if val>0:
+                 return val
+         except:
+             pass # If UI not ready, get from the parameters
+
+     if offline:
+         return self.params_offline["children"][name_parent]["children"][name]["value"]
+     else:
+         return self.params["children"][name_parent]["children"][name]["value"]
 
  def set_param(self,name_parent,name,newval,offline=False):
     if offline:
         self.params["children"][name_parent]["children"][name]["value"] = newval
     else:
         self.params["children"][name_parent]["children"][name]["value"] = newval
+
+ def pupil_changed(self):
+     #val=float( self.line_pupil_diam.text() )
+     #print("From UI: %s"%val)
+     self.engine.init_params() # will read from UI
+     self.engine.make_searchboxes(self.cx,self.cy)
 
  def reload_config(self):
      filename = self.edit_xml.text()
@@ -741,16 +756,22 @@ class NextWaveMainWindow(QMainWindow):
      layout1.addWidget(lbl,0,0)
      lbl = QLabel("Center Y:")
      layout1.addWidget(lbl,1,0)
+     lbl = QLabel("Diameter (mm):")
+     layout1.addWidget(lbl,2,0)
      self.line_centerx = QLineEdit()
-     self.line_centerx.setMaxLength(5)
+     self.line_centerx.setMaxLength(6)
      layout1.addWidget(self.line_centerx,0,1)
      self.line_centery = QLineEdit()
-     self.line_centery.setMaxLength(5)
+     self.line_centery.setMaxLength(6)
      layout1.addWidget(self.line_centery,1,1)
+     self.line_pupil_diam = QLineEdit()
+     self.line_pupil_diam.setMaxLength(6)
+     layout1.addWidget(self.line_pupil_diam,2,1)
 
-     btnFind = QPushButton("Find center")
-     btnFind.setStyleSheet("color : orange")
-     layout1.addWidget(btnFind,2,1)
+     self.line_pupil_diam.textChanged.connect(self.pupil_changed)
+     #btnFind = QPushButton("Find center")
+     #btnFind.setStyleSheet("color : orange")
+     #layout1.addWidget(btnFind,2,1)
 
      self.it_start = QLineEdit("3")
      layout1.addWidget(self.it_start,4,0)
