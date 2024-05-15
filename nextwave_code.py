@@ -259,7 +259,6 @@ class NextwaveEngineComm():
 
         self.num_boxes= num_boxes
 
-
         self.update_searchboxes()
 
         return self.ref_x,self.ref_y,self.norm_x,self.norm_y
@@ -445,7 +444,7 @@ class NextwaveEngineComm():
         #zern_new[0:NUM_ZERN_DIALOG]=zs 
         # TODO: What about term 0?
         if from_dialog:
-            zern_new[self.CVS_to_OSA_map[0:NUM_ZERN_DIALOG-1]-START_ZC-1 ] = zs[1:]
+            zern_new[self.CVS_to_OSA_map[0:NUM_ZERN_DIALOG]-START_ZC-1 ] = zs
         else:
             zern_new[self.CVS_to_OSA_map[0:zs.shape[0]]-START_ZC-1 ] = zs
 
@@ -455,8 +454,8 @@ class NextwaveEngineComm():
 
         delta=np.matmul(self.zterms_inv,zern_new) 
         num_boxes = self.box_x.shape[0] 
-        self.box_y = self.initial_y + delta[0:num_boxes]
-        self.box_x = self.initial_x - delta[num_boxes:]
+        self.box_y = self.initial_y + delta[0:num_boxes]/(self.ccd_pixel/self.focal)
+        self.box_x = self.initial_x - delta[num_boxes:]/(self.ccd_pixel/self.focal)
 
         self.update_searchboxes()
 

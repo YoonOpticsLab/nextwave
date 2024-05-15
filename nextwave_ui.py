@@ -68,6 +68,11 @@ class ZernikeDialog(QDialog):
         layout.addWidget(btnR,nZernike+1+1,2)
         btnR.clicked.connect(self.use_current )
 
+        btnReset = QPushButton("\u21ba") # reset spinning arrow
+        #btnReset = QPushButton("\u1f5d1") # trash can.. doesn't work
+        layout.addWidget(btnReset,nZernike+1+1,3)
+        btnReset.clicked.connect(self.reset )
+
         formGroupBox.setLayout(layout)
         return formGroupBox
 
@@ -75,26 +80,35 @@ class ZernikeDialog(QDialog):
         for nZernike,le in enumerate(self.lines):
             le.setText("%f"%self.ui_parent.engine.zernikes[nZernike])
 
+    def reset(self):
+        for nZernike,le in enumerate(self.lines):
+            le.setText("")
+
     def chk0_changed(self):
         print(self.ui_parent.engine.zernikes[4] )
 
-    def mycall(self,callback):
+    def mycall(self):
         zs = [str( l1.text()) for l1 in self.lines]
         zs = [0 if z1=='' else float(z1) for z1 in zs]
-        callback(zs)
+        self.callback(zs)
+
+    def handleClick(self,button):
+        role=self.buttonBox.buttonRole(button)
+        if role==QDialogButtonBox.ApplyRole:
+            self.mycall()
 
     def __init__(self,titl,callback,ui_parent):
         super().__init__()
         self.setWindowTitle(titl)
         self.ui_parent = ui_parent
-        buttonBox = QDialogButtonBox(QDialogButtonBox.Ok) # | QDialogButtonBox.Cancel)
-        buttonBox.accepted.connect(lambda: self.mycall(callback) )
-
-        buttonBox.setWindowModality(Qt.ApplicationModal)
+        self.callback = callback
+        self.buttonBox = QDialogButtonBox(QDialogButtonBox.Apply) # | QDialogButtonBox.Cancel)
+        self.buttonBox.clicked.connect(self.handleClick) #lambda: self.mycall(callback) )
+        self.buttonBox.setWindowModality(Qt.ApplicationModal)
 
         mainLayout = QVBoxLayout()
         mainLayout.addWidget(self.createFormGroupBox(titl))
-        mainLayout.addWidget(buttonBox)
+        mainLayout.addWidget(self.buttonBox)
         self.setLayout(mainLayout)
 
 
@@ -245,7 +259,7 @@ class NextWaveMainWindow(QMainWindow):
     self.updater_dm = QTimer(self);
     self.updater_dm.timeout.connect(self.update_ui_dm)
 
-    self.draw_refs = True
+    self.draw_refs = False
     self.draw_boxes = True
     self.draw_centroids = True
     self.draw_arrows = False
@@ -256,8 +270,8 @@ class NextWaveMainWindow(QMainWindow):
     #self.cy=488 # TODO
     self.cx=515 # TODO
     self.cy=518 # TODO
-    #self.cx=500 # TODO
-    #self.cy=510 # TODO
+    #self.cx=1000 # TODO
+    #self.cy=1000 # TODO
 
     self.params = [
         {'name': 'UI', 'type': 'group', 'title':'User interface', 'children': [
@@ -287,9 +301,9 @@ class NextWaveMainWindow(QMainWindow):
     self.params_offline_matlab = [
         {'name': 'system', 'type': 'group', 'title':'System Params', 'children': [
             {'name': 'wavelength', 'type': 'int', 'value': 830, 'title':'Wavelength (nm)', 'limits':[50,2000]},
-            {'name': 'lenslet_pitch', 'type': 'float', 'value': 256, 'title':'Lenslet pitch (um)'},
+            {'name': 'lenslet_pitch', 'type': 'float', 'value': 256*2, 'title':'Lenslet pitch (um)'},
             {'name': 'pixel_pitch', 'type': 'float', 'value': 6.4, 'title':'Pixel pitch (um)'},
-            {'name': 'pupil_diam', 'type': 'float', 'value': 6.4, 'title':'Pupil diameter (mm)'},
+            {'name': 'pupil_diam', 'type': 'float', 'value': 6.4*2, 'title':'Pupil diameter (mm)'},
             {'name': 'focal_length', 'type': 'float', 'value': 5.904, 'title':'Focal length'},
         ]}
         ]
@@ -854,6 +868,7 @@ class NextWaveMainWindow(QMainWindow):
      lbl = QLabel("XML Config: ")
      layout1.addWidget(lbl, 0,0)
      self.edit_xml = QLineEdit('/home/dcoates/projects/yoon/MiniWaveConfiguration/aoCoatesTestbed.xml')
+     #self.edit_xml = QLineEdit('/home/dcoates/projects/yoon/MiniWaveConfiguration/aoMatlab.xml')
      layout1.addWidget(self.edit_xml, 0,1)
      btn = QPushButton("...")
      layout1.addWidget(btn, 0,2)
