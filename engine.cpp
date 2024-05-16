@@ -301,13 +301,25 @@ int main(int argc, char** argv)
 
       int modnum=0;
       int logidx=pipeline_count % REP_LOG;
+      typedef boost::chrono::duration<long long, boost::micro> microseconds_type;
+      typedef boost::chrono::seconds mst;
+
       for (struct module it: listModules) {
-          high_resolution_clock::time_point time_before = high_resolution_clock::now();
+        //high_resolution_clock::time_point time_before = high_resolution_clock::now();
+          boost::chrono::system_clock::time_point time_before = boost::chrono::system_clock::now();
 
           int result=(*it.fp_do_process)((const char*)str_message);
-          high_resolution_clock::time_point time_after = high_resolution_clock::now();
-          duration<double> time_span = duration_cast<duration<double>>(time_after-time_before);
-          ns[logidx*2+modnum] = time_span.count();
+
+          boost::chrono::system_clock::time_point time_after = boost::chrono::system_clock::now();
+          //high_resolution_clock::time_point time_after = high_resolution_clock::now();
+          // duration<long int> time_span = duration_cast<duration<long int>>(time_after-time_before);
+          // microseconds_type micros = std::chrono::duration_cast< std::chrono::microseconds >( time_span );
+
+          // mst micros = boost::chrono::duration_cast< mst >( time_after - time_before );
+          boost::chrono::duration<double>micros = time_after - time_before;
+
+          //ns[logidx*2+modnum] = time_span.count();
+          ns[logidx*2+modnum] = (double)micros.count(); //seconds.count();
 
           modnum++;
         }
@@ -341,7 +353,7 @@ int main(int argc, char** argv)
     {
       int modnum=0;
       for (struct module it: listModules) {
-        spdlog::info(ns[pipeline_count*2+modnum]);
+        spdlog::info(ns[pipeline_count*2+modnum]*1e6);
         modnum++;
       }
     }
