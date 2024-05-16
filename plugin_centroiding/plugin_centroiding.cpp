@@ -192,7 +192,7 @@ void read_boxes(int width) {
 
   // Each box will have a set of 1D indices into its members
 	for (int ibox=0; ibox<num_boxes; ibox++) {
-    spdlog::info("{} {}\n", pShmemBoxes->box_x[ibox], pShmemBoxes->box_y[ibox]);
+    //spdlog::info("{} {}\n", pShmemBoxes->box_x[ibox], pShmemBoxes->box_y[ibox]);
 		int ibox_x = pShmemBoxes->box_x[ibox]-box_size/2;
 		int ibox_y = pShmemBoxes->box_y[ibox]-box_size/2;
 		for (int y=0; y<box_size; y++)  {

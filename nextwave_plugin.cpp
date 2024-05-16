@@ -27,7 +27,7 @@ shared_memory_object shmem3;
 mapped_region shmem_region1;
 mapped_region shmem_region2;
 mapped_region shmem_region3;
-#endif 
+#endif
 
 // For NextWave Plugin
 #pragma pack(push,1)

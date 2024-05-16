@@ -482,7 +482,7 @@ class NextWaveMainWindow(QMainWindow):
     self.line_centery.setText(str(self.cy) )
 
     if self.engine.fps0!=0:
-        s="Running. %3.2f FPS (%04.1f ms: %04.1f+%04.1f ms)"%(1000/self.engine.fps0,self.engine.fps0, self.engine.fps1, self.engine.fps2)
+        s="Running. %3.2f FPS (%04.1f ms: %04.1f+%04.1f ms)"%(1000/self.engine.fps0,self.engine.fps0, float(self.engine.fps1), float(self.engine.fps2)  )
     else:
         s="0 fps"
         

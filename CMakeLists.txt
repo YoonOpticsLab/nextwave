@@ -52,7 +52,7 @@ add_library(plugin_test2 SHARED plugin_test2.cpp nextwave_plugin.hpp)
 # add_subdirectory(plugin_fileplayer)
 add_subdirectory(plugin_rawplayer)
 
-add_subdirectory(plugin_flir)
+# add_subdirectory(plugin_flir)
 add_subdirectory(plugin_centroiding)
 
 if (WIN32)

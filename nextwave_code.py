@@ -465,9 +465,9 @@ class NextwaveEngineComm():
     def receive_image(self):
         # TODO: Wait until it's safe (unlocked)
 
-        self.fps0=extract_memory.get_array_item2(self.layout,self.shmem_hdr,'fps',0, True)/10.0
-        self.fps1=extract_memory.get_array_item2(self.layout,self.shmem_hdr,'fps',1, True)/10.0
-        self.fps2=extract_memory.get_array_item2(self.layout,self.shmem_hdr,'fps',2, True)/10.0
+        self.fps0=extract_memory.get_array_item2(self.layout,self.shmem_hdr,'fps',0, False)/10.0
+        self.fps1=extract_memory.get_array_item2(self.layout,self.shmem_hdr,'fps',1, False)/10.0
+        self.fps2=extract_memory.get_array_item2(self.layout,self.shmem_hdr,'fps',2, False)/10.0
 
         self.height=extract_memory.get_array_item2(self.layout,self.shmem_hdr,'dimensions',0, False)
         self.width=extract_memory.get_array_item2(self.layout,self.shmem_hdr,'dimensions',1, False)

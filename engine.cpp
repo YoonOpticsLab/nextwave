@@ -115,8 +115,10 @@ PLUGIN_API(centroiding,init,char *params);
 #include <json.hpp>
 using json=nlohmann::ordered_json;
 
+#pragma pack(push,1)
 #include "memory_layout.h"
 #include "layout_boxes.h"
+#pragma pack(pop) // restore previous setting
 
 struct module {
 public:
@@ -283,7 +285,7 @@ int main(int argc, char** argv)
 
   double times_total[10]; //TODO
 
-  double ns[REP_LOG*4]; //TODO
+  uint16_t ns[REP_LOG*4]; //TODO
 	char str_message[64] = " "; //.c_str();
   long int pipeline_count=0;
 
@@ -304,6 +306,9 @@ int main(int argc, char** argv)
       typedef boost::chrono::duration<long long, boost::micro> microseconds_type;
       typedef boost::chrono::seconds mst;
 
+      uint16_t times_local[4]; //TODO
+      double dur;
+      uint16_t ms_times_10;
       for (struct module it: listModules) {
         //high_resolution_clock::time_point time_before = high_resolution_clock::now();
           boost::chrono::system_clock::time_point time_before = boost::chrono::system_clock::now();
@@ -318,8 +323,13 @@ int main(int argc, char** argv)
           // mst micros = boost::chrono::duration_cast< mst >( time_after - time_before );
           boost::chrono::duration<double>micros = time_after - time_before;
 
-          //ns[logidx*2+modnum] = time_span.count();
-          ns[logidx*2+modnum] = (double)micros.count(); //seconds.count();
+          dur = micros.count();
+          ms_times_10 = (uint16_t)(dur*1e4);
+
+          ns[logidx*2+modnum] = ms_times_10;
+          times_local[modnum] = ms_times_10;
+
+          //std::cout << logidx << " took " << dur << " seconds " << ms_times_10 << " OR " << ns[logidx*2+modnum] << " OR " << times_local[modnum] << "\n";
 
           modnum++;
         }
@@ -329,13 +339,16 @@ int main(int argc, char** argv)
         times_total[pipeline_count % 10] = time_span.count();
         pShmem1->fps[0]=(uint16_t)(1e4*time_span.count()); // TODO: take mean
 
-        pShmem1->fps[1]=(uint16_t)(1e4*ns[logidx*2]);
-        pShmem1->fps[2]=(uint16_t)(1e4*ns[logidx*2+1]);
+        pShmem1->fps[1]=times_local[0];
+        pShmem1->fps[2]=times_local[1];
+        //pShmem1->fps[1]=(uint16_t)(ns[logidx*2]);
+        //pShmem1->fps[2]=(uint16_t)(ns[logidx*2+1]);
 
-        //spdlog::info("{} {}", ns[logidx*2], ns[logidx*2+1]);
         if ( pShmem1->header_version==99 || pShmem1->mode==MODE_QUIT ) {
           break;
         };
+
+        pipeline_count += 1;
 
       // Ran once, unarm
         if (pShmem1->mode == MODE_RUNONCE_CENTROIDING ) {
@@ -353,7 +366,7 @@ int main(int argc, char** argv)
     {
       int modnum=0;
       for (struct module it: listModules) {
-        spdlog::info(ns[pipeline_count*2+modnum]*1e6);
+        spdlog::info("{}",ns[pipeline_count*2+modnum]);
         modnum++;
       }
     }
