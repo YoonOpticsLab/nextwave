@@ -104,13 +104,67 @@ class ZernikeDialog(QDialog):
         self.callback = callback
         self.buttonBox = QDialogButtonBox(QDialogButtonBox.Apply) # | QDialogButtonBox.Cancel)
         self.buttonBox.clicked.connect(self.handleClick) #lambda: self.mycall(callback) )
-        self.buttonBox.setWindowModality(Qt.ApplicationModal)
+        #self.buttonBox.setWindowModality(Qt.ApplicationModal) # By default is modeless... better?
 
         mainLayout = QVBoxLayout()
         mainLayout.addWidget(self.createFormGroupBox(titl))
         mainLayout.addWidget(self.buttonBox)
         self.setLayout(mainLayout)
 
+class BoxInfoDialog(QDialog):
+    def __init__(self,titl,ui_parent):
+        super().__init__()
+        #self.setWindowFlag(Qt.FramelessWindowHint) 
+        #self.setWindowTitle(titl)
+        self.ui_parent = ui_parent
+
+        layout=QVBoxLayout()
+        self.text_num = QLabel()
+        layout.addWidget(self.text_num)
+        self.text_box = QLabel()
+        layout.addWidget(self.text_box)
+        self.text_centroid = QLabel()
+        layout.addWidget(self.text_centroid)
+        image_label = QLabel()
+        image_label.setAlignment(Qt.AlignCenter)
+        self.image_label=image_label
+        layout.addWidget(self.image_label)
+        self.setLayout(layout)
+
+    def set_box(self,n,box_pix, cent_x, cent_y, centroid_x_abs,centroid_y_abs, box_x,box_y):
+        self.text_num.setText("n=%d"%n)
+        self.text_box.setText("box center=(%0.3f,%0.3f)"%(box_x,box_y))
+        self.text_centroid.setText("centroid=(%0.3f,%0.3f)"%(centroid_x_abs,centroid_y_abs))
+        self.box_pix=box_pix
+        self.cent_x=cent_x
+        self.cent_y=cent_y
+
+    def update_ui(self):
+        self.image_label.resize(200,200)
+        bits=self.box_pix
+        totalBytes = bits.nbytes
+        width=bits.shape[1]
+        height=bits.shape[0]
+        bytesPerLine = int(totalBytes/height)
+        qimage = QImage(bits,width,height,bytesPerLine,QImage.Format_Indexed8)
+
+        pixmap = QPixmap(qimage)
+
+        painter = QPainter()
+        painter.begin(pixmap)
+
+        pen = QPen(Qt.red, 1.0)
+        painter.setPen(pen)
+        points=[QPointF(self.cent_x,self.cent_y)]
+        painter.drawPoints(points)
+
+        painter.end()
+
+        pixmap = pixmap.scaled(200,200,Qt.KeepAspectRatio)
+        self.image_label.setPixmap(pixmap)
+
+    def closeEvent(self, event):
+        self.ui_parent.box_info = -1
 
 class ActuatorPlot(QLabel):
     def __init__(self, *args, **kwargs):
@@ -265,6 +319,8 @@ class NextWaveMainWindow(QMainWindow):
     self.draw_arrows = False
     self.draw_crosshair = True
     self.iterative_first=True
+    self.box_info = -1
+    self.box_info_dlg = BoxInfoDialog("HiINFO",self)
 
     #self.cx=518 # TODO
     #self.cy=488 # TODO
@@ -349,7 +405,6 @@ class NextWaveMainWindow(QMainWindow):
 
     return
 
-
  def update_ui(self):
 
     # if self.engine.status ==  // TODO: see if engine is running before proceed
@@ -425,6 +480,33 @@ class NextWaveMainWindow(QMainWindow):
                        self.engine.box_y[n]-box_size_pixel//2-BOX_BORDER) for n in idx_bads]
         painter.drawLines(bad_boxes)
 
+    if self.box_info>0:
+        pen = QPen(Qt.yellow, 2.00, Qt.SolidLine)
+        painter.setPen(pen)
+        BOX_BORDER=2
+        box_size_pixel = self.engine.box_size_pixel
+        # Do as a list comprehension just for consistency with above
+        boxes1=[QLineF(self.engine.box_x[n]-box_size_pixel//2+BOX_BORDER, # top
+                       self.engine.box_y[n]-box_size_pixel//2+BOX_BORDER,
+                       self.engine.box_x[n]+box_size_pixel//2-BOX_BORDER,
+                       self.engine.box_y[n]-box_size_pixel//2+BOX_BORDER) for n in [self.box_info] ]
+        painter.drawLines(boxes1)
+        boxes1=[QLineF(self.engine.box_x[n]-box_size_pixel//2+BOX_BORDER,
+                       self.engine.box_y[n]+box_size_pixel//2-BOX_BORDER,
+                       self.engine.box_x[n]+box_size_pixel//2-BOX_BORDER,
+                       self.engine.box_y[n]+box_size_pixel//2-BOX_BORDER) for n in [self.box_info] ]
+        painter.drawLines(boxes1)
+        boxes1=[QLineF(self.engine.box_x[n]-box_size_pixel//2+BOX_BORDER,
+                       self.engine.box_y[n]-box_size_pixel//2+BOX_BORDER,
+                       self.engine.box_x[n]-box_size_pixel//2+BOX_BORDER,
+                       self.engine.box_y[n]+box_size_pixel//2-BOX_BORDER) for n in [self.box_info] ]
+        painter.drawLines(boxes1)
+        boxes1=[QLineF(self.engine.box_x[n]+box_size_pixel//2-BOX_BORDER,
+                       self.engine.box_y[n]-box_size_pixel//2+BOX_BORDER,
+                       self.engine.box_x[n]+box_size_pixel//2-BOX_BORDER,
+                       self.engine.box_y[n]+box_size_pixel//2-BOX_BORDER) for n in [self.box_info] ]
+        painter.drawLines(boxes1)
+
     # Centroids:
     if self.draw_centroids and self.engine.mode>1:
         #for ncen,cen in enumerate(self.centroids_x):
@@ -458,6 +540,25 @@ class NextWaveMainWindow(QMainWindow):
     #painter.drawLines(ql1)
     painter.end()
 
+    if self.box_info>0:
+        if not self.box_info_dlg.isVisible():
+            self.box_info_dlg.setGeometry(self.box_info_loc[0]+40,self.box_info_loc[1],100,100)
+            self.box_info_dlg.show()
+
+        xUL=int( self.engine.box_x[self.box_info]-box_size_pixel//2 )
+        yUL=int( self.engine.box_y[self.box_info]-box_size_pixel//2 )
+        #box_pix=self.engine.image.copy()
+        box_pix=self.engine.image[ yUL:yUL+int(box_size_pixel), xUL:xUL+int(box_size_pixel) ].copy()
+        # Centroid locations in this zoom box are relative to box upper left
+        self.box_info_dlg.set_box(self.box_info, box_pix,
+                                  self.engine.centroids_x[self.box_info]-xUL, self.engine.centroids_y[self.box_info]-yUL,
+                                  self.engine.centroids_x[self.box_info], self.engine.centroids_y[self.box_info],
+                                  self.engine.box_x[self.box_info], self.engine.box_y[self.box_info]
+                                  )
+        self.box_info_dlg.update_ui()
+    else:
+        self.box_info_dlg.hide()
+
     pixmap = pixmap.scaled(SPOTS_WIDTH_WIN,SPOTS_HEIGHT_WIN, Qt.KeepAspectRatio)
     self.pixmap_label.setPixmap(pixmap)
     #print ('%0.2f'%bytez.mean(),end=' ', flush=True);
@@ -482,7 +583,7 @@ class NextWaveMainWindow(QMainWindow):
     self.line_centery.setText(str(self.cy) )
 
     if self.engine.fps0!=0:
-        s="Running. %3.2f FPS (%04.1f ms: %04.1f+%04.1f ms)"%(1000/self.engine.fps0,self.engine.fps0, float(self.engine.fps1), float(self.engine.fps2)  )
+        s="Running. %3.2f FPS (%04.2f ms: %04.1f+%04.2f ms)"%(1000/self.engine.fps0,self.engine.fps0, float(self.engine.fps1), float(self.engine.fps2)  )
     else:
         s="0 fps"
         
@@ -1063,8 +1164,31 @@ class NextWaveMainWindow(QMainWindow):
 
  def butt(self, event):
     print("clicked:", event.pos() )
-    print("scx:", event.pos().x() / SPOTS_WIDTH_WIN*992) # TODO: Image win
-    print("scy:", event.pos().y() / SPOTS_HEIGHT_WIN*992) # TODO
+    x_scaled =event.pos().x() / SPOTS_WIDTH_WIN*992
+    y_scaled =event.pos().y() / SPOTS_WIDTH_WIN*992
+    print("scaled: x,y ", x_scaled, y_scaled)
+
+    which_box = np.where(np.all(
+        ( (self.engine.box_x-self.engine.box_size_pixel/2)<x_scaled,
+          (self.engine.box_x+self.engine.box_size_pixel/2)>x_scaled,
+          (self.engine.box_y-self.engine.box_size_pixel/2)<y_scaled,
+          (self.engine.box_y+self.engine.box_size_pixel/2)>y_scaled,
+         ), axis=0
+    ))[0]
+
+    if which_box.size==1:
+        selected=which_box[0]
+        if self.box_info==selected: # Already selected one. Toggle
+            self.box_info=-1
+        else:
+            self.box_info=which_box[0]
+            self.box_info_loc = (event.pos().x(), event.pos().y() )
+    elif which_box.size>1:
+        print( "Too many matches" )
+    else :
+        print( "No matches")
+        self.box_info = -1
+
     return 
 
  def keyReleaseEvent(self, event):
@@ -1150,6 +1274,9 @@ class NextWaveMainWindow(QMainWindow):
  def close(self):
     self.engine.send_quit() # Send stop command to engine
     self.app.exit()
+
+ def closeEvent(self, event):
+    self.close()
 
 # rpyc servic definition
 # Doesn't let you access member variables, so seems kind of pointless

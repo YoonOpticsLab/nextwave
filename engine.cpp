@@ -306,16 +306,18 @@ int main(int argc, char** argv)
       typedef boost::chrono::duration<long long, boost::micro> microseconds_type;
       typedef boost::chrono::seconds mst;
 
+#define CLOCK_MULT 1e5
+
       uint16_t times_local[4]; //TODO
       double dur;
       uint16_t ms_times_10;
       for (struct module it: listModules) {
         //high_resolution_clock::time_point time_before = high_resolution_clock::now();
-          boost::chrono::system_clock::time_point time_before = boost::chrono::system_clock::now();
+          boost::chrono::high_resolution_clock::time_point time_before = boost::chrono::high_resolution_clock::now();
 
           int result=(*it.fp_do_process)((const char*)str_message);
 
-          boost::chrono::system_clock::time_point time_after = boost::chrono::system_clock::now();
+          boost::chrono::high_resolution_clock::time_point time_after = boost::chrono::high_resolution_clock::now();
           //high_resolution_clock::time_point time_after = high_resolution_clock::now();
           // duration<long int> time_span = duration_cast<duration<long int>>(time_after-time_before);
           // microseconds_type micros = std::chrono::duration_cast< std::chrono::microseconds >( time_span );
@@ -324,7 +326,7 @@ int main(int argc, char** argv)
           boost::chrono::duration<double>micros = time_after - time_before;
 
           dur = micros.count();
-          ms_times_10 = (uint16_t)(dur*1e4);
+          ms_times_10 = (uint16_t)(dur*CLOCK_MULT);
 
           ns[logidx*2+modnum] = ms_times_10;
           times_local[modnum] = ms_times_10;
@@ -337,7 +339,7 @@ int main(int argc, char** argv)
         high_resolution_clock::time_point time_now = high_resolution_clock::now();
         duration<double> time_span = duration_cast<duration<double>>(time_now - time_total_before);
         times_total[pipeline_count % 10] = time_span.count();
-        pShmem1->fps[0]=(uint16_t)(1e4*time_span.count()); // TODO: take mean
+        pShmem1->fps[0]=(uint16_t)(CLOCK_MULT*time_span.count()); // TODO: take mean
 
         pShmem1->fps[1]=times_local[0];
         pShmem1->fps[2]=times_local[1];

@@ -465,9 +465,10 @@ class NextwaveEngineComm():
     def receive_image(self):
         # TODO: Wait until it's safe (unlocked)
 
-        self.fps0=extract_memory.get_array_item2(self.layout,self.shmem_hdr,'fps',0, False)/10.0
-        self.fps1=extract_memory.get_array_item2(self.layout,self.shmem_hdr,'fps',1, False)/10.0
-        self.fps2=extract_memory.get_array_item2(self.layout,self.shmem_hdr,'fps',2, False)/10.0
+        # This divider needs to match that in the engine code
+        self.fps0=extract_memory.get_array_item2(self.layout,self.shmem_hdr,'fps',0, False)/100.0
+        self.fps1=extract_memory.get_array_item2(self.layout,self.shmem_hdr,'fps',1, False)/100.0
+        self.fps2=extract_memory.get_array_item2(self.layout,self.shmem_hdr,'fps',2, False)/100.0
 
         self.height=extract_memory.get_array_item2(self.layout,self.shmem_hdr,'dimensions',0, False)
         self.width=extract_memory.get_array_item2(self.layout,self.shmem_hdr,'dimensions',1, False)
@@ -479,7 +480,6 @@ class NextwaveEngineComm():
         im_buf=self.shmem_data.read(self.width*self.height)
         bytez =np.frombuffer(im_buf, dtype='uint8', count=self.width*self.height )
         bytes2=np.reshape(bytez,( self.height,self.width)).copy()
-        #bytes2 = bytes2.T.copy()
 
         bytesf = bytes2 / np.max(bytes2)
 
@@ -488,7 +488,9 @@ class NextwaveEngineComm():
             self.box_x = np.array(box_x)
             self.box_y = np.array(box_y)
 
-        return bytes2
+        self.image = bytes2
+
+        return self.image
 
     def receive_centroids(self):
         fields=self.layout_boxes[1]
