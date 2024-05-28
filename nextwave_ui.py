@@ -1,5 +1,5 @@
 from PyQt5.QtWidgets import (QMainWindow, QLabel, QSizePolicy, QApplication, QPushButton,
-                             QHBoxLayout, QVBoxLayout, QGridLayout,
+                             QHBoxLayout, QVBoxLayout, QGridLayout, QScrollArea,
                              QWidget, QGroupBox, QTabWidget, QTextEdit, QSpinBox, QDoubleSpinBox, QSlider,
                              QFileDialog, QCheckBox, QDialog, QFormLayout, QDialogButtonBox, QLineEdit)
 from PyQt5.QtGui import QPixmap, QImage, QPainter, QPen, QFont
@@ -31,8 +31,13 @@ QIMAGE_WIDTH=1000
 
 MAIN_HEIGHT_WIN=1024
 MAIN_WIDTH_WIN=1800
+
+# These not used anymore:
 SPOTS_HEIGHT_WIN=768
 SPOTS_WIDTH_WIN=768
+
+# This is used, but should be based on image, not hard-coded:
+SPOTS_WIDTH_WIN_MINIMUM=1024
 
 NUM_ZERN_DIALOG=14 # TODO
 
@@ -324,8 +329,8 @@ class NextWaveMainWindow(QMainWindow):
 
     #self.cx=518 # TODO
     #self.cy=488 # TODO
-    self.cx=515 # TODO
-    self.cy=518 # TODO
+    self.cx=555 # TODO
+    self.cy=516 # TODO
     #self.cx=1000 # TODO
     #self.cy=1000 # TODO
 
@@ -442,7 +447,10 @@ class NextWaveMainWindow(QMainWindow):
 
     if self.draw_boxes and self.engine.mode>1:
     #if self.get_param("UI","show_boxes"):
-        pen = QPen(Qt.blue, 2.00, Qt.SolidLine)
+
+        dark_blue = QtGui.QColor.fromRgb(0,0,200)
+
+        pen = QPen(dark_blue, 1.00, Qt.DotLine)
         painter.setPen(pen)
         BOX_BORDER=2
         box_size_pixel = self.engine.box_size_pixel
@@ -480,8 +488,8 @@ class NextWaveMainWindow(QMainWindow):
                        self.engine.box_y[n]-box_size_pixel//2-BOX_BORDER) for n in idx_bads]
         painter.drawLines(bad_boxes)
 
-    if self.box_info>0:
-        pen = QPen(Qt.yellow, 2.00, Qt.SolidLine)
+    if self.box_info>=0:
+        pen = QPen(Qt.yellow, 1.00, Qt.SolidLine)
         painter.setPen(pen)
         BOX_BORDER=2
         box_size_pixel = self.engine.box_size_pixel
@@ -513,7 +521,7 @@ class NextWaveMainWindow(QMainWindow):
             #if np.isnan(cen):
                 #print(ncen,end=' ')
 
-        pen = QPen(Qt.red, 2.0)
+        pen = QPen(Qt.red, 1.0)
         painter.setPen(pen)
         points_centroids=[QPointF(self.engine.centroids_x[n],self.engine.centroids_y[n]) for n in np.arange(self.engine.num_boxes)]
         painter.drawPoints(points_centroids)
@@ -540,7 +548,7 @@ class NextWaveMainWindow(QMainWindow):
     #painter.drawLines(ql1)
     painter.end()
 
-    if self.box_info>0:
+    if self.box_info>=0:
         if not self.box_info_dlg.isVisible():
             self.box_info_dlg.setGeometry(self.box_info_loc[0]+40,self.box_info_loc[1],100,100)
             self.box_info_dlg.show()
@@ -559,7 +567,8 @@ class NextWaveMainWindow(QMainWindow):
     else:
         self.box_info_dlg.hide()
 
-    pixmap = pixmap.scaled(SPOTS_WIDTH_WIN,SPOTS_HEIGHT_WIN, Qt.KeepAspectRatio)
+    #pixmap = pixmap.scaled(SPOTS_WIDTH_WIN,SPOTS_HEIGHT_WIN, Qt.KeepAspectRatio)
+    self.widget_centrals.setMinimumWidth(SPOTS_WIDTH_WIN_MINIMUM)
     self.pixmap_label.setPixmap(pixmap)
     #print ('%0.2f'%bytez.mean(),end=' ', flush=True);
 
@@ -759,10 +768,11 @@ class NextWaveMainWindow(QMainWindow):
      #self.setWindowTitle("Icon")
 
      self.widget_centrals = QWidget()
+     self.scroll_central = QScrollArea()
      layout=QVBoxLayout()
      pixmap_label = QLabel()
      #pixmap_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
-     pixmap_label.resize(SPOTS_WIDTH_WIN,SPOTS_HEIGHT_WIN)
+     #pixmap_label.resize(SPOTS_WIDTH_WIN,SPOTS_HEIGHT_WIN)
      pixmap_label.setAlignment(Qt.AlignCenter)
      self.pixmap_label=pixmap_label
 
@@ -771,10 +781,17 @@ class NextWaveMainWindow(QMainWindow):
      qimage = QImage(im_np, im_np.shape[1], im_np.shape[0],
                      QImage.Format_Mono)
      pixmap = QPixmap(qimage)
-     pixmap = pixmap.scaled(SPOTS_WIDTH_WIN,SPOTS_HEIGHT_WIN, Qt.KeepAspectRatio)
+     #pixmap = pixmap.scaled(SPOTS_WIDTH_WIN,SPOTS_HEIGHT_WIN, Qt.KeepAspectRatio)
      pixmap_label.setPixmap(pixmap)
      pixmap_label.mousePressEvent = self.butt
-     layout.addWidget(pixmap_label,15)
+
+     #Scroll Area Properties
+     self.scroll_central.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
+     self.scroll_central.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+     self.scroll_central.setWidgetResizable(True)
+     self.scroll_central.setWidget(self.pixmap_label)
+     layout.addWidget(self.scroll_central,15)
+
      self.bar_plot = MyBarWidget()
      self.bar_plot.app = self
      layout.addWidget(self.bar_plot,5)
@@ -1164,8 +1181,8 @@ class NextWaveMainWindow(QMainWindow):
 
  def butt(self, event):
     print("clicked:", event.pos() )
-    x_scaled =event.pos().x() / SPOTS_WIDTH_WIN*992
-    y_scaled =event.pos().y() / SPOTS_WIDTH_WIN*992
+    x_scaled =event.pos().x() / SPOTS_WIDTH_WIN*992 # TODO: use image size
+    y_scaled =event.pos().y() / SPOTS_WIDTH_WIN*992 # TODO: use image size
     print("scaled: x,y ", x_scaled, y_scaled)
 
     which_box = np.where(np.all(
