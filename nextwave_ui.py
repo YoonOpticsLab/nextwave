@@ -352,7 +352,7 @@ class NextWaveMainWindow(QMainWindow):
     self.params_offline= [
         {'name': 'system', 'type': 'group', 'title':'System Params', 'children': [
             {'name': 'wavelength', 'type': 'int', 'value': 830, 'title':'Wavelength (nm)', 'limits':[50,2000]},
-            {'name': 'lenslet_pitch', 'type': 'float', 'value': 328.0, 'title':'Lenslet pitch (um)'},
+            {'name': 'lenslet_pitch', 'type': 'float', 'value': 324.0, 'title':'Lenslet pitch (um)'},
             {'name': 'pixel_pitch', 'type': 'float', 'value': 5.5*2, 'title':'Pixel pitch (um)'},
             {'name': 'pupil_diam', 'type': 'float', 'value': 10.0, 'title':'Pupil diameter (mm)'},
             {'name': 'focal_length', 'type': 'float', 'value': 24, 'title':'Focal length'},

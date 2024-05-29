@@ -73,11 +73,11 @@ public:
   af::array im_xcoor;
   af::array im_ycoor;
 
-  af::array box_x;
-  af::array box_y;
+  af::array ref_x;
+  af::array ref_y;
 
-  af::array cen_x;
-  af::array cen_y;
+  af::array delta_x;
+  af::array delta_y;
 
   af::array weighted_x;
   af::array weighted_y;
@@ -167,7 +167,6 @@ void read_boxes(int width) {
   // TODO: this will be slow to do every time.
   init_buffers(width, height, box_size, num_boxes);
 
-#if 0
   // DEbugging
   //float x_ref0 = pShmemBoxes->reference_x[0];
   //float y_ref0 = pShmemBoxes->reference_y[0];
@@ -177,15 +176,20 @@ void read_boxes(int width) {
 	//af_print_mem_info("message", -1);
 
 	//spdlog::info("RBf {} {} {}", box_size,num_boxes,pShmemBoxes->reference_x[0]);
-	try {
-		memcpy(local_refs, pShmemBoxes->reference_x, sizeof(float) * MAX_BOXES);
+	//try {
 		//af::array box_x = af::array(box_size, num_boxes, local_refs); // pShmemBoxes->reference_x);
-    } catch (af::exception &e) { fprintf(stderr, "%s\n", e.what()); }
-
+    //} catch (af::exception &e) { fprintf(stderr, "%s\n", e.what()); }
+#if 0
 	spdlog::info("RBf {} {} {}", box_size,num_boxes,pShmemBoxes->reference_x[0]);
 	//gaf->box_y = af::array(box_size,num_boxes,pShmemBoxes->reference_y);
 	spdlog::info("RB1");
 #endif //0
+
+  // TODO: can this be done without the memcpy to local?
+  memcpy(local_refs, pShmemBoxes->reference_x, sizeof(float) * num_boxes);
+  gaf->ref_x = af::array(1, num_boxes, local_refs);
+  memcpy(local_refs, pShmemBoxes->reference_y, sizeof(float) * num_boxes);
+  gaf->ref_y = af::array(1, num_boxes, local_refs);
 
 	spdlog::info("init: {}x{} {} {} {}\n", width,height,pShmemBoxes->box_x[0], pShmemBoxes->box_y[0]-box_size,
                pShmemBoxes->box_y[0]-box_size/2);
@@ -323,8 +327,6 @@ int find_cendroids_af(unsigned char *buffer, int width, int height) {
 	gaf->im2 = gaf->im(gaf->seq1);
 	gaf->im2 = af::moddims( gaf->im2, gaf->new_dims );
 
-  //af_print(af::transpose(gaf->im2(af::span,0) ));
-
 	gaf->sums = af::sum( gaf->im2, 0);
 	gaf->sums_x = af::sum( gaf->x_reshape, 0) / gaf->sums;
 	gaf->sums_y = af::sum( gaf->y_reshape, 0) / gaf->sums;
@@ -335,6 +337,14 @@ int find_cendroids_af(unsigned char *buffer, int width, int height) {
   struct shmem_boxes_header* pShmemBoxes = (struct shmem_boxes_header*) shmem_region3.get_address();
   memcpy(pShmemBoxes->centroid_x, host_x, sizeof(float)*num_boxes);
   memcpy(pShmemBoxes->centroid_y, host_y, sizeof(float)*num_boxes);
+
+  // Compute deltas and write to shmem
+  gaf->delta_x = gaf->sums_x - gaf->ref_x;
+  gaf->delta_y = gaf->sums_y - gaf->ref_y;
+  float *host_delta_x = gaf->delta_x.host<float>();
+  float *host_delta_y = gaf->delta_y.host<float>();
+  memcpy(pShmemBoxes->delta_x, host_delta_x, sizeof(float)*num_boxes);
+  memcpy(pShmemBoxes->delta_y, host_delta_y, sizeof(float)*num_boxes);
 
 #if 0
   if (pShmemBoxes->header_version & 2) //Follow

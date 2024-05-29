@@ -318,6 +318,20 @@ class NextwaveEngineComm():
         shmem_boxes.write(buf)
         shmem_boxes.flush()
 
+        buf = ByteStream()
+        for item in self.ref_x:
+            buf.append(item, 'f')
+        shmem_boxes.seek(fields['reference_x']['bytenum_current'])
+        shmem_boxes.write(buf)
+        shmem_boxes.flush()
+
+        buf = ByteStream()
+        for item in self.ref_y:
+            buf.append(item, 'f')
+        shmem_boxes.seek(fields['reference_y']['bytenum_current'])
+        shmem_boxes.write(buf)
+        shmem_boxes.flush()
+
         # Write header last, so the engine knows when we are ready
         buf = ByteStream()
         buf.append(1)
@@ -501,6 +515,14 @@ class NextwaveEngineComm():
         self.shmem_boxes.seek(fields['centroid_y']['bytenum_current'])
         buf=self.shmem_boxes.read(self.num_boxes*4)
         self.centroids_y=struct.unpack_from(''.join((['f']*self.num_boxes)), buf)
+
+        self.shmem_boxes.seek(fields['delta_x']['bytenum_current'])
+        buf=self.shmem_boxes.read(self.num_boxes*4)
+        self.delta_x=struct.unpack_from(''.join((['f']*self.num_boxes)), buf)
+
+        self.shmem_boxes.seek(fields['delta_y']['bytenum_current'])
+        buf=self.shmem_boxes.read(self.num_boxes*4)
+        self.delta_y=struct.unpack_from(''.join((['f']*self.num_boxes)), buf)
 
         DEBUGGING=False
         if DEBUGGING:

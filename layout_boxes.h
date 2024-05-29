@@ -20,10 +20,12 @@ struct shmem_boxes_header
 	float centroid_y[MAX_BOXES];
 	float box_x_normalized[MAX_BOXES];
 	float box_y_normalized[MAX_BOXES];
+  float delta_x[MAX_BOXES];
+  float delta_y[MAX_BOXES];
 
   double zterms[MAX_TERMS];
   double zterms_inv[MAX_TERMS];
 };
 
-#define SHMEM_BUFFER_SIZE_BOXES 1+1+2+sizeof(double)*3+MAX_BOXES*sizeof(float)+sizeof(double)*MAX_TERMS
+#define SHMEM_BUFFER_SIZE_BOXES 1+1+2+sizeof(double)*3+MAX_BOXES*sizeof(float)*10+sizeof(double)*MAX_TERMS*2
 #define SHMEM_BUFFER_NAME_BOXES "NW_BUFFER_BOXES"
