@@ -274,8 +274,11 @@ class NextwaveEngineComm():
         fil.close()
 
     def update_searchboxes(self):
-        self.send_searchboxes(self.shmem_boxes, self.box_x, self.box_y, self.layout_boxes)
         self.update_zernike_svd()
+        self.update_influence();
+
+        self.send_searchboxes(self.shmem_boxes, self.box_x, self.box_y, self.layout_boxes)
+
         print("Sent Searchboxes")
         self.dump_vars()
 
@@ -332,6 +335,13 @@ class NextwaveEngineComm():
         shmem_boxes.write(buf)
         shmem_boxes.flush()
 
+        buf = ByteStream()
+        for item in self.influence_inv.T.flatten():
+            buf.append(item, 'f')
+        shmem_boxes.seek(fields['influence_inv']['bytenum_current'])
+        shmem_boxes.write(buf)
+        shmem_boxes.flush()
+
         # Write header last, so the engine knows when we are ready
         buf = ByteStream()
         buf.append(1)
@@ -340,6 +350,10 @@ class NextwaveEngineComm():
         buf.append(self.ccd_pixel,'d')
         buf.append(self.box_um, 'd')
         buf.append(self.pupil_radius_pixel*self.ccd_pixel, 'd')
+
+        buf.append(self.nTerms, 'H')
+        buf.append(self.nActuators, 'H')
+
         shmem_boxes.seek(0)
         shmem_boxes.write(buf)
         shmem_boxes.flush()
@@ -385,6 +399,14 @@ class NextwaveEngineComm():
         # https://stackoverflow.com/questions/1001634/array-division-translating-from-matlab-to-python
         self.zterms = np.matmul( leftside, uu.T)
         self.zterms_inv = np.linalg.pinv(self.zterms)
+
+    def update_influence(self):
+        influence = np.loadtxt('/home/dcoates/share/InfluenceMatrix_ALPAO_10mm_.dat', skiprows=1)
+        valid_idx=np.sum(influence**2,0)>0 # TODO... base on pupil size or something?
+        self.influence = influence[:, valid_idx]
+        self.influence_inv = np.linalg.pinv(self.influence) # pseudoinverse
+        self.nActuators=self.influence.shape[0]
+        self.nTerms=self.influence.shape[1]
 
     def compute_zernikes(self):
         # find slope
@@ -507,22 +529,27 @@ class NextwaveEngineComm():
         return self.image
 
     def receive_centroids(self):
+        SIZEOF_FLOAT=4
         fields=self.layout_boxes[1]
         self.shmem_boxes.seek(fields['centroid_x']['bytenum_current'])
-        buf=self.shmem_boxes.read(self.num_boxes*4)
+        buf=self.shmem_boxes.read(self.num_boxes*SIZEOF_FLOAT)
         self.centroids_x=struct.unpack_from(''.join((['f']*self.num_boxes)), buf)
 
         self.shmem_boxes.seek(fields['centroid_y']['bytenum_current'])
-        buf=self.shmem_boxes.read(self.num_boxes*4)
+        buf=self.shmem_boxes.read(self.num_boxes*SIZEOF_FLOAT)
         self.centroids_y=struct.unpack_from(''.join((['f']*self.num_boxes)), buf)
 
         self.shmem_boxes.seek(fields['delta_x']['bytenum_current'])
-        buf=self.shmem_boxes.read(self.num_boxes*4)
+        buf=self.shmem_boxes.read(self.num_boxes*SIZEOF_FLOAT)
         self.delta_x=struct.unpack_from(''.join((['f']*self.num_boxes)), buf)
 
         self.shmem_boxes.seek(fields['delta_y']['bytenum_current'])
-        buf=self.shmem_boxes.read(self.num_boxes*4)
+        buf=self.shmem_boxes.read(self.num_boxes*SIZEOF_FLOAT)
         self.delta_y=struct.unpack_from(''.join((['f']*self.num_boxes)), buf)
+
+        self.shmem_boxes.seek(fields['mirror_voltages']['bytenum_current'])
+        buf=self.shmem_boxes.read(self.num_boxes*SIZEOF_FLOAT)
+        self.mirror_voltages=struct.unpack_from(''.join((['f']*self.nActuators)), buf)
 
         DEBUGGING=False
         if DEBUGGING:
@@ -553,6 +580,7 @@ class NextwaveEngineComm():
         self.mode=2
         if reinit:
             self.init_params()
+            self.update_searchboxes()
 
         buf = ByteStream()
         buf.append(2) # TODO: MODE_CENTROIDING

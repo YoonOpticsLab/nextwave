@@ -1,6 +1,6 @@
 #define MAX_BOXES 1024
 #define MAX_TERMS 67108864
-
+#define MAX_MIRROR_VOLTAGES 256
 
 struct shmem_boxes_header
 {
@@ -11,6 +11,9 @@ struct shmem_boxes_header
 	double pixel_um;
 	double box_um;
 	double pupil_radius_um;
+
+	uint16_t nTerms; // Influence Fn
+	uint16_t nActuators;
 
 	float reference_x[MAX_BOXES];
 	float reference_y[MAX_BOXES];
@@ -23,8 +26,10 @@ struct shmem_boxes_header
   float delta_x[MAX_BOXES];
   float delta_y[MAX_BOXES];
 
-  double zterms[MAX_TERMS];
-  double zterms_inv[MAX_TERMS];
+  double influence[MAX_TERMS];
+  double influence_inv[MAX_TERMS];
+
+  double mirror_voltages[MAX_MIRROR_VOLTAGES];
 };
 
 #define SHMEM_BUFFER_SIZE_BOXES 1+1+2+sizeof(double)*3+MAX_BOXES*sizeof(float)*10+sizeof(double)*MAX_TERMS*2

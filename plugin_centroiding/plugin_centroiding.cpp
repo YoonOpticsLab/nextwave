@@ -78,6 +78,7 @@ public:
 
   af::array delta_x;
   af::array delta_y;
+  af::array slopes;
 
   af::array weighted_x;
   af::array weighted_y;
@@ -96,6 +97,9 @@ public:
   af::array atemp;
   af::array x_reshape;
   af::array y_reshape;
+
+  af::array influence_inv;
+  af::array mirror_voltages;
 };
 
 class af_instance *gaf;
@@ -106,7 +110,7 @@ int nbuffer[BUF_SIZE];
 uint16_t num_boxes;
 double pixel_um;
 double box_size_float;
-int box_size; 
+int box_size;
 
 double pupil_radius_pixels;
 double pupil_radius_um;
@@ -114,7 +118,12 @@ double pupil_radius_um;
 int width;
 int height;
 
-float local_refs[MAX_BOXES];
+int nActuators;
+int nTerms;
+
+// Local buffer to copy from shmem into before af.
+// Need to hold either box positions or inv. influence matrix
+float local_buf[MAX_TERMS];
 
 #if _WIN64
 #include <windows.h>
@@ -147,7 +156,7 @@ void init_buffers(int width, int height, int box_size, int nboxes) {
   gaf->new_dims=af::dim4(box_size*box_size,nboxes); // AF stacks the boxes, so do this to reshape for easier sum reduction
 }
 
-void read_boxes(int width) {
+void rcv_boxes(int width) {
 
   // TODO: is dynamically changing the size allowed?
   struct shmem_header* pShmem = (struct shmem_header*) shmem_region1.get_address();
@@ -186,13 +195,12 @@ void read_boxes(int width) {
 #endif //0
 
   // TODO: can this be done without the memcpy to local?
-  memcpy(local_refs, pShmemBoxes->reference_x, sizeof(float) * num_boxes);
-  gaf->ref_x = af::array(1, num_boxes, local_refs);
-  memcpy(local_refs, pShmemBoxes->reference_y, sizeof(float) * num_boxes);
-  gaf->ref_y = af::array(1, num_boxes, local_refs);
+  memcpy(local_buf, pShmemBoxes->reference_x, sizeof(float) * num_boxes);
+  gaf->ref_x = af::array(1, num_boxes, local_buf);
+  memcpy(local_buf, pShmemBoxes->reference_y, sizeof(float) * num_boxes);
+  gaf->ref_y = af::array(1, num_boxes, local_buf);
 
-	spdlog::info("init: {}x{} {} {} {}\n", width,height,pShmemBoxes->box_x[0], pShmemBoxes->box_y[0]-box_size,
-               pShmemBoxes->box_y[0]-box_size/2);
+	spdlog::info("init: {}x{} {} {} {}\n", width,height,pShmemBoxes->box_x[0], pShmemBoxes->box_y[0]-box_size, pShmemBoxes->box_y[0]-box_size/2);
 
   // Each box will have a set of 1D indices into its members
 	for (int ibox=0; ibox<num_boxes; ibox++) {
@@ -229,8 +237,13 @@ void read_boxes(int width) {
   printf("count1: %f\n",(float)af::count<float>(gaf->seq1(af::span,1)) );
 #endif
 
-	spdlog::info("CEN Init: {} {} {} {} {} {} {}x{}", num_boxes, pixel_um, box_size, box_size_float,
-               pupil_radius_um, pupil_radius_pixels, width, height);
+  nActuators = pShmemBoxes->nActuators;
+  nTerms = pShmemBoxes->nTerms;
+
+  memcpy(local_buf, pShmemBoxes->influence_inv, sizeof(float) * nActuators*nTerms);
+	gaf->influence_inv = af::array(nTerms, nActuators, local_buf );
+
+	spdlog::info("CEN Init: {} {} {} {} {} {} {}x{} infl_inv:{}x{}", num_boxes, pixel_um, box_size, box_size_float, pupil_radius_um, pupil_radius_pixels, width, height, nTerms, nActuators);
 }
 
 PLUGIN_API(centroiding,init,char *params)
@@ -339,12 +352,29 @@ int find_cendroids_af(unsigned char *buffer, int width, int height) {
   memcpy(pShmemBoxes->centroid_y, host_y, sizeof(float)*num_boxes);
 
   // Compute deltas and write to shmem
-  gaf->delta_x = gaf->sums_x - gaf->ref_x;
-  gaf->delta_y = gaf->sums_y - gaf->ref_y;
+  gaf->delta_x = gaf->ref_x - gaf->sums_x;
+  gaf->delta_y = gaf->ref_y - gaf->sums_y;
   float *host_delta_x = gaf->delta_x.host<float>();
   float *host_delta_y = gaf->delta_y.host<float>();
-  memcpy(pShmemBoxes->delta_x, host_delta_x, sizeof(float)*num_boxes);
-  memcpy(pShmemBoxes->delta_y, host_delta_y, sizeof(float)*num_boxes);
+  //memcpy(pShmemBoxes->delta_x, host_delta_x, sizeof(float)*num_boxes);
+  //memcpy(pShmemBoxes->delta_y, host_delta_y, sizeof(float)*num_boxes);
+
+  // Remove tip and tilt
+  gaf->delta_x -= (float)af::mean<float>(gaf->delta_x);
+  gaf->delta_y -= (float)af::mean<float>(gaf->delta_y);
+  gaf->delta_y = -gaf->delta_y; // Negate y (coord system)
+
+  // Assumed that the dimensions of infl match
+  gaf->slopes = af::join(0, gaf->delta_x, gaf->delta_y);
+  gaf->slopes = af::moddims(gaf->slopes,af::dim4(1,num_boxes*2,1,1) ); // like flatten, but in 2nd dimension
+  gaf->slopes /= (24000.0/11.0); // TODO: use focal length, etc.
+  af_print(gaf->slopes(af::seq(4))); // 1346 1 1 1
+  af_print(gaf->influence_inv(af::seq(4),af::seq(4))); // 1346 1 1 1
+  gaf->mirror_voltages=af::matmul(gaf->slopes, gaf->influence_inv);
+  float *host_mirror_voltages = gaf->mirror_voltages.host<float>();
+  memcpy(pShmemBoxes->mirror_voltages, host_mirror_voltages, sizeof(float)*nActuators);
+
+  //af_print(gaf->mirror_voltages);
 
 #if 0
   if (pShmemBoxes->header_version & 2) //Follow
@@ -393,8 +423,7 @@ void unlock(uint8_t *lock) {
   *lock=0;
 }
 
-PLUGIN_API(centroiding,process,char *params)
-{
+void process_ui_commands(void) {
   char *msg=socket_check(CENTROIDING_SOCKET);
   if (msg!=NULL) {
     //spdlog::info("CEN: {}",msg);
@@ -407,12 +436,10 @@ PLUGIN_API(centroiding,process,char *params)
       spdlog::info("b!");
       bDoSubtractBackground=0;
       break;
-
     case 'S':
       spdlog::info("S!");
       bDoSetBackground=1;
       break;
-
     case 'R':
       spdlog::info("R!");
       bDoReplaceSubtracted=1;
@@ -421,7 +448,6 @@ PLUGIN_API(centroiding,process,char *params)
       spdlog::info("r!");
       bDoReplaceSubtracted=0;
       break;
-
     case 'T':
       fThreshold=atof(msg+1);
       spdlog::info("T={}",fThreshold);
@@ -431,11 +457,15 @@ PLUGIN_API(centroiding,process,char *params)
       spdlog::info("t!");
       bDoThreshold=0;
       break;
-
     default:
       spdlog::error("CEN unknown");
     }
   }
+}
+
+PLUGIN_API(centroiding,process,char *params)
+{
+  process_ui_commands();
 
   // TODO: is dynamically changing the size allowed?
 	struct shmem_header* pShmem = (struct shmem_header*) shmem_region1.get_address();
@@ -451,7 +481,7 @@ PLUGIN_API(centroiding,process,char *params)
          ((const char *)(shmem_region2.get_address()))+height*width*nCurrRing, height*width);
 
   if (params[0]=='I') {
-    read_boxes(width);
+    rcv_boxes(width);
     spdlog::info("Got boxes");
     spdlog::info("Centroiding Dims: {} {} {}", width, height, int(buffer[0])) ;
   }

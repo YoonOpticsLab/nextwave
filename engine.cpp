@@ -310,7 +310,7 @@ int main(int argc, char** argv)
 
       uint16_t times_local[4]; //TODO
       double dur;
-      uint16_t ms_times_10;
+      uint16_t ms_times_100;
       for (struct module it: listModules) {
         //high_resolution_clock::time_point time_before = high_resolution_clock::now();
           boost::chrono::high_resolution_clock::time_point time_before = boost::chrono::high_resolution_clock::now();
@@ -326,12 +326,12 @@ int main(int argc, char** argv)
           boost::chrono::duration<double>micros = time_after - time_before;
 
           dur = micros.count();
-          ms_times_10 = (uint16_t)(dur*CLOCK_MULT);
+          ms_times_100 = (uint16_t)(dur*CLOCK_MULT); 
 
-          ns[logidx*2+modnum] = ms_times_10;
-          times_local[modnum] = ms_times_10;
+          ns[logidx*2+modnum] = ms_times_100;
+          times_local[modnum] = ms_times_100;
 
-          //std::cout << logidx << " took " << dur << " seconds " << ms_times_10 << " OR " << ns[logidx*2+modnum] << " OR " << times_local[modnum] << "\n";
+          //std::cout << logidx << " took " << dur << " seconds " << ms_times_100 << " OR " << ns[logidx*2+modnum] << " OR " << times_local[modnum] << "\n";
 
           modnum++;
         }
