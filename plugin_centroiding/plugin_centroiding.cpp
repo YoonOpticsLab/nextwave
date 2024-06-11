@@ -140,6 +140,9 @@ double local_buf[MAX_TERMS];
 
 using namespace boost::interprocess;
 
+// TODO: use new scheme
+struct shmem_header* pShmem; // = (struct shmem_header*) shmem_region1.get_address();
+
 void init_buffers(int width, int height, int box_size, int nboxes) {
   // Precompute indexing arrays for weighted average
 	for (int x=0; x<width; x++) {
@@ -156,6 +159,7 @@ void init_buffers(int width, int height, int box_size, int nboxes) {
 	}
 	gaf->im_ycoor=af::array(width, height, fbuffer);
   gaf->new_dims=af::dim4(box_size*box_size,nboxes); // AF stacks the boxes, so do this to reshape for easier sum reduction
+
 }
 
 void rcv_boxes(int width) {
@@ -248,6 +252,12 @@ void rcv_boxes(int width) {
 	spdlog::info("CEN rcv: {} {} {} {} {} {} {}x{} infl_inv:{}x{} {}",
 		num_boxes, pixel_um, box_size, box_size_float, pupil_radius_um, pupil_radius_pixels,
 		width, height, nTerms, nActuators, (float)af::mean<float>(gaf->influence_inv) );
+		
+#if 0
+  	for (int i=0; i<nActuators; i++) {
+	  pShmemBoxes->mirror_voltages[i]=0;
+	}		
+#endif //0	
 }
 
 PLUGIN_API(centroiding,init,char *params)
@@ -265,6 +275,8 @@ PLUGIN_API(centroiding,init,char *params)
   }
 
   plugin_access_shmem();
+  pShmem = (struct shmem_header*) shmem_region1.get_address();
+  
   gaf=new af_instance();
   return 0;
 }
@@ -376,7 +388,7 @@ int find_cendroids_af(unsigned char *buffer, int width, int height) {
   float *host_mirror_voltages = gaf->mirror_voltages.host<float>();
 #endif //0
   //spdlog::info( '{}',  (float)af::mean<float>(gaf->influence_inv) );
-  spdlog::info("INF MAX: {}", (float)af::max<float>(gaf->influence_inv));
+  //spdlog::info("INF MAX: {}", (float)af::max<float>(gaf->influence_inv));
   spdlog::info("Mirror {} max: {} 0:{}",(float)af::count<float>(gaf->mirror_voltages) , (float)af::max<float>(gaf->mirror_voltages),
 	host_mirror_voltages[0]);
 
@@ -398,8 +410,31 @@ int find_cendroids_af(unsigned char *buffer, int width, int height) {
   memcpy(pShmemBoxes->centroid_y, host_y, sizeof(CALC_TYPE)*num_boxes);
   //memcpy(pShmemBoxes->mirror_voltages, host_mirror_voltages, sizeof(float)*nActuators);
   
-	for (int i=0; i<nActuators; i++)
-	  pShmemBoxes->mirror_voltages[i] = host_mirror_voltages[i];
+  double mirror_min=10, mirror_max=-10, mirror_mean=0;
+	for (int i=0; i<nActuators; i++) {
+		
+	  if (pShmem->mode == 3 || pShmem->mode==9 ) {
+		  // Add new voltages to old
+		  pShmemBoxes->mirror_voltages[i] = pShmemBoxes->mirror_voltages[i] + host_mirror_voltages[i];
+	  }
+	  
+	  // CLAMP
+	  if (pShmemBoxes->mirror_voltages[i] > 0.7)
+		pShmemBoxes->mirror_voltages[i]=0.7;
+	  if (pShmemBoxes->mirror_voltages[i] < -0.7)
+		pShmemBoxes->mirror_voltages[i]=-0.7;
+
+	  if (pShmemBoxes->mirror_voltages[i] > mirror_max)
+		mirror_max=pShmemBoxes->mirror_voltages[i];
+	  if (pShmemBoxes->mirror_voltages[i] < mirror_min)
+		mirror_min=pShmemBoxes->mirror_voltages[i];
+
+	  mirror_mean += pShmemBoxes->mirror_voltages[i];
+	}
+
+	mirror_mean /= nActuators;
+  spdlog::info("Mirror {}:{}/{} 0:{}", (double)mirror_mean, (double)mirror_min, (double) mirror_max, (double)pShmemBoxes->mirror_voltages[0] );
+		
 #endif //0
 
   af::freeHost(host_x);
@@ -479,12 +514,11 @@ void process_ui_commands(void) {
   }
 }
 
+
 PLUGIN_API(centroiding,process,char *params)
 {
   process_ui_commands();
 
-  // TODO: is dynamically changing the size allowed?
-	struct shmem_header* pShmem = (struct shmem_header*) shmem_region1.get_address();
 
 	uint16_t nCurrRing = pShmem->current_frame;
 	uint16_t height = pShmem->dimensions[0];

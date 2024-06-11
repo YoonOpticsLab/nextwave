@@ -904,9 +904,15 @@ INodeMap& nodeMap = pCam->GetNodeMap();
 	return 0;
 }
 
-DECL closex(void)
+DECL plugin_close(void)
 {
 	int result=0;
+	
+	pCam->EndAcquisition();
+			
+    INodeMap& nodeMap = pCam->GetNodeMap();
+    ResetTrigger(nodeMap);
+
 	try {
 #ifdef _DEBUG
         // Reset heartbeat for GEV camera
@@ -922,10 +928,6 @@ DECL closex(void)
         result = -1;
     }
 	
-	pCam->EndAcquisition();
-			
-  INodeMap& nodeMap = pCam->GetNodeMap();
-  ResetTrigger(nodeMap);
 
     //
     // Release reference to the camera
