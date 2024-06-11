@@ -1,3 +1,7 @@
+#include <json.hpp>
+using json=nlohmann::json;
+#include "../include/spdlog/spdlog.h"
+
 #if _WIN64
 #include <windows.h>
 #include <strsafe.h>
@@ -28,6 +32,10 @@ mapped_region shmem_region1;
 mapped_region shmem_region2;
 mapped_region shmem_region3;
 #endif
+
+struct shmem_header* gpShmemHeader;
+struct shmem_boxes_header* gpShmemBoxes;
+ 
 
 // For NextWave Plugin
 #pragma pack(push,1)
@@ -66,4 +74,7 @@ static void plugin_access_shmem( void ) {
   shmem2.truncate((size_t)SHMEM_BUFFER_SIZE);
   shmem3.truncate((size_t)sizeof(shmem_boxes_header));
 #endif
+
+  gpShmemHeader= (struct shmem_header*) shmem_region1.get_address();
+  gpShmemBoxes = (struct shmem_boxes_header*) shmem_region3.get_address();
 }

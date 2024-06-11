@@ -1,9 +1,11 @@
 {
-    "plugin_rawplayer":
+    "plugin_flir":
     {"mode": "inline",
      "type": "generator",
      "filename": "../shifted.bin"},
 
     "plugin_centroiding":
-    {"method": "single_pass"}
+    {"method": "single_pass"},
+	
+	"plugin_alpao": {}
 }

@@ -500,6 +500,7 @@ int ConfigureExposure(INodeMap& nodeMap, double exposureTimeToSet)
 DECL init(void)
 //int main(int /*argc*/, char** /*argv*/)
 {
+#if 0
     // Since this application saves images in the current folder
     // we must ensure that we have permission to write to this folder.
     // If we do not have permission, fail right away.
@@ -515,6 +516,7 @@ DECL init(void)
     }
     fclose(tempFile);
     remove("test.txt");
+#endif	
 
     // Print application build information
     cout << "Application build date: " << __DATE__ << " " << __TIME__ << endl << endl;
@@ -660,6 +662,7 @@ DECL init(void)
         }
         cout << endl;
 
+
         //
         // Set default image processor color processing method
         //
@@ -678,7 +681,7 @@ DECL init(void)
 	return 0;
 }
 
-DECL process(void) {
+DECL process(char *) {
     int result = 0;
 
     // Run example on each camera
@@ -718,7 +721,7 @@ INodeMap& nodeMap = pCam->GetNodeMap();
 	return 0;
 }
 
-DECL closex(void)
+DECL plugin_close(void)
 {
 	int result=0;
 	try {

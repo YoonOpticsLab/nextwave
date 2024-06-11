@@ -11,6 +11,7 @@ WINDOWS=(os.name == 'nt')
 # Make sure these match the C++ Code
 SOCKET_CAMERA=50007
 SOCKET_CENTROIDING=50008
+SOCKET_ALPAO=50010
 
 class SocketComponent():
     def __init__(self,port):
@@ -42,6 +43,9 @@ class NextwaveSocketComm():
         time.sleep(0.5)
         self.centroiding = SocketComponent(SOCKET_CENTROIDING)
         self.centroiding.init()
+        
+        self.alpao = SocketComponent(SOCKET_ALPAO)
+        self.alpao.init()
         #os.sleep(0.5)
 
 def do_listen(fn_callback, port):

@@ -286,7 +286,7 @@ int main(int argc, char** argv)
   double times_total[10]; //TODO
 
   uint16_t ns[REP_LOG*4]; //TODO
-	char str_message[64] = " "; //.c_str();
+  char str_message[64] = "    "; //.c_str();
   long int pipeline_count=0;
 
   while ( pShmem1->mode!=MODE_QUIT ) {
@@ -294,10 +294,16 @@ int main(int argc, char** argv)
     if (pShmem1->mode > MODE_READY ) {
       //for (int pipeline_count=0; pipeline_count<REPS; pipeline_count++)
 
-      if (pShmem1->mode == MODE_RUNONCE_CENTROIDING)
-        str_message[0]='I';
-      else
+      if (pShmem1->mode == MODE_RUNONCE_CENTROIDING_AO) {
+        str_message[0]='I'; // Re-init on "snap"
+        str_message[1]='C'; // Re-init on "snap"
+      } else if (pShmem1->mode == MODE_RUNONCE_CENTROIDING) {
+        str_message[0]='I'; // Re-init on "snap"
+        str_message[1]=' '; // Re-init on "snap"
+	  } else {
         str_message[0]=' ';
+        str_message[1]=' ';
+	  }
 
       high_resolution_clock::time_point time_total_before = high_resolution_clock::now();
 
@@ -316,7 +322,7 @@ int main(int argc, char** argv)
           boost::chrono::high_resolution_clock::time_point time_before = boost::chrono::high_resolution_clock::now();
 
           int result=(*it.fp_do_process)((const char*)str_message);
-
+  
           boost::chrono::high_resolution_clock::time_point time_after = boost::chrono::high_resolution_clock::now();
           //high_resolution_clock::time_point time_after = high_resolution_clock::now();
           // duration<long int> time_span = duration_cast<duration<long int>>(time_after-time_before);
@@ -328,7 +334,7 @@ int main(int argc, char** argv)
           dur = micros.count();
           ms_times_100 = (uint16_t)(dur*CLOCK_MULT); 
 
-          ns[logidx*2+modnum] = ms_times_100;
+          ns[logidx*3+modnum] = ms_times_100;
           times_local[modnum] = ms_times_100;
 
           //std::cout << logidx << " took " << dur << " seconds " << ms_times_100 << " OR " << ns[logidx*2+modnum] << " OR " << times_local[modnum] << "\n";
@@ -353,7 +359,7 @@ int main(int argc, char** argv)
         pipeline_count += 1;
 
       // Ran once, unarm
-        if (pShmem1->mode == MODE_RUNONCE_CENTROIDING ) {
+        if (pShmem1->mode & MODE_RUNONCE_CENTROIDING ) {
           pShmem1->mode = MODE_READY;
         }
 
@@ -376,6 +382,7 @@ int main(int argc, char** argv)
   // iterate the array
   for (struct module it: listModules) {
 	char str_nothing[64] = ""; //.c_str();
+	spdlog::info("Closing {}", it.name);
 	int result=(*it.fp_close)(str_nothing);
 	#if _WIN64
 		FreeLibrary( (HMODULE)it.handle);

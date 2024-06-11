@@ -287,7 +287,7 @@ class NextwaveEngineComm():
 
         adr=fields['box_x']['bytenum_current']
         shmem_boxes.seek(adr)
-        box_buf=shmem_boxes.read(NUM_BOXES*4)
+        box_buf=shmem_boxes.read(NUM_BOXES*4) # TODO: ALL WRONG FOR DOUBLES
         box_x = [struct.unpack('f',box_buf[n*4:n*4+4]) for n in np.arange(NUM_BOXES)]
         #box_x =np.frombuffer(box_buf, dtype='uint8', count=NUM_BOXES )
         #print(box_x[0], box_x[1], box_x[2], box_x[3])
@@ -309,35 +309,36 @@ class NextwaveEngineComm():
 
         buf = ByteStream()
         for item in box_x:
-            buf.append(item, 'f')
+            buf.append(item, 'd')
         shmem_boxes.seek(fields['box_x']['bytenum_current'])
         shmem_boxes.write(buf)
         shmem_boxes.flush()
 
         buf = ByteStream()
         for item in box_y:
-            buf.append(item, 'f')
+            buf.append(item, 'd')
         shmem_boxes.seek(fields['box_y']['bytenum_current'])
         shmem_boxes.write(buf)
         shmem_boxes.flush()
 
         buf = ByteStream()
         for item in self.ref_x:
-            buf.append(item, 'f')
+            buf.append(item, 'd')
         shmem_boxes.seek(fields['reference_x']['bytenum_current'])
         shmem_boxes.write(buf)
         shmem_boxes.flush()
 
         buf = ByteStream()
         for item in self.ref_y:
-            buf.append(item, 'f')
+            buf.append(item, 'd')
         shmem_boxes.seek(fields['reference_y']['bytenum_current'])
         shmem_boxes.write(buf)
         shmem_boxes.flush()
 
         buf = ByteStream()
+        print(  "INF_INV %f"%np.max( self.influence_inv ) )
         for item in self.influence_inv.T.flatten():
-            buf.append(item, 'f')
+            buf.append(item, 'd')
         shmem_boxes.seek(fields['influence_inv']['bytenum_current'])
         shmem_boxes.write(buf)
         shmem_boxes.flush()
@@ -401,7 +402,8 @@ class NextwaveEngineComm():
         self.zterms_inv = np.linalg.pinv(self.zterms)
 
     def update_influence(self):
-        influence = np.loadtxt('/home/dcoates/share/InfluenceMatrix_ALPAO_10mm_.dat', skiprows=1)
+        #influence = np.loadtxt('/home/dcoates/share/InfluenceMatrix_ALPAO_10mm_.dat', skiprows=1)
+        influence = np.loadtxt('c:\MiniWave\MiniWaveConfiguration\InfluenceMatrix_ALPAO_10mm_.dat', skiprows=1)
         valid_idx=np.sum(influence**2,0)>0 # TODO... base on pupil size or something?
         self.influence = influence[:, valid_idx]
         self.influence_inv = np.linalg.pinv(self.influence) # pseudoinverse
@@ -529,27 +531,27 @@ class NextwaveEngineComm():
         return self.image
 
     def receive_centroids(self):
-        SIZEOF_FLOAT=4
+        SIZEOF_FLOAT=8
         fields=self.layout_boxes[1]
         self.shmem_boxes.seek(fields['centroid_x']['bytenum_current'])
         buf=self.shmem_boxes.read(self.num_boxes*SIZEOF_FLOAT)
-        self.centroids_x=struct.unpack_from(''.join((['f']*self.num_boxes)), buf)
+        self.centroids_x=struct.unpack_from(''.join((['d']*self.num_boxes)), buf)
 
         self.shmem_boxes.seek(fields['centroid_y']['bytenum_current'])
         buf=self.shmem_boxes.read(self.num_boxes*SIZEOF_FLOAT)
-        self.centroids_y=struct.unpack_from(''.join((['f']*self.num_boxes)), buf)
+        self.centroids_y=struct.unpack_from(''.join((['d']*self.num_boxes)), buf)
 
         self.shmem_boxes.seek(fields['delta_x']['bytenum_current'])
         buf=self.shmem_boxes.read(self.num_boxes*SIZEOF_FLOAT)
-        self.delta_x=struct.unpack_from(''.join((['f']*self.num_boxes)), buf)
+        self.delta_x=struct.unpack_from(''.join((['d']*self.num_boxes)), buf)
 
         self.shmem_boxes.seek(fields['delta_y']['bytenum_current'])
         buf=self.shmem_boxes.read(self.num_boxes*SIZEOF_FLOAT)
-        self.delta_y=struct.unpack_from(''.join((['f']*self.num_boxes)), buf)
+        self.delta_y=struct.unpack_from(''.join((['d']*self.num_boxes)), buf)
 
         self.shmem_boxes.seek(fields['mirror_voltages']['bytenum_current'])
         buf=self.shmem_boxes.read(self.num_boxes*SIZEOF_FLOAT)
-        self.mirror_voltages=struct.unpack_from(''.join((['f']*self.nActuators)), buf)
+        self.mirror_voltages=struct.unpack_from(''.join((['d']*self.nActuators)), buf)
 
         DEBUGGING=False
         if DEBUGGING:
@@ -561,8 +563,8 @@ class NextwaveEngineComm():
 
     def send_quit(self):
         buf = ByteStream()
-        buf.append(255) # TODO: MODE from file
         #buf.append(0)  # Lock
+        buf.append(255) # TODO: MODE from() file
         #buf.append(1, 'H') # NUM BOXES. Hopefully doesn't matter
         #buf.append(40, 'd')
         #buf.append(500, 'd')
@@ -582,8 +584,9 @@ class NextwaveEngineComm():
             self.init_params()
             self.update_searchboxes()
 
+        val=3 if self.ui.chkLoop.isChecked() else 2
         buf = ByteStream()
-        buf.append(2) # TODO: MODE_CENTROIDING
+        buf.append(val) # TODO: MODE_CENTROIDING
         self.shmem_hdr.seek(2) #TODO: get address
         self.shmem_hdr.write(buf)
         self.shmem_hdr.flush()
@@ -592,8 +595,10 @@ class NextwaveEngineComm():
         self.mode=3
         if reinit:
             self.init_params()
+        val=9 if self.ui.chkLoop.isChecked() else 8
+            
         buf = ByteStream()
-        buf.append(9) # TODO: Greater than MODE_CEN_ONE
+        buf.append(val) # TODO: Greater than MODE_CEN_ONE
         self.shmem_hdr.seek(2) #TODO: get address
         self.shmem_hdr.write(buf)
         self.shmem_hdr.flush()

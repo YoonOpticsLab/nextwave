@@ -329,7 +329,7 @@ class NextWaveMainWindow(QMainWindow):
 
     #self.cx=518 # TODO
     #self.cy=488 # TODO
-    self.cx=555 # TODO
+    self.cx=516 # TODO
     self.cy=516 # TODO
     #self.cx=1000 # TODO
     #self.cy=1000 # TODO
@@ -651,8 +651,12 @@ class NextWaveMainWindow(QMainWindow):
     self.bar_plot.showGrid(x=False,y=True)
 
  def update_ui_dm(self):
-    if self.chkLoop.isChecked():
-        self.actuator_plot.paintEvent_manual()
+    if False:
+        if self.chkLoop.isChecked():
+            self.sockets.alpao.send(b"L")
+            # self.actuator_plot.paintEvent_manual()
+        else:
+            self.sockets.alpao.send(b"l")
 
  def set_follow(self,state):
     buf = ByteStream()
@@ -1010,8 +1014,9 @@ class NextWaveMainWindow(QMainWindow):
      layout1 = QGridLayout(pages[2])
      lbl = QLabel("XML Config: ")
      layout1.addWidget(lbl, 0,0)
-     self.edit_xml = QLineEdit('/home/dcoates/projects/yoon/MiniWaveConfiguration/aoCoatesTestbed.xml')
+     #self.edit_xml = QLineEdit('/home/dcoates/projects/yoon/MiniWaveConfiguration/aoCoatesTestbed.xml')
      #self.edit_xml = QLineEdit('/home/dcoates/projects/yoon/MiniWaveConfiguration/aoMatlab.xml')
+     self.edit_xml = QLineEdit('c:/MiniWave/MiniWaveConfiguration/aoCoatesTestbed.xml')     
      layout1.addWidget(self.edit_xml, 0,1)
      btn = QPushButton("...")
      layout1.addWidget(btn, 0,2)
@@ -1287,6 +1292,8 @@ class NextWaveMainWindow(QMainWindow):
     np.save('slope',self.engine.slope)
     np.save('zterms',self.engine.zterms)
     np.save('zterms_inv',self.engine.zterms_inv)
+
+    np.savetxt('mirror_voltages.txt',self.engine.mirror_voltages)
 
  def close(self):
     self.engine.send_quit() # Send stop command to engine

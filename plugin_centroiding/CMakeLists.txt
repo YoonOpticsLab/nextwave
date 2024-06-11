@@ -30,8 +30,8 @@ endif()
 add_library(plugin_centroiding SHARED plugin_centroiding.cpp ../nextwave_plugin.hpp)
 target_link_libraries(plugin_centroiding ${ArrayFire_Unified_LIBRARIES} )
 if (WIN32)
-  set_target_properties(plugin_rawplayer PROPERTIES LIBRARY_OUTPUT_DIRECTORY "c:/nextwave/build"  )
-  set_target_properties(plugin_rawplayer PROPERTIES RUNTIME_OUTPUT_DIRECTORY "c:/nextwave/build"  )
+  set_target_properties(plugin_centroiding PROPERTIES LIBRARY_OUTPUT_DIRECTORY "c:/nextwave/build"  )
+  set_target_properties(plugin_centroiding PROPERTIES RUNTIME_OUTPUT_DIRECTORY "c:/nextwave/build"  )
 else()
   set_target_properties(plugin_centroiding PROPERTIES
     LIBRARY_OUTPUT_DIRECTORY "../../build"

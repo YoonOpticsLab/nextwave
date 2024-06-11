@@ -19,9 +19,7 @@ include_directories(../common/include/boost_1_83_0)
 include(add_spinnaker.cmake)
 #include(add_executable.cmake)
 
-
-add_library(plugin_flir SHARED Acquisition.cpp ../nextwave_plugin.hpp)
-#add_executable(plugin_flir Acquisition.cpp ../nextwave_plugin.hpp)
+add_library(plugin_flir SHARED Acquisition.cpp)
 
 set_target_properties(plugin_flir PROPERTIES RUNTIME_OUTPUT_DIRECTORY "c:/nextwave/build"  )
 # set_target_properties(plugin_flir PROPERTIES LIBRARY_OUTPUT_DIRECTORY "../debug"  )
