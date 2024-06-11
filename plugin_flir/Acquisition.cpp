@@ -72,6 +72,213 @@ using namespace std;
 #define CAMERA_SOCKET 50007
 #include "socket.cpp"
 
+// Use the following enum and global constant to select whether a software or
+// hardware trigger is used.
+enum triggerType
+{
+    SOFTWARE,
+    HARDWARE
+};
+
+const triggerType chosenTrigger = SOFTWARE;
+
+// This function configures the camera to use a trigger. First, trigger mode is
+// set to off in order to select the trigger source. Once the trigger source
+// has been selected, trigger mode is then enabled, which has the camera
+// capture only a single image upon the execution of the chosen trigger.
+int ConfigureTrigger(INodeMap& nodeMap)
+{
+    int result = 0;
+
+    cout << endl << endl << "*** CONFIGURING TRIGGER ***" << endl << endl;
+
+    cout << "Note that if the application / user software triggers faster than frame time, the trigger may be dropped "
+            "/ skipped by the camera."
+         << endl
+         << "If several frames are needed per trigger, a more reliable alternative for such case, is to use the "
+            "multi-frame mode."
+         << endl
+         << endl;
+
+    if (chosenTrigger == SOFTWARE)
+    {
+        cout << "Software trigger chosen..." << endl;
+    }
+    else if (chosenTrigger == HARDWARE)
+    {
+        cout << "Hardware trigger chosen..." << endl;
+    }
+
+    try
+    {
+        //
+        // Ensure trigger mode off
+        //
+        // *** NOTES ***
+        // The trigger must be disabled in order to configure whether the source
+        // is software or hardware.
+        //
+        CEnumerationPtr ptrTriggerMode = nodeMap.GetNode("TriggerMode");
+        if (!IsReadable(ptrTriggerMode))
+        {
+            cout << "Unable to disable trigger mode (node retrieval). Aborting..." << endl;
+            return -1;
+        }
+
+        CEnumEntryPtr ptrTriggerModeOff = ptrTriggerMode->GetEntryByName("Off");
+        if (!IsReadable(ptrTriggerModeOff))
+        {
+            cout << "Unable to disable trigger mode (enum entry retrieval). Aborting..." << endl;
+            return -1;
+        }
+
+        ptrTriggerMode->SetIntValue(ptrTriggerModeOff->GetValue());
+
+        cout << "Trigger mode disabled..." << endl;
+
+        //
+        // Set TriggerSelector to FrameStart
+        //
+        // *** NOTES ***
+        // For this example, the trigger selector should be set to frame start.
+        // This is the default for most cameras.
+        //
+        CEnumerationPtr ptrTriggerSelector = nodeMap.GetNode("TriggerSelector");
+        if (!IsReadable(ptrTriggerSelector) ||
+            !IsWritable(ptrTriggerSelector))
+        {
+            cout << "Unable to get or set trigger selector (node retrieval). Aborting..." << endl;
+            return -1;
+        }
+
+        CEnumEntryPtr ptrTriggerSelectorFrameStart = ptrTriggerSelector->GetEntryByName("FrameStart");
+        if (!IsReadable(ptrTriggerSelectorFrameStart))
+        {
+            cout << "Unable to get trigger selector (enum entry retrieval). Aborting..." << endl;
+            return -1;
+        }
+
+        ptrTriggerSelector->SetIntValue(ptrTriggerSelectorFrameStart->GetValue());
+
+        cout << "Trigger selector set to frame start..." << endl;
+
+        //
+        // Select trigger source
+        //
+        // *** NOTES ***
+        // The trigger source must be set to hardware or software while trigger
+        // mode is off.
+        //
+        CEnumerationPtr ptrTriggerSource = nodeMap.GetNode("TriggerSource");
+        if (!IsReadable(ptrTriggerSource) ||
+            !IsWritable(ptrTriggerSource))
+        {
+            cout << "Unable to get or set trigger mode (node retrieval). Aborting..." << endl;
+            return -1;
+        }
+
+        if (chosenTrigger == SOFTWARE)
+        {
+            // Set trigger mode to software
+            CEnumEntryPtr ptrTriggerSourceSoftware = ptrTriggerSource->GetEntryByName("Software");
+            if (!IsReadable(ptrTriggerSourceSoftware))
+            {
+                cout << "Unable to set trigger mode (enum entry retrieval). Aborting..." << endl;
+                return -1;
+            }
+
+            ptrTriggerSource->SetIntValue(ptrTriggerSourceSoftware->GetValue());
+
+            cout << "Trigger source set to software..." << endl;
+        }
+        else if (chosenTrigger == HARDWARE)
+        {
+            // Set trigger mode to hardware ('Line0')
+            CEnumEntryPtr ptrTriggerSourceHardware = ptrTriggerSource->GetEntryByName("Line0");
+            if (!IsReadable(ptrTriggerSourceHardware))
+            {
+                cout << "Unable to set trigger mode (enum entry retrieval). Aborting..." << endl;
+                return -1;
+            }
+
+            ptrTriggerSource->SetIntValue(ptrTriggerSourceHardware->GetValue());
+
+            cout << "Trigger source set to hardware..." << endl;
+        }
+
+        //
+        // Turn trigger mode on
+        //
+        // *** LATER ***
+        // Once the appropriate trigger source has been set, turn trigger mode
+        // on in order to retrieve images using the trigger.
+        //
+
+        CEnumEntryPtr ptrTriggerModeOn = ptrTriggerMode->GetEntryByName("On");
+        if (!IsReadable(ptrTriggerModeOn))
+        {
+            cout << "Unable to enable trigger mode (enum entry retrieval). Aborting..." << endl;
+            return -1;
+        }
+
+        ptrTriggerMode->SetIntValue(ptrTriggerModeOn->GetValue());
+
+        // NOTE: Blackfly and Flea3 GEV cameras need 1 second delay after trigger mode is turned on
+
+        cout << "Trigger mode turned back on..." << endl << endl;
+    }
+    catch (Spinnaker::Exception& e)
+    {
+        cout << "Error: " << e.what() << endl;
+        result = -1;
+    }
+
+    return result;
+}
+
+// This function returns the camera to a normal state by turning off trigger
+// mode.
+int ResetTrigger(INodeMap& nodeMap)
+{
+    int result = 0;
+
+    try
+    {
+        //
+        // Turn trigger mode back off
+        //
+        // *** NOTES ***
+        // Once all images have been captured, turn trigger mode back off to
+        // restore the camera to a clean state.
+        //
+        CEnumerationPtr ptrTriggerMode = nodeMap.GetNode("TriggerMode");
+        if (!IsReadable(ptrTriggerMode))
+        {
+            cout << "Unable to disable trigger mode (node retrieval). Non-fatal error..." << endl;
+            return -1;
+        }
+
+        CEnumEntryPtr ptrTriggerModeOff = ptrTriggerMode->GetEntryByName("Off");
+        if (!IsReadable(ptrTriggerModeOff))
+        {
+            cout << "Unable to disable trigger mode (enum entry retrieval). Non-fatal error..." << endl;
+            return -1;
+        }
+
+        ptrTriggerMode->SetIntValue(ptrTriggerModeOff->GetValue());
+
+        cout << "Trigger mode disabled..." << endl << endl;
+    }
+    catch (Spinnaker::Exception& e)
+    {
+        cout << "Error: " << e.what() << endl;
+        result = -1;
+    }
+
+    return result;
+}
+
+
 // Disables or enables heartbeat on GEV cameras so debugging does not incur timeout errors
 int ConfigureGVCPHeartbeat(CameraPtr pCam, bool enable)
 {
@@ -180,6 +387,18 @@ int AcquireImages(CameraPtr pCam) //, INodeMap& nodeMap, INodeMap& nodeMapTLDevi
     mapped_region shmem_region2{ shmem2, read_write };
 #endif //0
 
+		INodeMap& nodeMap = pCam->GetNodeMap();
+
+    // Execute software trigger
+    CCommandPtr ptrSoftwareTriggerCommand = nodeMap.GetNode("TriggerSoftware");
+    if (!IsWritable(ptrSoftwareTriggerCommand))
+      {
+        cout << "Unable to execute trigger. Aborting..." << endl;
+        return -1;
+      }
+
+    ptrSoftwareTriggerCommand->Execute();
+
 //cout << endl << endl << "*** IMAGE ACQUISITION ***" << endl << endl;
 	// Retrieve, convert, and save images
 	const unsigned int k_numImages = 1;
@@ -255,25 +474,7 @@ int AcquireImages(CameraPtr pCam) //, INodeMap& nodeMap, INodeMap& nodeMapTLDevi
                     // serial numbers to keep images of one device from
                     // overwriting those of another.
                     //
-#if 0
-                    if (imageCnt == 99) {  // i.e., comment this out. Never do it. DRC
 
-                        // Create a unique filename
-                        ostringstream filename;
-
-                        filename << "Acquisition-";
-                        if (!deviceSerialNumber.empty())
-                        {
-                            filename << deviceSerialNumber.c_str() << "-";
-                        }
-                        filename << imageCnt << ".png";
-
-                        convertedImage->Save(filename.str().c_str());
-
-                        cout << "Image saved at " << filename.str() << endl;
-                    }
-#endif //0
-                    // DC NEW
                     struct shmem_header* pShmem = (struct shmem_header*) shmem_region.get_address();
 
                     pShmem->lock = (uint8_t)1; // Everyone keep out until we are done!
@@ -498,26 +699,7 @@ int ConfigureExposure(INodeMap& nodeMap, double exposureTimeToSet)
 // Example entry point; please see Enumeration example for more in-depth
 // comments on preparing and cleaning up the system.
 DECL init(void)
-//int main(int /*argc*/, char** /*argv*/)
 {
-#if 0
-    // Since this application saves images in the current folder
-    // we must ensure that we have permission to write to this folder.
-    // If we do not have permission, fail right away.
-    FILE* tempFile = fopen("test.txt", "w+");
-    if (tempFile == nullptr)
-    {
-        cout << "Failed to create file in current folder.  Please check "
-            "permissions."
-            << endl;
-        cout << "Press Enter to exit..." << endl;
-        getchar();
-        return -1;
-    }
-    fclose(tempFile);
-    remove("test.txt");
-#endif	
-
     // Print application build information
     cout << "Application build date: " << __DATE__ << " " << __TIME__ << endl << endl;
 
@@ -627,6 +809,8 @@ DECL init(void)
 
 		ConfigureExposure(nodeMap, 50);
 
+    ConfigureTrigger(nodeMap);
+
         //
         // Begin acquiring images
         //
@@ -662,7 +846,6 @@ DECL init(void)
         }
         cout << endl;
 
-
         //
         // Set default image processor color processing method
         //
@@ -681,7 +864,7 @@ DECL init(void)
 	return 0;
 }
 
-DECL process(char *) {
+DECL process(void) {
     int result = 0;
 
     // Run example on each camera
@@ -721,7 +904,7 @@ INodeMap& nodeMap = pCam->GetNodeMap();
 	return 0;
 }
 
-DECL plugin_close(void)
+DECL closex(void)
 {
 	int result=0;
 	try {
@@ -741,6 +924,9 @@ DECL plugin_close(void)
 	
 	pCam->EndAcquisition();
 			
+  INodeMap& nodeMap = pCam->GetNodeMap();
+  ResetTrigger(nodeMap);
+
     //
     // Release reference to the camera
     //
