@@ -13,6 +13,7 @@ from pyqtgraph.parametertree import Parameter, ParameterTree
 import numpy as np
 import sys
 import os
+import json
 
 import matplotlib.cm as cmap
 
@@ -293,12 +294,13 @@ class NextWaveMainWindow(QMainWindow):
     self.box_info = -1
     self.box_info_dlg = BoxInfoDialog("HiINFO",self)
 
-    #self.cx=518 # TODO
-    #self.cy=488 # TODO
-    self.cx=496 # TODO
-    self.cy=516 # TODO
-    #self.cx=1000 # TODO
-    #self.cy=1000 # TODO
+
+    f=open("./config.json")
+    self.json_data = json.load(f)
+    f.close()
+
+    self.cx=self.json_data["params"]["cx"]
+    self.cy=self.json_data["params"]["cy"]
 
     self.params = [
         {'name': 'UI', 'type': 'group', 'title':'User interface', 'children': [
@@ -619,17 +621,11 @@ class NextWaveMainWindow(QMainWindow):
  def update_ui_dm(self):
     if self.chkLoop.isChecked():
         self.actuator_plot.paintEvent_manual()
-<<<<<<< HEAD
-    if False:
-        if self.chkLoop.isChecked():
-            #self.sockets.alpao.send(b"L")
-=======
 
     # New method is to send the command somewhere else
     if False:
         if self.chkLoop.isChecked():
             self.sockets.alpao.send(b"L")
->>>>>>> 149b231da2600e1ce2777b945771f73de4dd474d
             self.actuator_plot.paintEvent_manual()
         else:
             #self.sockets.alpao.send(b"l")
@@ -991,9 +987,7 @@ class NextWaveMainWindow(QMainWindow):
      layout1 = QGridLayout(pages[2])
      lbl = QLabel("XML Config: ")
      layout1.addWidget(lbl, 0,0)
-     #self.edit_xml = QLineEdit('/home/dcoates/projects/yoon/MiniWaveConfiguration/aoCoatesTestbed.xml')
-     #self.edit_xml = QLineEdit('/home/dcoates/projects/yoon/MiniWaveConfiguration/aoMatlab.xml')
-     self.edit_xml = QLineEdit('c:/MiniWave/MiniWaveConfiguration/aoCoatesTestbed.xml')     
+     self.edit_xml = QLineEdit(self.json_data["params"]["xml_file"])
      layout1.addWidget(self.edit_xml, 0,1)
      btn = QPushButton("...")
      layout1.addWidget(btn, 0,2)

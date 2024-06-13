@@ -142,6 +142,11 @@ int load_module(std::string name, std::string params, std::list<struct module> &
 
   struct module aModule;
 
+  // If name does NOT begin with plugin, bail.
+  if (name.find("plugin") != 0) {
+    return -1;
+  };
+
   spdlog::info("Name: {}", name);
 #if _WIN64
   if (name=="plugin_centroiding") {

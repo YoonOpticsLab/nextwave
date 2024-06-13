@@ -1,11 +1,15 @@
 {
-    "plugin_flir":
+    "plugin_rawplayer":
     {"mode": "inline",
      "type": "generator",
      "filename": "../shifted.bin"},
 
     "plugin_centroiding":
     {"method": "single_pass"},
-	
-	"plugin_alpao": {}
+
+	"params":
+	{"cx":525,
+    	"cy":516,
+		"xml_file":"/home/dcoates/projects/yoon/MiniWaveConfiguration/aoCoatesTestbed.xml",
+		"influence_file":"/home/dcoates/share/InfluenceMatrix_ALPAO_10mm_.dat"}
 }

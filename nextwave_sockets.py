@@ -13,6 +13,17 @@ SOCKET_CAMERA=50007
 SOCKET_CENTROIDING=50008
 SOCKET_ALPAO=50010
 
+class SocketDummy():
+    def __init__(self,port):
+        self.port=port
+        self.s = None
+
+    def init(self):
+        return
+
+    def send(self,msg):
+        return
+
 class SocketComponent():
     def __init__(self,port):
         self.port=port
@@ -41,12 +52,16 @@ class NextwaveSocketComm():
         self.camera = SocketComponent(SOCKET_CAMERA)
         self.camera.init()
         time.sleep(0.5)
+
         self.centroiding = SocketComponent(SOCKET_CENTROIDING)
         self.centroiding.init()
-        
-        self.alpao = SocketComponent(SOCKET_ALPAO)
+
+        if "plugin_alpao" in self.ui.json_data:
+            self.alpao = SocketComponent(SOCKET_ALPAO)
+        else:
+            print("loaded Dumpmy AO")
+            self.alpao = SocketDummy(SOCKET_ALPAO)
         self.alpao.init()
-        #os.sleep(0.5)
 
 def do_listen(fn_callback, port):
    #fn_callback=args[0]

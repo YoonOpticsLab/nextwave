@@ -402,8 +402,10 @@ class NextwaveEngineComm():
         self.zterms_inv = np.linalg.pinv(self.zterms)
 
     def update_influence(self):
-        #influence = np.loadtxt('/home/dcoates/share/InfluenceMatrix_ALPAO_10mm_.dat', skiprows=1)
-        influence = np.loadtxt('c:\MiniWave\MiniWaveConfiguration\InfluenceMatrix_ALPAO_10mm_.dat', skiprows=1)
+        #try:
+        influence = np.loadtxt(self.ui.json_data["params"]["influence_file"], skiprows=1)
+        #except:
+            #influence = np.random.normal ( loc=0, scale=0.01, size=(97, self.num_boxes * 2)  )
         valid_idx=np.sum(influence**2,0)>0 # TODO... base on pupil size or something?
         self.influence = influence[:, valid_idx]
         self.influence_inv = np.linalg.pinv(self.influence) # pseudoinverse
@@ -531,27 +533,27 @@ class NextwaveEngineComm():
         return self.image
 
     def receive_centroids(self):
-        SIZEOF_FLOAT=8
+        SIZEOF_DOUBLE=8
         fields=self.layout_boxes[1]
         self.shmem_boxes.seek(fields['centroid_x']['bytenum_current'])
-        buf=self.shmem_boxes.read(self.num_boxes*SIZEOF_FLOAT)
+        buf=self.shmem_boxes.read(self.num_boxes*SIZEOF_DOUBLE)
         self.centroids_x=struct.unpack_from(''.join((['d']*self.num_boxes)), buf)
 
         self.shmem_boxes.seek(fields['centroid_y']['bytenum_current'])
-        buf=self.shmem_boxes.read(self.num_boxes*SIZEOF_FLOAT)
+        buf=self.shmem_boxes.read(self.num_boxes*SIZEOF_DOUBLE)
         self.centroids_y=struct.unpack_from(''.join((['d']*self.num_boxes)), buf)
 
         self.shmem_boxes.seek(fields['delta_x']['bytenum_current'])
-        buf=self.shmem_boxes.read(self.num_boxes*SIZEOF_FLOAT)
+        buf=self.shmem_boxes.read(self.num_boxes*SIZEOF_DOUBLE)
         self.delta_x=struct.unpack_from(''.join((['d']*self.num_boxes)), buf)
 
         self.shmem_boxes.seek(fields['delta_y']['bytenum_current'])
-        buf=self.shmem_boxes.read(self.num_boxes*SIZEOF_FLOAT)
+        buf=self.shmem_boxes.read(self.num_boxes*SIZEOF_DOUBLE)
         self.delta_y=struct.unpack_from(''.join((['d']*self.num_boxes)), buf)
 
         self.shmem_boxes.seek(fields['mirror_voltages']['bytenum_current'])
-        buf=self.shmem_boxes.read(self.num_boxes*SIZEOF_FLOAT)
-        self.mirror_voltages=struct.unpack_from(''.join((['d']*self.nActuators)), buf)
+        buf=self.shmem_boxes.read(self.num_boxes*SIZEOF_DOUBLE)
+        self.mirror_voltages=np.array( struct.unpack_from(''.join((['d']*self.nActuators)), buf) )
 
         DEBUGGING=False
         if DEBUGGING:
