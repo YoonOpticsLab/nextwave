@@ -295,7 +295,7 @@ class NextWaveMainWindow(QMainWindow):
 
     #self.cx=518 # TODO
     #self.cy=488 # TODO
-    self.cx=526 # TODO
+    self.cx=496 # TODO
     self.cy=516 # TODO
     #self.cx=1000 # TODO
     #self.cy=1000 # TODO
@@ -619,9 +619,17 @@ class NextWaveMainWindow(QMainWindow):
  def update_ui_dm(self):
     if self.chkLoop.isChecked():
         self.actuator_plot.paintEvent_manual()
+<<<<<<< HEAD
     if False:
         if self.chkLoop.isChecked():
             #self.sockets.alpao.send(b"L")
+=======
+
+    # New method is to send the command somewhere else
+    if False:
+        if self.chkLoop.isChecked():
+            self.sockets.alpao.send(b"L")
+>>>>>>> 149b231da2600e1ce2777b945771f73de4dd474d
             self.actuator_plot.paintEvent_manual()
         else:
             #self.sockets.alpao.send(b"l")
