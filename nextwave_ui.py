@@ -952,6 +952,18 @@ class NextWaveMainWindow(QMainWindow):
      self.chkLoop = QCheckBox("Close AO Loop")
      layout1.addWidget(self.chkLoop,0,0)
 
+     btn = QPushButton("Save flat")
+     btn.clicked.connect(self.flat_save)
+     layout1.addWidget(btn, 0,3 )
+
+     btn = QPushButton("Do flat")
+     btn.clicked.connect(self.flat_do)
+     layout1.addWidget(btn, 0,1 )
+
+     btn = QPushButton("Do zero")
+     btn.clicked.connect(self.zero_do)
+     layout1.addWidget(btn, 0,2 )
+
      btn = QPushButton("Search box shift")
      btn.clicked.connect(lambda: self.showdialog("Shift search boxes", self.engine.shift_search_boxes ) )
      layout1.addWidget(btn, 1,0 )
@@ -1099,6 +1111,16 @@ class NextWaveMainWindow(QMainWindow):
  def slider_gain_changed(self):
      scaled = self.slider_gain.value()/100.0*CAM_GAIN_MAX
      self.gain.setValue(scaled)
+
+ def flat_save(self):
+     self.engine.flat_save()
+     return
+ def flat_do(self):
+     self.engine.flat_do()
+     return
+ def zero_do(self):
+     self.engine.zero_do()
+     return
 
  def iterative_step(self):
      try:
