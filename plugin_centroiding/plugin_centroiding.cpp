@@ -384,8 +384,8 @@ int find_cendroids_af(unsigned char *buffer, int width, int height) {
   gaf->slopes = af::moddims(gaf->slopes,af::dim4(1,num_boxes*2,1,1) ); // like flatten, but in 2nd dimension
   gaf->slopes /= (24000.0/11.0); // TODO: use focal length, etc.
   
-  gaf->mirror_voltages = af::matmul(gaf->slopes.as(f32), gaf->influence_inv.as(f32) );
-  float *host_mirror_voltages = gaf->mirror_voltages.host<float>();
+  gaf->mirror_voltages = af::matmul(gaf->slopes, gaf->influence_inv );
+  double *host_mirror_voltages = gaf->mirror_voltages.host<double>();
 #endif //0
   //spdlog::info( '{}',  (float)af::mean<float>(gaf->influence_inv) );
   //spdlog::info("INF MAX: {}", (float)af::max<float>(gaf->influence_inv));
