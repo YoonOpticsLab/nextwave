@@ -214,7 +214,7 @@ class ActuatorPlot(QLabel):
             #for x in np.arange(11):
                 #self.bits[y,x]=int(x*(256/11) )
         #self.bits = np.random.normal( size=(11,11))*32+128
-        np.savetxt("/tmp/bits.txt", self.bits)
+        #np.savetxt("/tmp/bits.txt", self.bits)
         # calculate the total number of bytes in the frame 
         width=self.bits.shape[0]
         height=self.bits.shape[1]
