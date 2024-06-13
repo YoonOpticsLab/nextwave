@@ -171,99 +171,65 @@ class BoxInfoDialog(QDialog):
     def closeEvent(self, event):
         self.ui_parent.box_info = -1
 
+
+def actuator_color(nval):
+        if 0<nval<64:
+            colr=QtGui.qRgb(255-nval,0,0)
+        elif nval>(256-64): # TODO check this
+            colr=QtGui.qRgb(0,nval,0)
+        else:
+            colr=QtGui.qRgb(nval,nval,nval) # Middle values are gray
+        return colr
+
 class ActuatorPlot(QLabel):
-    def __init__(self, *args, **kwargs):
+    def __init__(self, ui_parent, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        #self.generatePicture()
-        #self.init_ui()
 
-    #def init_ui(self):
-        #self.show()
-        #boxes1=[QLineF(self.engine.box_x[n]-box_size_pixel//2+BOX_BORDER, # top
+        #self.setGeometry(QtCore.QRect(0,0,spectroWidth,spectroHeight))
+        self.ui_parent = ui_parent
+        #self.pixmap = QPixmap(11,11)
+        #self.bits=np.random.normal(size=(11,11))*32+128
+        self.bits=np.zeros( (11,11), dtype='uint8')
+        #self.qi = QImage(self.bits*0,self.bits.shape[0],self.bits.shape[1],QImage.Format_Indexed8)
 
-        self.pixmap = QPixmap(10,10)
+        self.map_rows=(list(range(3,8))+list(range(2,9))+list(range(1,10))+list(range(0,11))*5+
+                       list(range(1,10)) + list(range(2,9)) + list(range(3,8)) )
 
-        bits=np.random.normal(size=(10,10))*32+128
-        self.qi = QImage(bits*0,10,10,QImage.Format_Indexed8)
+        self.map_cols=[0]*5+[1]*7+[2]*9+[3]*11+[4]*11+[5]*11+[6]*11+[7]*11+[8]*9+[9]*7+[10]*5
 
-    def set_colors(self):
+        self.act_colors = [actuator_color(nwhich) for nwhich in np.arange(256)]
+
+    def set_colors(self,widg):
         #https://het.as.utexas.edu/HET/Software/html/qimage.html#image-transformations
         #https://stackoverflow.com/questions/35382088/qimage-custom-indexed-colors-using-setcolortable
-        for n in np.arange(256):
-            if 0<n<64:
-                val=QtGui.qRgb(255-n,0,0)
-            elif n>=(256-64): # TODO check this
-                val=QtGui.qRgb(0,n,0)
-            else:
-                val=QtGui.qRgb(n,n,n) # Middle values are gray
-            self.qi.setColor(n, val)
-
-    def generatePicture(self):
-        ## pre-computing a QPicture object allows paint() to run much more quickly, 
-        ## rather than re-drawing the shapes every time.
-        self.picture = QtGui.QPicture()
-        p = QtGui.QPainter(self.picture)
-        p.setPen(pg.mkPen('w'))
-        data = [  ## fields are (time, open, close, min, max).
-    (1., 10, 13, 5, 15),
-    (2., 13, 17, 9, 20),
-    (3., 17, 14, 11, 23),
-    (4., 14, 15, 5, 19),
-    (5., 15, 9, 8, 22),
-    (6., 9, 15, 8, 16),
-]
-        w = (data[1][0] - data[0][0]) / 3.
-        for (t, open, close, min, max) in data:
-            p.drawLine(QtCore.QPointF(t, min), QtCore.QPointF(t, max))
-            if open > close:
-                p.setBrush(pg.mkBrush('r'))
-            else:
-                p.setBrush(pg.mkBrush('g'))
-            p.drawRect(QtCore.QRectF(t-w, open, w*2, close-open))
-        p.drawPicture(0,0,self.picture)
+        [widg.setColor(n, self.act_colors[n]) for n in np.arange(256)]
 
     def paintEvent_manual(self): #, p, *args):
-        #bits[0,0]=128
-        #bits[9,9]=128
-        #yybits=np.random.normal(0,255,size=(10,10), dtype='uint8' )
-        #qi.setColorTable(self.ct)
-        #self.generatePicture()
-        #self.setStyleSheet("background-color:black;");
-        #self.pixmap.fill(Qt.black)
-        #for n in np.arange(256):
-            #val = QtGui.qRgb(*self.ct[n])
-            #self.qi.setColor(n, val)
-        #self.qi.loadFromData(bits)
-
-        bits=np.array(np.random.normal(size=(10,10))*32+128, dtype='uint8' )
-        bits[0,0:3]=0
-        bits[1,0:2]=0
-        bits[2,0:1]=0
-        bits[0,-3:]=0
-        bits[1,-2:]=0
-        bits[2,-1:]=0
-
-        bits[-1,0:3]=0
-        bits[-2,0:2]=0
-        bits[-3,0:1]=0
-        bits[-1,-3:]=0
-        bits[-2,-2:]=0
-        bits[-3,-1:]=0
+        #mirror_vals=np.array(np.random.normal(size=(97)) )
+        #mirror_vals=np.linspace(-0.99,0.99,97)
+        mirror_vals = self.ui_parent.engine.mirror_voltages 
+        self.bits[ self.map_cols,self.map_rows] = mirror_vals * 128 + 128
+        #for y in np.arange(11):
+            #for x in np.arange(11):
+                #self.bits[y,x]=int(x*(256/11) )
+        #self.bits = np.random.normal( size=(11,11))*32+128
+        np.savetxt("/tmp/bits.txt", self.bits)
         # calculate the total number of bytes in the frame 
-        width=10
-        height = 10
-        totalBytes = bits.nbytes
+        width=self.bits.shape[0]
+        height=self.bits.shape[1]
+        totalBytes = self.bits.nbytes
         bytesPerLine = int(totalBytes/height)
 
         # Needed to fix skew problem.
         #https://stackoverflow.com/questions/41596940/qimage-skews-some-images-but-not-others
 
         #image = QImage(bits, width, height, bytesPerLine, QImage.Format_Grayscale8)
-
         #self.imageLabel.setPixmap(QPixmap.fromImage(image))
+        #self.set_colors(self.qi)
 
-        self.qi = QImage(bits,width,height,bytesPerLine,QImage.Format_Indexed8)
-        self.set_colors()
+        self.qi = QImage(self.bits,width,height,bytesPerLine,QImage.Format_Indexed8)
+        self.qi.setColorTable(self.act_colors)
+        self.setPixmap(QPixmap.fromImage(self.qi).scaled(self.height(),self.width(),Qt.KeepAspectRatio) )
 
         #qp = QPainter(self.qi)
         #qp.setBrush(br)
@@ -271,9 +237,9 @@ class ActuatorPlot(QLabel):
         #qp.setBrush(QtGui.QColor(200,0,0)) 
         #qp.drawRect(10, 10, 30,30)
         #qp.end()
-        pixmap = QPixmap(self.qi)
-        pixmap = pixmap.scaled(self.height(),self.width(),Qt.KeepAspectRatio)
-        self.setPixmap(pixmap)
+        #pixmap = QPixmap(self.qi)
+        #pixmap = pixmap.scaled(self.height(),self.width(),Qt.KeepAspectRatio)
+        #self.setPixmap(pixmap)
 
 class MyBarWidget(pg.PlotWidget):
 
@@ -329,7 +295,7 @@ class NextWaveMainWindow(QMainWindow):
 
     #self.cx=518 # TODO
     #self.cy=488 # TODO
-    self.cx=516 # TODO
+    self.cx=526 # TODO
     self.cy=516 # TODO
     #self.cx=1000 # TODO
     #self.cy=1000 # TODO
@@ -651,12 +617,15 @@ class NextWaveMainWindow(QMainWindow):
     self.bar_plot.showGrid(x=False,y=True)
 
  def update_ui_dm(self):
+    if self.chkLoop.isChecked():
+        self.actuator_plot.paintEvent_manual()
     if False:
         if self.chkLoop.isChecked():
-            self.sockets.alpao.send(b"L")
-            # self.actuator_plot.paintEvent_manual()
+            #self.sockets.alpao.send(b"L")
+            self.actuator_plot.paintEvent_manual()
         else:
-            self.sockets.alpao.send(b"l")
+            #self.sockets.alpao.send(b"l")
+            pass
 
  def set_follow(self,state):
     buf = ByteStream()
@@ -805,7 +774,7 @@ class NextWaveMainWindow(QMainWindow):
      layout=QVBoxLayout(self.widget_displays)
      layout.addWidget(QGroupBox('Pupil'))
      #layout.addWidget(QGroupBox('DM'))
-     self.actuator_plot = ActuatorPlot()
+     self.actuator_plot = ActuatorPlot(self)
      self.actuator_plot.resize(200,200)
      #layout.addWidget(QGroupBox('Wavefront'))
      #layout.addWidget(QGroupBox('PSF'))
@@ -1153,7 +1122,7 @@ class NextWaveMainWindow(QMainWindow):
 
  def set_m(self, doit):
      if doit:
-         self.m=10
+         self.m = round( self.engine.box_size_pixel )
      else:
          self.m=1
 
