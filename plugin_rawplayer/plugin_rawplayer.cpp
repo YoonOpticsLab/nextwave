@@ -114,7 +114,7 @@ pShmem->current_frame = (uint8_t)nCurrRing;
 pShmem->timestamps[nCurrRing] = (uint8_t)NW_STATUS_READ;
 pShmem->timestamps[nCurrRing] = time_highres();
 
-//spdlog::info("Sent. {} {} {}", height, width, (int)buffer[0]);
+ pShmem->lock = (uint8_t)0; // Everyone keep out until we are done!
 
   return; 
 }
@@ -173,9 +173,8 @@ DECL process(char *params)
 	pShmem->lock = (uint8_t)0; // Keep out until we are done!
 
 	nCurrRing += 1;
-	if (nCurrRing >= 1) nCurrRing = 0;
-
-//spdlog::info("Sent. {} {} {}", height, width, (int)buffer[0]);
+	if (nCurrRing >= NW_MAX_FRAMES)
+    nCurrRing = 0;
 
 	return 0;
 };

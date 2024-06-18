@@ -399,12 +399,8 @@ int AcquireImages(CameraPtr pCam) //, INodeMap& nodeMap, INodeMap& nodeMapTLDevi
 
     ptrSoftwareTriggerCommand->Execute();
 
-//cout << endl << endl << "*** IMAGE ACQUISITION ***" << endl << endl;
-	// Retrieve, convert, and save images
-	const unsigned int k_numImages = 1;
 	try {
 
-        for (unsigned int imageCnt = 0; (imageCnt < k_numImages) && (GetKeyState('Q') == 0); imageCnt++)
         {
             try
             {
