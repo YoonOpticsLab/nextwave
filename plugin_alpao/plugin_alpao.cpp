@@ -81,21 +81,38 @@ DECL process(char *commands)
   double val;
   for( int i=0; i<num_act; i++) {
 	  val= pShmemBoxes->mirror_voltages[i];
-	  data[i] = (acs::Scalar)val;
 	  
 	  if (val<mymin) mymin=val;
 	  if (val>mymax) mymax=val;
 	  mymean += val;
+
+	  // CLAMP
+	  if (val > 0.7)
+		val=0.7;
+	  if (val < -0.7)
+		val=-0.7;  
+
+	  data[i] = (acs::Scalar)val;	  
   };
   
   mymean /= num_act;
   
-  //spdlog::info("DM Loop:{} #{}:{}x{} {}{} min:{:0.4f} max:{:0.4f}, mean:{:0.4f} 0:{:0.4f} 1:{:0.4f} {}", loop, nCurrRing, height, width,
-//		commands[0], commands[1], mymin, mymax, mymean, data[0], data[1], val );
+  spdlog::info("DM Loop:{} #{}:{}x{} {}{} min:{:0.4f} max:{:0.4f}, mean:{:0.4f} 0:{:0.4f} 1:{:0.4f} {}", loop, nCurrRing, height, width,
+		commands[0], commands[1], mymin, mymax, mymean, data[0], data[1], val );
   
   if (loop) {
-#if REAL_AO	  
-	dm->Send(data);
+#if REAL_AO	 
+	// Copied from documentation in ALPAO SDK3 Programmer's Guide  (pg 13/18)
+	// Not sure why/if Stop() is needed.. (drc 06/2024)
+	try
+	{
+	 dm->Send( data );
+	 dm->Stop();
+	}
+	catch (std::exception e)
+	{
+		spdlog::error("ALPAO DM error: {}",e.what() );
+	}
 #endif
   };
   

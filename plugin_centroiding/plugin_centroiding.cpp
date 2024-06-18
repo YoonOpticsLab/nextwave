@@ -389,8 +389,8 @@ int find_cendroids_af(unsigned char *buffer, int width, int height) {
 #endif //0
   //spdlog::info( '{}',  (float)af::mean<float>(gaf->influence_inv) );
   //spdlog::info("INF MAX: {}", (float)af::max<float>(gaf->influence_inv));
-  spdlog::info("Mirror {} max: {} 0:{}",(float)af::count<float>(gaf->mirror_voltages) , (float)af::max<float>(gaf->mirror_voltages),
-	host_mirror_voltages[0]);
+  //spdlog::info("Mirror {} max: {} 0:{}",(float)af::count<float>(gaf->mirror_voltages) , (float)af::max<float>(gaf->mirror_voltages),
+	//host_mirror_voltages[0]);
 
 #if 0
   if (pShmemBoxes->header_version & 2) //Follow
@@ -433,7 +433,7 @@ int find_cendroids_af(unsigned char *buffer, int width, int height) {
 	}
 
 	mirror_mean /= nActuators;
-  spdlog::info("Mirror {}:{}/{} 0:{}", (double)mirror_mean, (double)mirror_min, (double) mirror_max, (double)pShmemBoxes->mirror_voltages[0] );
+  //spdlog::info("Mirror {}:{}/{} 0:{}", (double)mirror_mean, (double)mirror_min, (double) mirror_max, (double)pShmemBoxes->mirror_voltages[0] );
 		
 #endif //0
 
