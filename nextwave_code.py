@@ -505,6 +505,10 @@ class NextwaveEngineComm():
     def receive_image(self):
         # TODO: Wait until it's safe (unlocked)
 
+        #TODO. Could use this method to read everything into memory. Probably more efficient:
+        #self.shmem_hdr.seek(0)
+        #mem_header=self.shmem_hdr.read(MEM_LEN)
+
         # This divider needs to match that in the engine code
         self.fps0=extract_memory.get_array_item2(self.layout,self.shmem_hdr,'fps',0, False)/100.0
         self.fps1=extract_memory.get_array_item2(self.layout,self.shmem_hdr,'fps',1, False)/100.0
@@ -513,8 +517,7 @@ class NextwaveEngineComm():
         self.height=extract_memory.get_array_item2(self.layout,self.shmem_hdr,'dimensions',0, False)
         self.width=extract_memory.get_array_item2(self.layout,self.shmem_hdr,'dimensions',1, False)
 
-        self.shmem_hdr.seek(0)
-        mem_header=self.shmem_hdr.read(MEM_LEN)
+        self.total_frames=extract_memory.get_array_item2(self.layout,self.shmem_hdr,'total_frames',0, False)
 
         self.shmem_data.seek(0)
         im_buf=self.shmem_data.read(self.width*self.height)
@@ -614,7 +617,7 @@ class NextwaveEngineComm():
         if reinit:
             self.init_params()
         val=9 if self.ui.chkLoop.isChecked() else 8
-            
+
         buf = ByteStream()
         buf.append(val) # TODO: Greater than MODE_CEN_ONE
         self.shmem_hdr.seek(2) #TODO: get address

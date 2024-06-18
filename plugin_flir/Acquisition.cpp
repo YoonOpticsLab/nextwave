@@ -400,11 +400,8 @@ int AcquireImages(CameraPtr pCam) //, INodeMap& nodeMap, INodeMap& nodeMapTLDevi
 	// Fire software trigger to start acquisition of new image
     ptrSoftwareTriggerCommand->Execute();
 
-	// Retrieve, convert, and save images
-	const unsigned int k_numImages = 1;
 	try {
 
-        for (unsigned int imageCnt = 0; (imageCnt < k_numImages) && (GetKeyState('Q') == 0); imageCnt++)
         {
             try
             {

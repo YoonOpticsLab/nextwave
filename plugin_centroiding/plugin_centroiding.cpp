@@ -266,12 +266,17 @@ PLUGIN_API(centroiding,init,char *params)
     af::setBackend(AF_BACKEND_CUDA);
     spdlog::info("Set AF_BACKEND_CUDA");
   } catch (...){
-      try {
-      af::setBackend(AF_BACKEND_CPU);
-      spdlog::info("Set AF_BACKEND_CPU");
-    } catch (...){
-      spdlog::error("Couldn't load any AF_BACKEND!!");
-    }
+	  try {
+		af::setBackend(AF_BACKEND_OPENCL);
+		spdlog::info("Set AF_BACKEND_OPENCL");
+	  } catch (...){
+		  try {
+			  af::setBackend(AF_BACKEND_CPU);
+			  spdlog::info("Set AF_BACKEND_CPU");
+		} catch (...){
+		  spdlog::error("Couldn't load any AF_BACKEND!!");
+		}
+	  }
   }
 
   plugin_access_shmem();
@@ -409,33 +414,37 @@ int find_cendroids_af(unsigned char *buffer, int width, int height) {
   memcpy(pShmemBoxes->centroid_x, host_x, sizeof(CALC_TYPE)*num_boxes);
   memcpy(pShmemBoxes->centroid_y, host_y, sizeof(CALC_TYPE)*num_boxes);
   //memcpy(pShmemBoxes->mirror_voltages, host_mirror_voltages, sizeof(float)*nActuators);
-  
+
   double mirror_min=10, mirror_max=-10, mirror_mean=0;
 	for (int i=0; i<nActuators; i++) {
-		
+
 	  if (pShmem->mode == 3 || pShmem->mode==9 ) {
-		  // Add new voltages to old
+		  // If closed loop, add new voltages to old
 		  pShmemBoxes->mirror_voltages[i] = pShmemBoxes->mirror_voltages[i] + host_mirror_voltages[i];
 	  }
-	  
+
 	  // CLAMP
 	  if (pShmemBoxes->mirror_voltages[i] > 0.7)
-		pShmemBoxes->mirror_voltages[i]=0.7;
+      pShmemBoxes->mirror_voltages[i]=0.7;
 	  if (pShmemBoxes->mirror_voltages[i] < -0.7)
-		pShmemBoxes->mirror_voltages[i]=-0.7;
+      pShmemBoxes->mirror_voltages[i]=-0.7;
 
+    // Just for statistics
 	  if (pShmemBoxes->mirror_voltages[i] > mirror_max)
-		mirror_max=pShmemBoxes->mirror_voltages[i];
+      mirror_max=pShmemBoxes->mirror_voltages[i];
 	  if (pShmemBoxes->mirror_voltages[i] < mirror_min)
-		mirror_min=pShmemBoxes->mirror_voltages[i];
+      mirror_min=pShmemBoxes->mirror_voltages[i];
 
 	  mirror_mean += pShmemBoxes->mirror_voltages[i];
 	}
 
+  memcpy(gpShmemLog[gpShmemHeader->total_frames].centroid_x, host_x, sizeof(CALC_TYPE)*num_boxes);
+  memcpy(gpShmemLog[gpShmemHeader->total_frames].centroid_y, host_y, sizeof(CALC_TYPE)*num_boxes);
+  memcpy(gpShmemLog[gpShmemHeader->total_frames].mirrors, pShmemBoxes->mirror_voltages, sizeof(CALC_TYPE)*nActuators);
+
 	mirror_mean /= nActuators;
   //spdlog::info("Mirror {}:{}/{} 0:{}", (double)mirror_mean, (double)mirror_min, (double) mirror_max, (double)pShmemBoxes->mirror_voltages[0] );
-		
-#endif //0
+#endif //1
 
   af::freeHost(host_x);
   af::freeHost(host_y);

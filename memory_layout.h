@@ -32,6 +32,7 @@ struct shmem_header
 	uint16_t fps[3];
 	uint8_t num_ring_frames;
 	uint8_t current_frame;
+	uint64_t total_frames;
 	uint8_t max_frames=NW_MAX_FRAMES;
 	uint64_t timestamps[NW_MAX_FRAMES];
 	uint64_t statuses[NW_MAX_FRAMES];

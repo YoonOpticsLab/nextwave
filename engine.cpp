@@ -118,6 +118,7 @@ using json=nlohmann::ordered_json;
 #pragma pack(push,1)
 #include "memory_layout.h"
 #include "layout_boxes.h"
+#include "layout_log.h"
 #pragma pack(pop) // restore previous setting
 
 struct module {
@@ -169,7 +170,7 @@ int load_module(std::string name, std::string params, std::list<struct module> &
   };
 
   // Error check. What to do if can't load?
-  chkerr();
+  //chkerr();
 
   int (*fptr1)(const char*);
   int (*fptr2)(const char*);
@@ -226,20 +227,22 @@ int main(int argc, char** argv)
     windows_shared_memory shmem1(open_or_create, SHMEM_HEADER_NAME, read_write, (size_t)SHMEM_HEADER_SIZE);
     windows_shared_memory shmem2(open_or_create, SHMEM_BUFFER_NAME, read_write, (size_t)SHMEM_BUFFER_SIZE);
     windows_shared_memory shmem3(open_or_create, SHMEM_BUFFER_NAME_BOXES, read_write, (size_t)sizeof(shmem_boxes_header));
+    windows_shared_memory shmem4(open_or_create, SHMEM_LOG_NAME, read_write, (size_t)(sizeof(shmem_log_entry)*SHMEM_LOG_MAX));
 #else
-
     struct shm_remove
     {
       shm_remove() {
         shared_memory_object::remove(SHMEM_HEADER_NAME);
         shared_memory_object::remove(SHMEM_BUFFER_NAME);
         shared_memory_object::remove(SHMEM_BUFFER_NAME_BOXES);
+        shared_memory_object::remove(SHMEM_LOG_NAME);
         spdlog::info("Ok. removed");
       }
       ~shm_remove() {
         shared_memory_object::remove(SHMEM_HEADER_NAME);
         shared_memory_object::remove(SHMEM_BUFFER_NAME);
         shared_memory_object::remove(SHMEM_BUFFER_NAME_BOXES);
+        shared_memory_object::remove(SHMEM_LOG_NAME);
         spdlog::info("Removed"); }
     } remover;
 
@@ -249,6 +252,8 @@ int main(int argc, char** argv)
     shmem2.truncate((size_t)SHMEM_BUFFER_SIZE);
     shared_memory_object shmem3(open_or_create, SHMEM_BUFFER_NAME_BOXES, read_write);
     shmem3.truncate((size_t)sizeof(shmem_boxes_header));
+    shared_memory_object shmem4(open_or_create, SHMEM_LOG_NAME, read_write);
+    shmem4.truncate((size_t)(sizeof(shmem_log_entry)*SHMEM_LOG_MAX));
     //spdlog::info("Siz: {}",sizeof(shmem_boxes_header) );
 #endif
 
@@ -256,6 +261,7 @@ int main(int argc, char** argv)
     mapped_region shmem_region1{ shmem1, read_write };
     mapped_region shmem_region2{ shmem2, read_write };
     mapped_region shmem_region3{ shmem3, read_write };
+    mapped_region shmem_region4{ shmem4, read_write };
 
   // Read config file with modules
   std::list<struct module> listModules;
@@ -276,10 +282,16 @@ int main(int argc, char** argv)
 
   struct shmem_header* pShmem1 = (struct shmem_header*) shmem_region1.get_address();
   struct shmem_boxes_header* pShmemBoxes = (struct shmem_boxes_header*) shmem_region3.get_address();
+  struct shmem_log_entry* pShmemLog = (struct shmem_log_entry*) shmem_region4.get_address();
+ 
+  // Clear this before start anything since use as a sentinel
   pShmemBoxes->num_boxes=0;
 
-#define REPS 9999999
 #define REP_LOG 20
+
+#define CLOCK_MULT 1e5
+  typedef boost::chrono::duration<long long, boost::micro> microseconds_type;
+  typedef boost::chrono::seconds mst;
 
   while ( pShmem1->mode==MODE_OFF || pShmemBoxes->num_boxes==0 ) {
     // sleep until the UI is ready to tell us to do something
@@ -293,62 +305,71 @@ int main(int argc, char** argv)
   uint16_t ns[REP_LOG*4]; //TODO
   char str_message[64] = "    "; //.c_str();
   long int pipeline_count=0;
+  uint8_t bRunning=0;
+  boost::chrono::high_resolution_clock::time_point time_start = boost::chrono::high_resolution_clock::now();
 
   while ( pShmem1->mode!=MODE_QUIT ) {
 
     if (pShmem1->mode > MODE_READY ) {
-      //for (int pipeline_count=0; pipeline_count<REPS; pipeline_count++)
 
       if (pShmem1->mode == MODE_RUNONCE_CENTROIDING_AO) {
         str_message[0]='I'; // Re-init on "snap"
         str_message[1]='C'; // Re-init on "snap"
+        bRunning=0;
       } else if (pShmem1->mode == MODE_RUNONCE_CENTROIDING) {
         str_message[0]='I'; // Re-init on "snap"
         str_message[1]=' '; // Re-init on "snap"
-	  } else {
+        bRunning=0;
+      } else {
         str_message[0]=' ';
         str_message[1]=' ';
-	  }
 
-      high_resolution_clock::time_point time_total_before = high_resolution_clock::now();
+        if (!bRunning) { // If not running before, i.e. (re)-started
+          pShmem1->total_frames=0;
+          bRunning=1;
+          time_start = boost::chrono::high_resolution_clock::now();
+        }
+      }
+
+      boost::chrono::high_resolution_clock::time_point time_total_before = boost::chrono::high_resolution_clock::now();
+      boost::chrono::high_resolution_clock::time_point time_start_frame = boost::chrono::high_resolution_clock::now();
 
       int modnum=0;
       int logidx=pipeline_count % REP_LOG;
-      typedef boost::chrono::duration<long long, boost::micro> microseconds_type;
-      typedef boost::chrono::seconds mst;
-
-#define CLOCK_MULT 1e5
 
       uint16_t times_local[4]; //TODO
       double dur;
       uint16_t ms_times_100;
+      double times_before[4]; //TODO
       for (struct module it: listModules) {
-        //high_resolution_clock::time_point time_before = high_resolution_clock::now();
           boost::chrono::high_resolution_clock::time_point time_before = boost::chrono::high_resolution_clock::now();
 
           int result=(*it.fp_do_process)((const char*)str_message);
-  
-          boost::chrono::high_resolution_clock::time_point time_after = boost::chrono::high_resolution_clock::now();
-          //high_resolution_clock::time_point time_after = high_resolution_clock::now();
-          // duration<long int> time_span = duration_cast<duration<long int>>(time_after-time_before);
-          // microseconds_type micros = std::chrono::duration_cast< std::chrono::microseconds >( time_span );
 
-          // mst micros = boost::chrono::duration_cast< mst >( time_after - time_before );
+          boost::chrono::high_resolution_clock::time_point time_after = boost::chrono::high_resolution_clock::now();
           boost::chrono::duration<double>micros = time_after - time_before;
 
           dur = micros.count();
-          ms_times_100 = (uint16_t)(dur*CLOCK_MULT); 
+          ms_times_100 = (uint16_t)(dur*CLOCK_MULT);
 
           ns[logidx*3+modnum] = ms_times_100;
           times_local[modnum] = ms_times_100;
 
-          //std::cout << logidx << " took " << dur << " seconds " << ms_times_100 << " OR " << ns[logidx*2+modnum] << " OR " << times_local[modnum] << "\n";
+          boost::chrono::duration<double>time_since_start = time_before - time_start;
+          times_before[modnum] = time_since_start.count();
 
           modnum++;
         }
 
-        high_resolution_clock::time_point time_now = high_resolution_clock::now();
-        duration<double> time_span = duration_cast<duration<double>>(time_now - time_total_before);
+        pShmemLog[pShmem1->total_frames].frame_number=pShmem1->current_frame;
+        pShmemLog[pShmem1->total_frames].total_frame_number=pShmem1->total_frames;
+        pShmemLog[pShmem1->total_frames].time0=times_before[0];
+        pShmemLog[pShmem1->total_frames].time1=times_before[1];
+        pShmemLog[pShmem1->total_frames].time2=times_before[2];
+
+        boost::chrono::high_resolution_clock::time_point time_now = boost::chrono::high_resolution_clock::now();
+        //boost::chrono::duration<double> time_span = duration_cast<duration<double>>(time_now - time_total_before);
+        boost::chrono::duration<double> time_span = time_now - time_total_before;
         times_total[pipeline_count % 10] = time_span.count();
         pShmem1->fps[0]=(uint16_t)(CLOCK_MULT*time_span.count()); // TODO: take mean
 
@@ -356,6 +377,8 @@ int main(int argc, char** argv)
         pShmem1->fps[2]=times_local[1];
         //pShmem1->fps[1]=(uint16_t)(ns[logidx*2]);
         //pShmem1->fps[2]=(uint16_t)(ns[logidx*2+1]);
+
+        pShmem1->total_frames++;
 
         if ( pShmem1->header_version==99 || pShmem1->mode==MODE_QUIT ) {
           break;
@@ -368,7 +391,7 @@ int main(int argc, char** argv)
           pShmem1->mode = MODE_READY;
         }
 
-    } else { // don't do anything. Sleep a bit
+    } else { // Not running at all. Sleep a bit until summoned.
       std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
 

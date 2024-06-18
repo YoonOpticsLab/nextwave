@@ -560,10 +560,17 @@ class NextWaveMainWindow(QMainWindow):
     self.line_centery.setText(str(self.cy) )
 
     if self.engine.fps0!=0:
-        s="Running. %3.2f FPS (%04.2f ms: %04.1f+%04.2f ms)"%(1000/self.engine.fps0,self.engine.fps0, float(self.engine.fps1), float(self.engine.fps2)  )
+        # TODO: get state
+        s=""
+        if self.engine.mode==3:
+            s+="Running "
+        if self.chkLoop.isChecked():
+            s += "(AO) "
+        s+="%3.2f FPS (%04.2f ms: %04.1f+%04.2f ms)"%(1000/self.engine.fps0,self.engine.fps0, float(self.engine.fps1), float(self.engine.fps2)  )
+        s+="\nFrames: %d"%self.engine.total_frames
     else:
         s="0 fps"
-        
+
     self.label_status0.setText(s)
     self.label_status0.setStyleSheet("color: rgb(0, 255, 0); background-color: rgb(0,0,0);")
 
@@ -1179,8 +1186,8 @@ class NextWaveMainWindow(QMainWindow):
 
  def butt(self, event):
     print("clicked:", event.pos() )
-    x_scaled =event.pos().x() / SPOTS_WIDTH_WIN*992 # TODO: use image size
-    y_scaled =event.pos().y() / SPOTS_WIDTH_WIN*992 # TODO: use image size
+    x_scaled =event.pos().x() #/ SPOTS_WIDTH_WIN*992 # TODO: use image size
+    y_scaled =event.pos().y() #/ SPOTS_WIDTH_WIN*992 # TODO: use image size
     print("scaled: x,y ", x_scaled, y_scaled)
 
     which_box = np.where(np.all(
