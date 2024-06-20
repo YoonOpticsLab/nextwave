@@ -335,7 +335,7 @@ class NextwaveEngineComm():
         shmem_boxes.write(buf)
         shmem_boxes.flush()
 
-        if False:
+        if True:
             buf = ByteStream()
             for item in self.influence.T.flatten():
                 buf.append(item, 'd')
