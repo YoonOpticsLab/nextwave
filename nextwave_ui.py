@@ -1261,9 +1261,9 @@ class NextWaveMainWindow(QMainWindow):
  def mode_run(self):
     self.engine.mode_run()
  def mode_stop(self):
-    #self.engine.mode_stop()
+    self.engine.mode_stop()
     #self.sockets.camera.send(b"E=3.14")
-    self.engine.update_searchboxes()
+    #self.engine.update_searchboxes()
 
  def export(self):
     default_filename="centroids.dat"

@@ -625,8 +625,10 @@ class NextwaveEngineComm():
         self.shmem_hdr.flush()
 
     def mode_stop(self):
+        val=0
+        
         buf = ByteStream()
-        buf.append(255) # TODO: Back to ready
+        buf.append(val) # TODO: Back to ready
         self.shmem_hdr.seek(2) #TODO: get address
         self.shmem_hdr.write(buf)
         self.shmem_hdr.flush()

@@ -387,7 +387,7 @@ int find_cendroids_af(unsigned char *buffer, int width, int height) {
   // Assumed that the dimensions of infl match
   gaf->slopes = af::join(0, gaf->delta_x, gaf->delta_y);
   gaf->slopes = af::moddims(gaf->slopes,af::dim4(1,num_boxes*2,1,1) ); // like flatten, but in 2nd dimension
-  gaf->slopes /= (24000.0/11.0); // TODO: use focal length, etc.
+  gaf->slopes /= (24000.0/10.0) * (992.0/1000.0); // TODO: use focal length, etc.
   
   gaf->mirror_voltages = af::matmul(gaf->slopes, gaf->influence_inv );
   double *host_mirror_voltages = gaf->mirror_voltages.host<double>();
