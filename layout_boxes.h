@@ -26,7 +26,7 @@ struct shmem_boxes_header
 	CALC_TYPE box_x_normalized[MAX_BOXES];
 	CALC_TYPE box_y_normalized[MAX_BOXES];
 
-  CALC_TYPE influence_inv[MAX_TERMS];
+  CALC_TYPE influence_inv[MAX_TERMS]; 
 	
   CALC_TYPE delta_x[MAX_BOXES];
   CALC_TYPE delta_y[MAX_BOXES];

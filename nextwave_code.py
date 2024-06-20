@@ -335,6 +335,14 @@ class NextwaveEngineComm():
         shmem_boxes.write(buf)
         shmem_boxes.flush()
 
+        if False:
+            buf = ByteStream()
+            for item in self.influence.T.flatten():
+                buf.append(item, 'd')
+                shmem_boxes.seek(fields['influence']['bytenum_current'])
+                shmem_boxes.write(buf)
+                shmem_boxes.flush()
+
         buf = ByteStream()
         print(  "INF_INV %f"%np.max( self.influence_inv ) )
         for item in self.influence_inv.T.flatten():

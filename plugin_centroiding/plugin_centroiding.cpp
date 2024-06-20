@@ -90,6 +90,9 @@ public:
 
   af::dim4 new_dims;//(BOX_SIZE*BOX_SIZE,NBOXES); // AF stacks the boxes, so do this to reshape for easier sum reduction
 
+  af::array refs_next;
+  //af::dim4 ref_y_next;
+
   // These are "temp" & overwritten each time in the loop, but put here to avoid GC, etc. :
   af::array im2;
   af::array sums;
@@ -98,6 +101,7 @@ public:
   af::array x_reshape;
   af::array y_reshape;
 
+  //af::array influence;
   af::array influence_inv;
   af::array mirror_voltages;
   
@@ -246,10 +250,12 @@ void rcv_boxes(int width) {
   nActuators = pShmemBoxes->nActuators;
   nTerms = pShmemBoxes->nTerms;
 
+  //memcpy(local_buf, pShmemBoxes->influence, sizeof(CALC_TYPE) * nActuators*nTerms);
+	//gaf->influence = af::array(nActuators, nTerms, local_buf );
   memcpy(local_buf, pShmemBoxes->influence_inv, sizeof(CALC_TYPE) * nActuators*nTerms);
 	gaf->influence_inv = af::array(nTerms, nActuators, local_buf );
 
-	spdlog::info("CEN rcv: {} {} {} {} {} {} {}x{} infl_inv:{}x{} {}",
+	spdlog::info("CEN rcv: {} {} {} {} {} {} {}x{} infl:{}x{} {}",
 		num_boxes, pixel_um, box_size, box_size_float, pupil_radius_um, pupil_radius_pixels,
 		width, height, nTerms, nActuators, (float)af::mean<float>(gaf->influence_inv) );
 		
@@ -373,21 +379,22 @@ int find_cendroids_af(unsigned char *buffer, int width, int height) {
   // Compute deltas and write to shmem
   gaf->delta_x = gaf->ref_x - gaf->sums_x;
   gaf->delta_y = gaf->ref_y - gaf->sums_y;
-  CALC_TYPE *host_delta_x = gaf->delta_x.host<CALC_TYPE>();
-  CALC_TYPE *host_delta_y = gaf->delta_y.host<CALC_TYPE>();
-  //memcpy(pShmemBoxes->delta_x, host_delta_x, sizeof(float)*num_boxes);
-  //memcpy(pShmemBoxes->delta_y, host_delta_y, sizeof(float)*num_boxes);
 
   // Remove tip and tilt
   gaf->delta_x -= (CALC_TYPE)af::mean<CALC_TYPE>(gaf->delta_x);
   gaf->delta_y -= (CALC_TYPE)af::mean<CALC_TYPE>(gaf->delta_y);
   gaf->delta_y = -gaf->delta_y; // Negate y (coord system)
 
+  CALC_TYPE *host_delta_x = gaf->delta_x.host<CALC_TYPE>();
+  CALC_TYPE *host_delta_y = gaf->delta_y.host<CALC_TYPE>();
+  //memcpy(pShmemBoxes->delta_x, host_delta_x, sizeof(float)*num_boxes);
+  //memcpy(pShmemBoxes->delta_y, host_delta_y, sizeof(float)*num_boxes);
+
 #if 1
   // Assumed that the dimensions of infl match
   gaf->slopes = af::join(0, gaf->delta_x, gaf->delta_y);
   gaf->slopes = af::moddims(gaf->slopes,af::dim4(1,num_boxes*2,1,1) ); // like flatten, but in 2nd dimension
-  gaf->slopes /= (24000.0/11.0); // TODO: use focal length, etc.
+  gaf->slopes /= (24.0/10.0) * (992.0/1000.0); // TODO: use focal length, real pupil, etc. Check the equation
   
   gaf->mirror_voltages = af::matmul(gaf->slopes, gaf->influence_inv );
   double *host_mirror_voltages = gaf->mirror_voltages.host<double>();
@@ -404,6 +411,10 @@ int find_cendroids_af(unsigned char *buffer, int width, int height) {
     memcpy(pShmemBoxes->box_y, host_y, sizeof(float)*num_boxes);
   }
 #endif //0
+
+  //gaf->refs_next = af::matmul(gaf->mirror_voltages, gaf->influence );
+  //spdlog::info("influ: {}", (float)af::count<float>(gaf->refs_next));
+  //spdlog::info("influ: {}", (float)af::max<float>(gaf->refs_next));
 
 #if VERBOSE
   spdlog::info("Val0 x,y: {},{}",host_x[0],host_y[0]);
@@ -522,7 +533,6 @@ void process_ui_commands(void) {
     }
   }
 }
-
 
 PLUGIN_API(centroiding,process,char *params)
 {
