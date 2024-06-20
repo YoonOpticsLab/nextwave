@@ -389,9 +389,18 @@ int main(int argc, char** argv)
       // Ran once, unarm
         if (pShmem1->mode & MODE_RUNONCE_CENTROIDING ) {
           pShmem1->mode = MODE_READY;
-        }
+        } else {
+		
+			// TODO: Some kind of problems in closed loop... going too fast? 
+			std::this_thread::sleep_for(std::chrono::milliseconds(50));
+		}
+
 
     } else { // Not running at all. Sleep a bit until summoned.
+      bRunning=0;	  
+	  
+	  if (pShmem1->mode == MODE_OFF)
+		pShmem1->total_frames=0; // TODO: not sure if we want this long-term
       std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
 

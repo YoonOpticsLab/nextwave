@@ -397,6 +397,7 @@ int AcquireImages(CameraPtr pCam) //, INodeMap& nodeMap, INodeMap& nodeMapTLDevi
         return -1;
       }
 
+	// Fire software trigger to start acquisition of new image
     ptrSoftwareTriggerCommand->Execute();
 
 	try {
@@ -404,29 +405,9 @@ int AcquireImages(CameraPtr pCam) //, INodeMap& nodeMap, INodeMap& nodeMapTLDevi
         {
             try
             {
-                //
-                // Retrieve next received image
-                //
-                // *** NOTES ***
-                // Capturing an image houses images on the camera buffer. Trying
-                // to capture an image that does not exist will hang the camera.
-                //
-                // *** LATER ***
-                // Once an image from the buffer is saved and/or no longer
-                // needed, the image must be released in order to keep the
-                // buffer from filling up.
-                //
                 ImagePtr pResultImage = pCam->GetNextImage(1000);
 
-                //
                 // Ensure image completion
-                //
-                // *** NOTES ***
-                // Images can easily be checked for completion. This should be
-                // done whenever a complete image is expected or required.
-                // Further, check image status for a little more insight into
-                // why an image is incomplete.
-                //
                 if (pResultImage->IsIncomplete())
                 {
                     // Retrieve and print the image status description
@@ -436,40 +417,10 @@ int AcquireImages(CameraPtr pCam) //, INodeMap& nodeMap, INodeMap& nodeMapTLDevi
                 }
                 else
                 {
-                    //
-                    // Print image information; height and width recorded in pixels
-                    //
-                    // *** NOTES ***
-                    // Images have quite a bit of available metadata including
-                    // things such as CRC, image status, and offset values, to
-                    // name a few.
-                    //
                     const size_t width = pResultImage->GetWidth();
                     const size_t height = pResultImage->GetHeight();
 
-                    //cout << "Grabbed image " << imageCnt << ", width = " << width << ", height = " << height << nCurrRing << endl;
-
-                    //
-                    // Convert image to mono 8
-                    //
-                    // *** NOTES ***
-                    // Images can be converted between pixel formats by using
-                    // the appropriate enumeration value. Unlike the original
-                    // image, the converted one does not need to be released as
-                    // it does not affect the camera buffer.
-                    //
-                    // When converting images, color processing algorithm is an
-                    // optional parameter.
-                    //
                     ImagePtr convertedImage = processor.Convert(pResultImage, PixelFormat_Mono8);
-
-                    // Save first image
-                    //
-                    // *** NOTES ***
-                    // The standard practice of the examples is to use device
-                    // serial numbers to keep images of one device from
-                    // overwriting those of another.
-                    //
 
                     struct shmem_header* pShmem = (struct shmem_header*) shmem_region.get_address();
 
@@ -499,17 +450,7 @@ int AcquireImages(CameraPtr pCam) //, INodeMap& nodeMap, INodeMap& nodeMapTLDevi
                     if (nCurrRing >= NW_MAX_FRAMES) nCurrRing = 0;
                 }
 
-                //
-                // Release image
-                //
-                // *** NOTES ***
-                // Images retrieved directly from the camera (i.e. non-converted
-                // images) need to be released in order to keep from filling the
-                // buffer.
-                //
                 pResultImage->Release();
-
-                //cout << endl;
             }
             catch (Spinnaker::Exception& e)
             {
@@ -517,16 +458,6 @@ int AcquireImages(CameraPtr pCam) //, INodeMap& nodeMap, INodeMap& nodeMapTLDevi
                 result = -1;
             }
         }
-
-        //
-        // End acquisition
-        //
-        // *** NOTES ***
-        // Ending acquisition appropriately helps ensure that devices clean up
-        // properly and do not need to be power-cycled to maintain integrity.
-        //
-
-
     }
     catch (Spinnaker::Exception& e)
     {

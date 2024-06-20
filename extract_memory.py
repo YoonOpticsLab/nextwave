@@ -45,6 +45,17 @@ def get_array_item(layout,bytes,which_item, which_index):
     if 'int' in pytpe(entry['type']):
         data=int(data) # Make an untyped int size (in case we are in something like a multiply
     return data
+    
+def get_array_item_offset(layout,bytes,which_item, which_index=0,offset=0):
+    entry = layout[1][which_item]
+    array_start=entry['bytenum_current']
+
+    itemsize=numbytes[ entry['type'] ]
+    first=array_start+itemsize*which_index
+    data = np.frombuffer(bytes[first+offset:first+offset+itemsize], pytpe(entry['type']), count=1)[0]
+    if 'int' in pytpe(entry['type']):
+        data=int(data) # Make an untyped int size (in case we are in something like a multiply
+    return data
 
 def get_array_item2(layout,shmem,which_item, which_index, endian):
     entry = layout[1][which_item]
