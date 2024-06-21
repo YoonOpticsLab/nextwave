@@ -629,10 +629,11 @@ class NextwaveEngineComm():
 
         fields=self.layout[1]
         buf = ByteStream()
+
         val= np.array( self.ui.edit_num_runs.text(), dtype='uint64' )
-        buf.append(val)
+        #buf.append(val.tobytes())
         self.shmem_hdr.seek(fields['frames_left']['bytenum_current'])
-        self.shmem_hdr.write(buf)
+        self.shmem_hdr.write(val.tobytes())
         self.shmem_hdr.flush()
 
         val=9 if self.ui.chkLoop.isChecked() else 8

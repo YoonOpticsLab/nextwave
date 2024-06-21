@@ -293,6 +293,8 @@ int main(int argc, char** argv)
   typedef boost::chrono::duration<long long, boost::micro> microseconds_type;
   typedef boost::chrono::seconds mst;
 
+  pShmem1->frames_left=-1; // Since unsigned, this will actually be a huge number
+
   while ( pShmem1->mode==MODE_OFF || pShmemBoxes->num_boxes==0 ) {
     // sleep until the UI is ready to tell us to do something
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
@@ -308,7 +310,7 @@ int main(int argc, char** argv)
   uint8_t bRunning=0;
   boost::chrono::high_resolution_clock::time_point time_start = boost::chrono::high_resolution_clock::now();
 
-  while ( pShmem1->mode!=MODE_QUIT ) {
+  while ( pShmem1->mode!=MODE_QUIT  ) {
 
     if (pShmem1->mode > MODE_READY ) {
 
@@ -386,13 +388,16 @@ int main(int argc, char** argv)
 
         pipeline_count += 1;
 
+        pShmem1->frames_left--;
+        spdlog::info("Frames lefT: {}", pShmem1->frames_left);
+
       // Ran once, unarm
-        if (pShmem1->mode & MODE_RUNONCE_CENTROIDING ) {
+        if (pShmem1->mode & MODE_RUNONCE_CENTROIDING || pShmem1->frames_left<1) {
           pShmem1->mode = MODE_READY;
         } else {
 		
 			// TODO: Some kind of problems in closed loop... going too fast? 
-			std::this_thread::sleep_for(std::chrono::milliseconds(50));
+			//std::this_thread::sleep_for(std::chrono::milliseconds(50));
 		}
 
 
