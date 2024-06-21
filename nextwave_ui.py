@@ -998,6 +998,10 @@ class NextWaveMainWindow(QMainWindow):
      layoutStatusButtons.addWidget(self.mode_btn4)
      self.mode_btn4.clicked.connect(self.mode_stop)
 
+     self.edit_num_runs = QLineEdit("0")
+     self.edit_num_runs.setMaxLength(6)
+     layoutStatusButtons.addWidget(self.edit_num_runs)
+
      self.mode_btn2.setEnabled( True )
      self.mode_btn3.setEnabled( True )
      #self.mode_btn4.setEnabled( False )

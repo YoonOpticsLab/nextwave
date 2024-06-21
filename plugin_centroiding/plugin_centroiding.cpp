@@ -381,8 +381,8 @@ int find_cendroids_af(unsigned char *buffer, int width, int height) {
   struct shmem_boxes_header* pShmemBoxes = (struct shmem_boxes_header*) shmem_region3.get_address();
 
   // Compute deltas and write to shmem
-  gaf->delta_x = gaf->ref_x + gaf->ref_x_shift - gaf->sums_x;
-  gaf->delta_y = gaf->ref_y + gaf->ref_y_shift - gaf->sums_y;
+  gaf->delta_x = gaf->sums_x - gaf->ref_x;
+  gaf->delta_y = gaf->sums_y - gaf->ref_y;
 
   // Remove tip and tilt
   gaf->delta_x -= (CALC_TYPE)af::mean<CALC_TYPE>(gaf->delta_x);
@@ -416,17 +416,6 @@ int find_cendroids_af(unsigned char *buffer, int width, int height) {
   }
 #endif //0
 
-  gaf->refs_next = af::matmul(gaf->mirror_voltages, gaf->influence );
-
-  //seq idx_x(0, 673-1);
-  //seq idx_y(673, 673*2-1);
-  gaf->ref_x_shift = gaf->refs_next( af::seq(0,673-1));
-  gaf->ref_y_shift = gaf->refs_next( af::seq(673,673*2-1));
-
-  gaf->ref_x_shift *= (24000.0/10.0) * (992.0/1000.0); // TODO
-  gaf->ref_y_shift *= (24000.0/10.0) * (992.0/1000.0); // TODO
-  spdlog::info("influ: {}", (float)af::count<float>(gaf->ref_x_shift));
-  spdlog::info("influ: {}", (float)af::max<float>(gaf->ref_x_shift));
 
 #if VERBOSE
   spdlog::info("Val0 x,y: {},{}",host_x[0],host_y[0]);
@@ -437,13 +426,24 @@ int find_cendroids_af(unsigned char *buffer, int width, int height) {
   memcpy(pShmemBoxes->centroid_x, host_x, sizeof(CALC_TYPE)*num_boxes);
   memcpy(pShmemBoxes->centroid_y, host_y, sizeof(CALC_TYPE)*num_boxes);
   //memcpy(pShmemBoxes->mirror_voltages, host_mirror_voltages, sizeof(float)*nActuators);
+  
+  if (pShmem->mode == 3 || pShmem->mode==9 ) {
+	  // If closed loop, update refs
+	  
+	  gaf->refs_next = af::matmul(gaf->mirror_voltages, gaf->influence );
+	  gaf->ref_x_shift = gaf->refs_next( af::seq(0,673-1)) * (24000.0/10.0) * (992.0/1000.0); // TODO
+	  gaf->ref_y_shift = gaf->refs_next( af::seq(673,673*2-1)) * (24000.0/10.0) * (992.0/1000.0); // TODO
+	  
+	  // spdlog::info("influ0: {}", gaf->ref_x_shift(0) );
+	  spdlog::info("influ: {}", (float)af::max<float>(gaf->ref_x_shift));
+  }
 
   double mirror_min=10, mirror_max=-10, mirror_mean=0;
 	for (int i=0; i<nActuators; i++) {
 
 	  if (pShmem->mode == 3 || pShmem->mode==9 ) {
 		  // If closed loop, add new voltages to old
-		  pShmemBoxes->mirror_voltages[i] = pShmemBoxes->mirror_voltages[i] + host_mirror_voltages[i];
+		  pShmemBoxes->mirror_voltages[i] = pShmemBoxes->mirror_voltages[i] - host_mirror_voltages[i];
 	  }
 
 	  // CLAMP
@@ -461,8 +461,8 @@ int find_cendroids_af(unsigned char *buffer, int width, int height) {
 	  mirror_mean += pShmemBoxes->mirror_voltages[i];
 	}
 
-  memcpy(gpShmemLog[gpShmemHeader->total_frames].centroid_x, host_x, sizeof(CALC_TYPE)*num_boxes);
-  memcpy(gpShmemLog[gpShmemHeader->total_frames].centroid_y, host_y, sizeof(CALC_TYPE)*num_boxes);
+  memcpy(gpShmemLog[gpShmemHeader->total_frames].centroid_x, host_delta_x, sizeof(CALC_TYPE)*num_boxes);
+  memcpy(gpShmemLog[gpShmemHeader->total_frames].centroid_y, host_delta_y, sizeof(CALC_TYPE)*num_boxes);
   memcpy(gpShmemLog[gpShmemHeader->total_frames].mirrors, pShmemBoxes->mirror_voltages, sizeof(CALC_TYPE)*nActuators);
 
 	mirror_mean /= nActuators;

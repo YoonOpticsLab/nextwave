@@ -527,7 +527,9 @@ class NextwaveEngineComm():
 
         self.total_frames=extract_memory.get_array_item2(self.layout,self.shmem_hdr,'total_frames',0, False)
 
-        self.shmem_data.seek(0)
+        nwhich_buffer=extract_memory.get_array_item2(self.layout,self.shmem_hdr,'current_frame',0, False)
+        
+        self.shmem_data.seek(self.width*self.height*nwhich_buffer)
         im_buf=self.shmem_data.read(self.width*self.height)
         bytez =np.frombuffer(im_buf, dtype='uint8', count=self.width*self.height )
         bytes2=np.reshape(bytez,( self.height,self.width)).copy()
@@ -624,6 +626,15 @@ class NextwaveEngineComm():
         self.mode=3
         if reinit:
             self.init_params()
+
+        fields=self.layout[1]
+        buf = ByteStream()
+        val= np.array( self.ui.edit_num_runs.text(), dtype='uint64' )
+        buf.append(val)
+        self.shmem_hdr.seek(fields['frames_left']['bytenum_current'])
+        self.shmem_hdr.write(buf)
+        self.shmem_hdr.flush()
+
         val=9 if self.ui.chkLoop.isChecked() else 8
 
         buf = ByteStream()
