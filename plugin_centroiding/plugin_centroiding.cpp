@@ -27,6 +27,8 @@ using json=nlohmann::json;
 // Globals
 #define BUF_SIZE (2048*2048)
 
+#define CLIPVAL
+
 unsigned char buffer[BUF_SIZE];
 
 uint8_t bDoSubtractBackground=0;
@@ -426,7 +428,8 @@ int find_cendroids_af(unsigned char *buffer, int width, int height) {
   memcpy(pShmemBoxes->centroid_x, host_x, sizeof(CALC_TYPE)*num_boxes);
   memcpy(pShmemBoxes->centroid_y, host_y, sizeof(CALC_TYPE)*num_boxes);
   //memcpy(pShmemBoxes->mirror_voltages, host_mirror_voltages, sizeof(float)*nActuators);
-  
+
+  /*
   if (pShmem->mode == 3 || pShmem->mode==9 ) {
 	  // If closed loop, update refs
 	  
@@ -437,6 +440,7 @@ int find_cendroids_af(unsigned char *buffer, int width, int height) {
 	  // spdlog::info("influ0: {}", gaf->ref_x_shift(0) );
 	  spdlog::info("influ: {}", (float)af::max<float>(gaf->ref_x_shift));
   }
+  */
 
   double mirror_min=10, mirror_max=-10, mirror_mean=0;
 	for (int i=0; i<nActuators; i++) {
@@ -447,10 +451,10 @@ int find_cendroids_af(unsigned char *buffer, int width, int height) {
 	  }
 
 	  // CLAMP
-	  if (pShmemBoxes->mirror_voltages[i] > 0.7)
-      pShmemBoxes->mirror_voltages[i]=0.7;
-	  if (pShmemBoxes->mirror_voltages[i] < -0.7)
-      pShmemBoxes->mirror_voltages[i]=-0.7;
+	  if (pShmemBoxes->mirror_voltages[i] > CLIPVAL)
+      pShmemBoxes->mirror_voltages[i]=CLIPVAL;
+	  if (pShmemBoxes->mirror_voltages[i] < -CLIPVAL)
+      pShmemBoxes->mirror_voltages[i]=-CLIPVAL;
 
     // Just for statistics
 	  if (pShmemBoxes->mirror_voltages[i] > mirror_max)

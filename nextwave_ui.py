@@ -249,6 +249,7 @@ class MyBarWidget(pg.PlotWidget):
     def __init__(self, *args, **kwargs):
         super(MyBarWidget, self).__init__(*args, **kwargs)
         self.terms_expanded=False
+        self.ylim_manual = None
         #self.setToolTip('This is a tooltip YO.')
         self.installEventFilter(self)
 
@@ -269,6 +270,12 @@ class MyBarWidget(pg.PlotWidget):
             self.setToolTip("Z%d=%+0.3f"%(bar_which,zernike_val) )
 
         return super(MyBarWidget, self).eventFilter(obj, event)
+
+    def clamp_current_ylim(self):
+        ranges = self.viewRange()
+        #ranges = self.getViewBox().viewRange() # The first one works okay, keeping this here just in case needed
+        self.ylim_manual = ranges[1][1] # ymax
+        return
 
 class NextWaveMainWindow(QMainWindow):
  def __init__(self):
@@ -574,6 +581,7 @@ class NextWaveMainWindow(QMainWindow):
     self.label_status0.setText(s)
     self.label_status0.setStyleSheet("color: rgb(0, 255, 0); background-color: rgb(0,0,0);")
 
+    # TODO: Perhaps move all this code into the bar_plot object itself??
     self.bar_plot.clear()
 
     if self.bar_plot.terms_expanded:
@@ -614,9 +622,13 @@ class NextWaveMainWindow(QMainWindow):
             itm=pg.ScatterPlotItem([ntrunc],[minval],symbol="arrow_down",size=40)
             self.bar_plot.addItem(itm)
 
-    if not np.isnan(maxval):
-        lim = np.max( (np.abs(minval), np.abs(maxval)) )
-        self.bar_plot.setYRange(-lim, lim)
+    if self.bar_plot.ylim_manual is None:
+        if not np.isnan(maxval):
+            lim = np.max( (np.abs(minval), np.abs(maxval)) )
+            self.bar_plot.setYRange(-lim, lim)
+    else:
+        self.bar_plot.setYRange(-self.bar_plot.ylim_manual, self.bar_plot.ylim_manual)
+
     #self.bar_plot.getAxis('left').setTickSpacing(1, 0.1)
     #self.bar_plot.getAxis('left').setTickDensity(2)
     #colr2=np.array(cmap.Spectral(0.8))*255
@@ -1234,6 +1246,8 @@ class NextWaveMainWindow(QMainWindow):
         self.draw_centroids = not( self.draw_centroids )
     elif event.key()==ord('X'):
         self.draw_crosshair = not( self.draw_crosshair )
+    elif event.key()==ord('H'):
+        self.bar_plot.clamp_current_ylim()
     elif event.key()==ord('Q'):
         self.close()
     elif event.key()==Qt.Key_Control:

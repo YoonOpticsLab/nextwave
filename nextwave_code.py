@@ -508,7 +508,7 @@ class NextwaveEngineComm():
         dx,dy = self.get_deltas(zs,from_dialog)
         self.ref_x = self.initial_x + dx
         self.ref_y = self.initial_y + dy
-        self.update_zernike_svd()
+        #self.update_zernike_svd() // This happens as part of the "send" on next snap
 
     def receive_image(self):
         # TODO: Wait until it's safe (unlocked)
