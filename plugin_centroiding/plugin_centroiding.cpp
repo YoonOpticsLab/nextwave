@@ -27,7 +27,7 @@ using json=nlohmann::json;
 // Globals
 #define BUF_SIZE (2048*2048)
 
-#define CLIPVAL
+#define CLIPVAL 0.9
 
 unsigned char buffer[BUF_SIZE];
 
@@ -455,6 +455,9 @@ int find_cendroids_af(unsigned char *buffer, int width, int height) {
       pShmemBoxes->mirror_voltages[i]=CLIPVAL;
 	  if (pShmemBoxes->mirror_voltages[i] < -CLIPVAL)
       pShmemBoxes->mirror_voltages[i]=-CLIPVAL;
+	  if (!std::isfinite(pShmemBoxes->mirror_voltages[i]) )
+		pShmemBoxes->mirror_voltages[i]=0; // ? flatten to zero if nan/inf
+		  
 
     // Just for statistics
 	  if (pShmemBoxes->mirror_voltages[i] > mirror_max)

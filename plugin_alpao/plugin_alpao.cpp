@@ -93,6 +93,9 @@ DECL process(char *commands)
 		val=CLAMP_VAL;
 	  if (val < -CLAMP_VAL)
 		val=-CLAMP_VAL;
+	  if (!std::isfinite(val) )
+		val=0; // ?
+
 
 	  data[i] = (acs::Scalar)val;	  
   };

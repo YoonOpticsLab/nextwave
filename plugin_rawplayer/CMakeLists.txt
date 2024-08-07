@@ -14,8 +14,8 @@ include_directories(include)
 
 add_library(plugin_rawplayer SHARED plugin_rawplayer.cpp ../nextwave_plugin.hpp)
 if (WIN32)
-  set_target_properties(plugin_rawplayer PROPERTIES LIBRARY_OUTPUT_DIRECTORY "d:/code/nextwave/build"  )
-  set_target_properties(plugin_rawplayer PROPERTIES RUNTIME_OUTPUT_DIRECTORY "d:/code/nextwave/build"  )
+  set_target_properties(plugin_rawplayer PROPERTIES LIBRARY_OUTPUT_DIRECTORY "../../nextwave/build"  )
+  set_target_properties(plugin_rawplayer PROPERTIES RUNTIME_OUTPUT_DIRECTORY "../../nextwave/build"  )
 else()
   set_target_properties(plugin_rawplayer PROPERTIES
     LIBRARY_OUTPUT_DIRECTORY "../../build"
