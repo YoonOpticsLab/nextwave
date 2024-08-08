@@ -272,9 +272,12 @@ class MyBarWidget(pg.PlotWidget):
         return super(MyBarWidget, self).eventFilter(obj, event)
 
     def clamp_current_ylim(self):
-        ranges = self.viewRange()
-        #ranges = self.getViewBox().viewRange() # The first one works okay, keeping this here just in case needed
-        self.ylim_manual = ranges[1][1] # ymax
+        if self.ylim_manual is None:
+            ranges = self.viewRange()
+            #ranges = self.getViewBox().viewRange() # The first one works okay, keeping this here just in case needed
+            self.ylim_manual = ranges[1][1] # ymax
+        else:
+            self.ylim_manual = None # Toggle
         return
 
 class NextWaveMainWindow(QMainWindow):

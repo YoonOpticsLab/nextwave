@@ -25,6 +25,8 @@ int loop=0;
 
 #define REAL_AO 1
 
+#define CLAMP_VAL 0.7
+
 //PLUGIN_API(alpao,init,char *params)
 DECL init(void)
 {
@@ -87,10 +89,13 @@ DECL process(char *commands)
 	  mymean += val;
 
 	  // CLAMP
-	  if (val > 0.7)
-		val=0.7;
-	  if (val < -0.7)
-		val=-0.7;  
+	  if (val > CLAMP_VAL)
+		val=CLAMP_VAL;
+	  if (val < -CLAMP_VAL)
+		val=-CLAMP_VAL;
+	  if (!std::isfinite(val) )
+		val=0; // ?
+
 
 	  data[i] = (acs::Scalar)val;	  
   };
