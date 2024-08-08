@@ -173,10 +173,12 @@ class BoxInfoDialog(QDialog):
         self.ui_parent.box_info = -1
 
 
+COLOR_INDICATOR_VAL=0.1
+
 def actuator_color(nval):
-        if 0<nval<64:
+        if 0<nval<128*COLOR_INDICATOR_VAL:
             colr=QtGui.qRgb(255-nval,0,0)
-        elif nval>(256-64): # TODO check this
+        elif nval>(256*(1-COLOR_INDICATOR_VAL) ): # TODO check this
             colr=QtGui.qRgb(0,nval,0)
         else:
             colr=QtGui.qRgb(nval,nval,nval) # Middle values are gray
