@@ -662,7 +662,7 @@ class NextWaveMainWindow(QMainWindow):
     self.shmem_boxes.write(buf)
     self.shmem_boxes.flush()
 
- def showdialog(self,which,callback):
+ def show_zernike_dialog(self,which,callback):
      dlg = ZernikeDialog(which, callback,self)
      dlg.exec()
 
@@ -824,11 +824,11 @@ class NextWaveMainWindow(QMainWindow):
      l1.addWidget(self.chkFollow)
 
      btn = QPushButton("Search box shift")
-     btn.clicked.connect(lambda: self.showdialog("Shift search boxes", self.engine.shift_search_boxes ) )
+     btn.clicked.connect(lambda: self.show_zernike_dialog("Shift search boxes", self.engine.shift_search_boxes ) )
      l1.addWidget(btn)
 
      btn = QPushButton("Reference shift")
-     btn.clicked.connect(lambda: self.showdialog("Shift references", self.shift_references ) )
+     btn.clicked.connect(lambda: self.show_zernike_dialog("Shift references", self.shift_references ) )
      l1.addWidget(btn)
 
      self.widget_op = QWidget()
@@ -989,12 +989,20 @@ class NextWaveMainWindow(QMainWindow):
      layout1.addWidget(btn, 0,2 )
 
      btn = QPushButton("Search box shift")
-     btn.clicked.connect(lambda: self.showdialog("Shift search boxes", self.engine.shift_search_boxes ) )
+     btn.clicked.connect(lambda: self.show_zernike_dialog("Shift search boxes", self.engine.shift_search_boxes ) )
      layout1.addWidget(btn, 1,0 )
 
      btn = QPushButton("Reference shift")
-     btn.clicked.connect(lambda: self.showdialog("Shift references", self.engine.shift_references ) )
+     btn.clicked.connect(lambda: self.show_zernike_dialog("Shift references", self.engine.reset_references ) )
      layout1.addWidget(btn, 1,1 )
+
+     btn = QPushButton("Search box RESET")
+     btn.clicked.connect(self.engine.reset_search_boxes )
+     layout1.addWidget(btn, 2,0 )
+
+     btn = QPushButton("Reference RESET")
+     btn.clicked.connect(self.engine.reset_references )
+     layout1.addWidget(btn, 2,1 )
 
      self.widget_mode_buttons = QWidget()
      layoutStatusButtons = QHBoxLayout(self.widget_mode_buttons)
