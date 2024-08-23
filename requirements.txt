@@ -2,3 +2,5 @@ pyqtgraph
 beautifulsoup4
 lxml
 rpyc
+pyqt5
+matplotlib
