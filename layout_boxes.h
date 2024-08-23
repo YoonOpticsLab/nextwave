@@ -23,6 +23,7 @@ struct shmem_boxes_header
 	CALC_TYPE box_y[MAX_BOXES];
 	CALC_TYPE centroid_x[MAX_BOXES];
 	CALC_TYPE centroid_y[MAX_BOXES];
+	uint8_t centroid_valid[MAX_BOXES];
 	CALC_TYPE box_x_normalized[MAX_BOXES];
 	CALC_TYPE box_y_normalized[MAX_BOXES];
 

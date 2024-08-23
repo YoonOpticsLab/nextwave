@@ -25,7 +25,7 @@ int loop=0;
 
 #define REAL_AO 1
 
-#define CLAMP_VAL 0.7
+#define CLAMP_VAL 0.9
 
 //PLUGIN_API(alpao,init,char *params)
 DECL init(void)
@@ -64,11 +64,11 @@ DECL process(char *commands)
   //if (msg!=NULL) {
   //  spdlog::info("ALPAO: {}",msg);
   //}
-  if (commands[0]=='I')
-	  if (commands[1]=='C')
-		  loop=1;
-	  else
-		  loop=0;
+  //if (commands[0]=='I')
+  if (commands[1]=='C')
+	  loop=1;
+  else
+	  loop=0;
 
   // TODO: is dynamically changing the size allowed?
 	uint16_t nCurrRing = gpShmemHeader->current_frame;
@@ -93,9 +93,9 @@ DECL process(char *commands)
 		val=CLAMP_VAL;
 	  if (val < -CLAMP_VAL)
 		val=-CLAMP_VAL;
-	  if (!std::isfinite(val) )
-		val=0; // ?
-
+	  if (!std::isfinite(val) ) {
+		val=0; // ? TODO . Shouldn't happen. Interpolate elsewhere. Error MSg.
+	  }
 
 	  data[i] = (acs::Scalar)val;	  
   };

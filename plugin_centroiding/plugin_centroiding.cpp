@@ -27,7 +27,7 @@ using json=nlohmann::json;
 // Globals
 #define BUF_SIZE (2048*2048)
 
-#define CLIPVAL 0.9
+#define CLIPVAL 0.95
 
 unsigned char buffer[BUF_SIZE];
 
@@ -300,7 +300,7 @@ PLUGIN_API(centroiding,init,char *params)
 
 // https://stackoverflow.com/questions/49692531/transfer-data-from-arrayfire-arrays-to-armadillo-structures
 // https://github.com/arrayfire/arrayfire/issues/1405;
-int find_cendroids_af(unsigned char *buffer, int width, int height) {
+int find_centroids_af(unsigned char *buffer, int width, int height) {
 	
 	gaf->im = af::array(width, height, buffer).as(f64);
 	gaf->im = af::transpose( gaf->im );
@@ -393,8 +393,12 @@ int find_cendroids_af(unsigned char *buffer, int width, int height) {
 
   CALC_TYPE *host_delta_x = gaf->delta_x.host<CALC_TYPE>();
   CALC_TYPE *host_delta_y = gaf->delta_y.host<CALC_TYPE>();
-  //memcpy(pShmemBoxes->delta_x, host_delta_x, sizeof(float)*num_boxes);
-  //memcpy(pShmemBoxes->delta_y, host_delta_y, sizeof(float)*num_boxes);
+  memcpy(pShmemBoxes->delta_x, host_delta_x, sizeof(CALC_TYPE)*num_boxes);
+  memcpy(pShmemBoxes->delta_y, host_delta_y, sizeof(CALC_TYPE)*num_boxes);
+
+  // If want to log deltas:
+  memcpy(gpShmemLog[gpShmemHeader->total_frames].centroid_x, host_delta_x, sizeof(CALC_TYPE)*num_boxes);
+  memcpy(gpShmemLog[gpShmemHeader->total_frames].centroid_y, host_delta_y, sizeof(CALC_TYPE)*num_boxes);
 
 #if 1
   // Assumed that the dimensions of infl match
@@ -411,7 +415,7 @@ int find_cendroids_af(unsigned char *buffer, int width, int height) {
 	//host_mirror_voltages[0]);
 
 #if 0
-  if (pShmemBoxes->header_version & 2) //Follow
+  if (pShmemBoxes->header_version & 2) //Follow // TODO
   {
     memcpy(pShmemBoxes->box_x, host_x, sizeof(float)*num_boxes);
     memcpy(pShmemBoxes->box_y, host_y, sizeof(float)*num_boxes);
@@ -442,37 +446,38 @@ int find_cendroids_af(unsigned char *buffer, int width, int height) {
   }
   */
 
-  double mirror_min=10, mirror_max=-10, mirror_mean=0;
-	for (int i=0; i<nActuators; i++) {
+	if (pShmem->mode == 3 || pShmem->mode==9 ) { // Closed loop
+	
+		double mirror_min=10, mirror_max=-10, mirror_mean=0;
+		for (int i=0; i<nActuators; i++) {
 
-	  if (pShmem->mode == 3 || pShmem->mode==9 ) {
-		  // If closed loop, add new voltages to old
-		  pShmemBoxes->mirror_voltages[i] = pShmemBoxes->mirror_voltages[i] - host_mirror_voltages[i];
-	  }
+			if (pShmem->mode == 3 || pShmem->mode==9 ) {
+			  // If closed loop, add new voltages to old
+			  pShmemBoxes->mirror_voltages[i] = pShmemBoxes->mirror_voltages[i] - host_mirror_voltages[i];
+			}
 
-	  // CLAMP
-	  if (pShmemBoxes->mirror_voltages[i] > CLIPVAL)
-      pShmemBoxes->mirror_voltages[i]=CLIPVAL;
-	  if (pShmemBoxes->mirror_voltages[i] < -CLIPVAL)
-      pShmemBoxes->mirror_voltages[i]=-CLIPVAL;
-	  if (!std::isfinite(pShmemBoxes->mirror_voltages[i]) )
-		pShmemBoxes->mirror_voltages[i]=0; // ? flatten to zero if nan/inf
-		  
+			// CLAMP
+			if (pShmemBoxes->mirror_voltages[i] > CLIPVAL)
+				pShmemBoxes->mirror_voltages[i]=CLIPVAL;
+			if (pShmemBoxes->mirror_voltages[i] < -CLIPVAL)
+				pShmemBoxes->mirror_voltages[i]=-CLIPVAL;
+			if (!std::isfinite(pShmemBoxes->mirror_voltages[i]) ) {
+				pShmemBoxes->mirror_voltages[i]=0; // ? flatten to zero if nan/inf
+			}
 
-    // Just for statistics
-	  if (pShmemBoxes->mirror_voltages[i] > mirror_max)
-      mirror_max=pShmemBoxes->mirror_voltages[i];
-	  if (pShmemBoxes->mirror_voltages[i] < mirror_min)
-      mirror_min=pShmemBoxes->mirror_voltages[i];
+			// Just for statistics
+			if (pShmemBoxes->mirror_voltages[i] > mirror_max)
+				mirror_max=pShmemBoxes->mirror_voltages[i];
+			if (pShmemBoxes->mirror_voltages[i] < mirror_min)
+				mirror_min=pShmemBoxes->mirror_voltages[i];
 
-	  mirror_mean += pShmemBoxes->mirror_voltages[i];
-	}
+			mirror_mean += pShmemBoxes->mirror_voltages[i];
+		}
+		
+		memcpy(gpShmemLog[gpShmemHeader->total_frames].mirrors, pShmemBoxes->mirror_voltages, sizeof(CALC_TYPE)*nActuators);
+		mirror_mean /= nActuators;
+	} // if closed loop
 
-  memcpy(gpShmemLog[gpShmemHeader->total_frames].centroid_x, host_delta_x, sizeof(CALC_TYPE)*num_boxes);
-  memcpy(gpShmemLog[gpShmemHeader->total_frames].centroid_y, host_delta_y, sizeof(CALC_TYPE)*num_boxes);
-  memcpy(gpShmemLog[gpShmemHeader->total_frames].mirrors, pShmemBoxes->mirror_voltages, sizeof(CALC_TYPE)*nActuators);
-
-	mirror_mean /= nActuators;
   //spdlog::info("Mirror {}:{}/{} 0:{}", (double)mirror_mean, (double)mirror_min, (double) mirror_max, (double)pShmemBoxes->mirror_voltages[0] );
 #endif //1
 
@@ -574,7 +579,7 @@ PLUGIN_API(centroiding,process,char *params)
     spdlog::info("Centroiding Dims: {}x{} pixel0:{}", width, height, int(buffer[0])) ;
   }
 
-  find_cendroids_af(buffer, width, height);
+  find_centroids_af(buffer, width, height);
 
   unlock(&pShmemBoxes->lock);
 	return 0;

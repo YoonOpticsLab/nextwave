@@ -19,6 +19,7 @@
 #define MODE_RUNONCE_CENTROIDING_AO 3
 #define MODE_LOOP_CENTROIDING 0x10
 #define MODE_LOOP_AO 0x11
+#define MODE_CALIBRATING 0x40
 #define MODE_QUIT 0xFF
 
 struct shmem_header

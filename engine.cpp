@@ -163,7 +163,7 @@ int load_module(std::string name, std::string params, std::list<struct module> &
   handle=dlopen(name.c_str(), RTLD_NOW|RTLD_LOCAL);
 #endif
 
-  if (handle==0) {
+  if (handle<0) {
     spdlog::error("Couldn't load '{}'\n",name);
     chkerr();
     return -1;
@@ -200,7 +200,7 @@ int load_module(std::string name, std::string params, std::list<struct module> &
   aModule.fp_do_process=fptr2;
   aModule.fp_close=fptr3;
 
-chkerr();
+ //chkerr(); // I think this is the one that was failing on the first module
 
  spdlog::info("Loaded {} {}", name, handle);
  int result=(**aModule.fp_init)(params.c_str());
@@ -322,6 +322,10 @@ int main(int argc, char** argv)
         str_message[0]='I'; // Re-init on "snap"
         str_message[1]=' '; // Re-init on "snap"
         bRunning=0;
+      } else if (pShmem1->mode == MODE_CALIBRATING) {
+        str_message[0]=' ';
+        str_message[1]='C'; //"closed loop" (==apply AO)
+        bRunning=0;		
       } else {
         str_message[0]=' ';
         str_message[1]=' ';
@@ -392,7 +396,10 @@ int main(int argc, char** argv)
         spdlog::info("Frames lefT: {}", pShmem1->frames_left);
 
       // Ran once, unarm
-        if (pShmem1->mode & MODE_RUNONCE_CENTROIDING || pShmem1->frames_left<1) {
+        if ( (pShmem1->mode & MODE_RUNONCE_CENTROIDING) ||
+			(pShmem1->mode == MODE_CALIBRATING) || // Run calibration one-by-one (1 iteration per mirror)
+			(pShmem1->frames_left<1)
+			) {
           pShmem1->mode = MODE_READY;
         } else {
 		

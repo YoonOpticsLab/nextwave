@@ -17,7 +17,6 @@ import iterative
 WINDOWS=(os.name == 'nt')
 
 NUM_ZERNIKES=67 # TODO
-NUM_ZERN_DIALOG=14 # TODO
 START_ZC=1
 NUM_ZCS=68
 
@@ -488,9 +487,9 @@ class NextwaveEngineComm():
     def get_deltas(self,zs,from_dialog):
         zern_new = np.zeros(NUM_ZERNIKES)
         if from_dialog:
-            zern_new[self.CVS_to_OSA_map[0:NUM_ZERN_DIALOG]-START_ZC-1 ] = zs
+            zern_new[self.CVS_to_OSA_map[0:len(zs)]  ] = zs
         else:
-            zern_new[self.CVS_to_OSA_map[0:zs.shape[0]]-START_ZC-1 ] = zs
+            zern_new[self.CVS_to_OSA_map[0:zs.shape[0]] ] = zs
         delta=np.matmul(self.zterms_inv,zern_new)
         num_boxes = self.box_x.shape[0]
         delta_y = delta[0:num_boxes]/(self.ccd_pixel/self.focal)
@@ -509,6 +508,14 @@ class NextwaveEngineComm():
         self.ref_x = self.initial_x + dx
         self.ref_y = self.initial_y + dy
         #self.update_zernike_svd() // This happens as part of the "send" on next snap
+
+    def reset_search_boxes(self):
+        self.box_x = self.initial_x
+        self.box_y = self.initial_y
+        self.update_searchboxes()    
+
+    def reset_references(self):
+        return
 
     def receive_image(self):
         # TODO: Wait until it's safe (unlocked)
@@ -553,13 +560,98 @@ class NextwaveEngineComm():
         self.shmem_boxes.flush()
 
     def zero_do(self):
-        self.write_mirrors( np.zeros(97) )
+        self.write_mirrors( np.zeros(97) ) # TODO
 
     def flat_do(self):
         self.write_mirrors( self.mirror_state_flat )
 
     def flat_save(self):
         self.mirror_state_flat = np.copy(self.mirror_voltages)
+
+    def do_snap(self, mode):
+        buf = ByteStream()
+        buf.append(mode) # TODO: MODE_CENTROIDING
+        self.shmem_hdr.seek(2) #TODO: get address
+        self.shmem_hdr.write(buf)
+        self.shmem_hdr.flush()    
+    
+    def do_calibration(self):
+        mirrors = np.zeros( 97 ) # TODO
+        
+        slopes_x=np.zeros( (97, self.num_boxes) )
+        slopes_y=np.zeros( (97, self.num_boxes) )
+        for n in np.arange(97): #len( mirrors ):
+            print( "Calibrating %d.."%n)
+            mirrors *= 0
+            mirrors[n] = 0.2
+            self.write_mirrors( mirrors )
+            
+            # First make sure mirrors are read in and programmed
+            self.do_snap(0x40) # TODO: MODE_CALIBRATING
+            time.sleep(0.25)
+            
+            slopes_x[n] *= 0
+            slopes_y[n] *= 0
+            NUM_ITS=3
+            for it in np.arange(NUM_ITS):
+                self.do_snap(0x40) # TODO: MODE_CALIBRATING
+                # The main loop will keep snapping and calc-ing, so we can just poll that occasionally
+                time.sleep(0.25) # TODO: better to wait for status/handshake
+                SIZEOF_DOUBLE=8
+                fields=self.layout_boxes[1]            
+                self.shmem_boxes.seek(fields['delta_x']['bytenum_current'])
+                buf=self.shmem_boxes.read(self.num_boxes*SIZEOF_DOUBLE)
+                delta_x=struct.unpack_from(''.join((['d']*self.num_boxes)), buf)
+
+                self.shmem_boxes.seek(fields['delta_y']['bytenum_current'])
+                buf=self.shmem_boxes.read(self.num_boxes*SIZEOF_DOUBLE)
+                delta_y=struct.unpack_from(''.join((['d']*self.num_boxes)), buf)
+                
+                print ( n, np.max( delta_x), np.min(delta_x), np.mean(delta_x) )
+                
+                slopes_x[n] += delta_x
+                slopes_y[n] += delta_y
+            slopes_x[n] /= NUM_ITS
+            slopes_y[n] /= NUM_ITS
+            
+        np.savez("calib_p.npz",slopes_x, slopes_y);
+        
+        for n in np.arange(97): #len( mirrors ):
+            print( "Calibrating %d.."%n)
+            mirrors *= 0
+            mirrors[n] = -0.2
+            self.write_mirrors( mirrors )
+            
+            # First make sure mirrors are read in and programmed
+            self.do_snap(0x40) # TODO: MODE_CALIBRATING
+            time.sleep(0.25)
+            
+            slopes_x[n] *= 0
+            slopes_y[n] *= 0
+            NUM_ITS=3
+            for it in np.arange(NUM_ITS):
+                self.do_snap(0x40) # TODO: MODE_CALIBRATING
+                # The main loop will keep snapping and calc-ing, so we can just poll that occasionally
+                time.sleep(0.25) # TODO: better to wait for status/handshake
+                SIZEOF_DOUBLE=8
+                fields=self.layout_boxes[1]            
+                self.shmem_boxes.seek(fields['delta_x']['bytenum_current'])
+                buf=self.shmem_boxes.read(self.num_boxes*SIZEOF_DOUBLE)
+                delta_x=struct.unpack_from(''.join((['d']*self.num_boxes)), buf)
+
+                self.shmem_boxes.seek(fields['delta_y']['bytenum_current'])
+                buf=self.shmem_boxes.read(self.num_boxes*SIZEOF_DOUBLE)
+                delta_y=struct.unpack_from(''.join((['d']*self.num_boxes)), buf)
+                
+                print ( n, np.max( delta_x), np.min(delta_x), np.mean(delta_x) )
+                
+                slopes_x[n] += delta_x
+                slopes_y[n] += delta_y
+            slopes_x[n] /= NUM_ITS
+            slopes_y[n] /= NUM_ITS
+            
+        np.savez("calib_n.npz",slopes_x, slopes_y);        
+            
 
     def receive_centroids(self):
         SIZEOF_DOUBLE=8
