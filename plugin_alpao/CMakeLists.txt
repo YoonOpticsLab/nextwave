@@ -10,9 +10,11 @@ list(APPEND SOURCES
 include_directories(../include)
 include_directories(..)
 include_directories(include)
-include_directories(include/boost_1_83_0)
-include_directories(../sdk/include)
-include_directories(sdk/include)
+#include_directories(include/boost_1_83_0)
+include_directories("C:/Program Files/Alpao/SDK/Include")
+include_directories(C:/Program Files/Alpao/SDK)
+
+#include_directories(sdk/include)
 
 #link_libraries(plugin_alpao ASDK.dll )
 #link_directories(c:/nextwave/sdk/lib/x64)
@@ -21,7 +23,7 @@ include_directories(sdk/include)
 
 add_library(plugin_alpao SHARED plugin_alpao.cpp)
 link_libraries(ASDK)
-target_link_libraries(plugin_alpao C:/nextwave/sdk/lib/x64/asdk.lib)
+target_link_libraries(plugin_alpao "C:/Program Files/Alpao/SDK/lib/x64/asdk.lib")
 	
 set_target_properties(plugin_alpao PROPERTIES RUNTIME_OUTPUT_DIRECTORY "c:/nextwave/build"  )
 	

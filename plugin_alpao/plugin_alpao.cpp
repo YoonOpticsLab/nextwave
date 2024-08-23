@@ -3,6 +3,8 @@
 #include <fstream>
 #include <iostream>
 
+#pragma warning( disable : 4996)
+
 //using namespace std;
 #include "nextwave_plugin.hpp"
 #include "nextwave_plugin.cpp"
@@ -14,6 +16,7 @@
 
 #define VERBOSE 0
 
+#undef _MSC_VER : asdkDMTypes inside AlpaoSDK tries to redefine uint8_t, which fails
 #include "asdkDM.h"
 
 acs::DM* dm;
@@ -42,6 +45,7 @@ DECL init(void)
 #else
   num_act=97;
 #endif
+
   spdlog::info("ALPAO DM ok: {}",num_act);
 
   data = new acs::Scalar[num_act]; // TODO: update if num_act changes (smaller pupil, etc.)

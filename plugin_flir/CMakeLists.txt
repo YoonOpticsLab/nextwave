@@ -7,7 +7,7 @@ list(APPEND SOURCES
   VERSION 1.0
   LANGUAGES CXX)
 
-set(SPINNAKER_DIR "C:/Program Files/FLIR Systems/Spinnaker")
+set(SPINNAKER_DIR "C:/Program Files/Teledyne/Spinnaker")
 
 include_directories(${SPINNAKER_DIR}/include)
 
