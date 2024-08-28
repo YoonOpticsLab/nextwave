@@ -579,20 +579,26 @@ class NextwaveEngineComm():
         self.shmem_hdr.write(buf)
         self.shmem_hdr.flush()    
     
-    def do_calibration(self):
-        mirrors = np.zeros( 97 ) # TODO
+    def do_calibration(self,updater):
+        mirrors = np.zeros( 98 ) # TODO
         
-        slopes_x=np.zeros( (97, self.num_boxes) )
-        slopes_y=np.zeros( (97, self.num_boxes) )
-        for n in np.arange(97): #len( mirrors ):
-            print( "Calibrating %d.."%n)
+        slopes_x=np.zeros( (98, self.num_boxes) )
+        slopes_y=np.zeros( (98, self.num_boxes) )
+        for n in np.arange(98): #len( mirrors ):
             mirrors *= 0
-            mirrors[n] = 0.2
+            
+            if n >0:
+                mirrors[n] = 0.15
+                
+            updater( "Calibrating %d (%f).."%(n, np.sum(mirrors)) )
+
             self.write_mirrors( mirrors )
             
             # First make sure mirrors are read in and programmed
             self.do_snap(0x40) # TODO: MODE_CALIBRATING
-            time.sleep(0.25)
+            self.do_snap(0x40) # TODO: MODE_CALIBRATING
+            self.do_snap(0x40) # TODO: MODE_CALIBRATING
+            time.sleep(0.1)
             
             slopes_x[n] *= 0
             slopes_y[n] *= 0
@@ -600,7 +606,7 @@ class NextwaveEngineComm():
             for it in np.arange(NUM_ITS):
                 self.do_snap(0x40) # TODO: MODE_CALIBRATING
                 # The main loop will keep snapping and calc-ing, so we can just poll that occasionally
-                time.sleep(0.25) # TODO: better to wait for status/handshake
+                # time.sleep( 0.1 ) # TODO: better to wait for status/handshake
                 SIZEOF_DOUBLE=8
                 fields=self.layout_boxes[1]            
                 self.shmem_boxes.seek(fields['delta_x']['bytenum_current'])
@@ -620,7 +626,7 @@ class NextwaveEngineComm():
             
         np.savez("calib_p.npz",slopes_x, slopes_y);
         
-        for n in np.arange(97): #len( mirrors ):
+        for n in []: #np.arange(97): #len( mirrors ):
             print( "Calibrating %d.."%n)
             mirrors *= 0
             mirrors[n] = -0.2
@@ -718,7 +724,7 @@ class NextwaveEngineComm():
         self.shmem_hdr.write(buf)
         self.shmem_hdr.flush()
 
-    def mode_run(self, reinit=True):
+    def mode_run(self, reinit=True, numruns=1):
         self.mode=3
         if reinit:
             self.init_params()
@@ -726,7 +732,8 @@ class NextwaveEngineComm():
         fields=self.layout[1]
         buf = ByteStream()
 
-        val= np.array( self.ui.edit_num_runs.text(), dtype='uint64' )
+        val= np.array( numruns, dtype='uint64' )
+        #val= np.array( self.ui.edit_num_runs.text(), dtype='uint64' )
         #buf.append(val.tobytes())
         self.shmem_hdr.seek(fields['frames_left']['bytenum_current'])
         self.shmem_hdr.write(val.tobytes())

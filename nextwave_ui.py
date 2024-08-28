@@ -1,5 +1,5 @@
 from PyQt5.QtWidgets import (QMainWindow, QLabel, QSizePolicy, QApplication, QPushButton,
-                             QHBoxLayout, QVBoxLayout, QGridLayout, QScrollArea,
+                             QHBoxLayout, QVBoxLayout, QGridLayout, QScrollArea, QMessageBox,
                              QWidget, QGroupBox, QTabWidget, QTextEdit, QSpinBox, QDoubleSpinBox, QSlider,
                              QFileDialog, QCheckBox, QDialog, QFormLayout, QDialogButtonBox, QLineEdit)
 from PyQt5.QtGui import QPixmap, QImage, QPainter, QPen, QFont
@@ -871,7 +871,7 @@ class NextWaveMainWindow(QMainWindow):
 
      menu=self.menuBar().addMenu('&File')
      menu.addAction('&Export Centroids + Zernikes', self.export)
-     menu.addAction('Run &Calibration', self.engine.do_calibration)
+     menu.addAction('Run &Calibration', self.do_calibration)
      menu.addAction('e&Xit', self.close)
 
      pixmap_label.setFocus()
@@ -882,6 +882,22 @@ class NextWaveMainWindow(QMainWindow):
      self.setGeometry(2,2,MAIN_WIDTH_WIN,MAIN_HEIGHT_WIN)
      self.show()
 
+ def calibration_status(self,s):
+    print( s )
+    #  self.label_status0.setText(s)
+    
+ def do_calibration(self):
+    msgBox = QMessageBox()
+    msgBox.setText("Calibrating");
+    msgBox.title="CalTitle";
+  #QPushButton *btnCancel =  msgBox->addButton( "Cancel", QMessageBox::RejectRole );
+  #msgBox->setAttribute(Qt::WA_DeleteOnClose); // delete pointer after close
+    msgBox.setModal(False);
+    msgBox.show()
+    #msgBox.repaint()
+    #msgBox.update()
+    self.engine.do_calibration(self.calibration_status)
+    
  def slider_threshold_changed(self):
      scaled = self.slider_threshold.value()/100.0
      self.threshold_val.setValue(scaled)
@@ -1037,7 +1053,7 @@ class NextWaveMainWindow(QMainWindow):
  def mode_snap(self):
     self.engine.mode_snap()
  def mode_run(self):
-    self.engine.mode_run()
+    self.engine.mode_run(numruns=int(self.edit_num_runs.text()) )
  def mode_stop(self):
     self.engine.mode_stop()
     #self.sockets.camera.send(b"E=3.14")
