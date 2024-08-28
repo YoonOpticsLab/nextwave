@@ -49,9 +49,10 @@ class NextwaveSocketComm():
         self.ui = ui
 
     def init(self):
-        self.camera = SocketComponent(SOCKET_CAMERA)
-        self.camera.init()
-        time.sleep(0.5)
+        if "plugin_flir" in self.ui.json_data:
+            self.camera = SocketComponent(SOCKET_CAMERA)
+            self.camera.init()
+            time.sleep(0.5)
 
         self.centroiding = SocketComponent(SOCKET_CENTROIDING)
         self.centroiding.init()

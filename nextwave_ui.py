@@ -72,7 +72,9 @@ class NextWaveMainWindow(QMainWindow):
     self.box_info = -1
     self.box_info_dlg = BoxInfoDialog("HiINFO",self)
 
+    self.chkLoop = QCheckBox("Close AO Loop") # This is needed for engine.mode_init, called in our init. Will be replaced by chkbox widget in our InitUI
 
+ def params_json(self):
     f=open("./config.json")
     self.json_data = json.load(f)
     f.close()
@@ -98,20 +100,12 @@ class NextWaveMainWindow(QMainWindow):
     self.params_offline= [
         {'name': 'system', 'type': 'group', 'title':'System Params', 'children': [
             {'name': 'wavelength', 'type': 'int', 'value': 830, 'title':'Wavelength (nm)', 'limits':[50,2000]},
-            {'name': 'lenslet_pitch', 'type': 'float', 'value': 324.0, 'title':'Lenslet pitch (um)'},
-            {'name': 'pixel_pitch', 'type': 'float', 'value': 5.5*2, 'title':'Pixel pitch (um)'},
-            {'name': 'pupil_diam', 'type': 'float', 'value': 10.0, 'title':'Pupil diameter (mm)'},
-            {'name': 'focal_length', 'type': 'float', 'value': 24, 'title':'Focal length'},
         ]}
         ]
 
     self.params_offline_matlab = [
         {'name': 'system', 'type': 'group', 'title':'System Params', 'children': [
             {'name': 'wavelength', 'type': 'int', 'value': 830, 'title':'Wavelength (nm)', 'limits':[50,2000]},
-            {'name': 'lenslet_pitch', 'type': 'float', 'value': 256*2, 'title':'Lenslet pitch (um)'},
-            {'name': 'pixel_pitch', 'type': 'float', 'value': 6.4, 'title':'Pixel pitch (um)'},
-            {'name': 'pupil_diam', 'type': 'float', 'value': 6.4*2, 'title':'Pupil diameter (mm)'},
-            {'name': 'focal_length', 'type': 'float', 'value': 5.904, 'title':'Focal length'},
         ]}
         ]
 
@@ -121,12 +115,6 @@ class NextWaveMainWindow(QMainWindow):
 
     self.p_offline = Parameter.create(name='params_offline', type='group', children=self.params_offline)
     self.params_offline = self.p_offline.saveState()
-
-    self.engine = NextwaveEngineComm(self)
-    self.engine.init()
-    self.sockets = NextwaveSocketComm(self)
-
-    box_x,box_y,box_norm_x,box_norm_y=self.engine.make_searchboxes(self.cx,self.cy)
 
  def apply_params(self):
     self.updater.start(self.get_param("UI","update_rate"))
@@ -443,10 +431,10 @@ class NextWaveMainWindow(QMainWindow):
             if node['name']==name:
                 return(node["value"])
 
- def get_param_new(self,name):
-     print( self.params_new)
-     print( self.params_params)
-     return self.params_new["children"][name]["value"]
+ def get_param_xml(self,name):
+     #print( self.params_xml)
+     #print( self.params_params)
+     return float( self.params_xml_state["children"][name]["value"] )
 
  def get_param(self,name_parent,name,offline=False):
      if name=="pupil_diam":
@@ -476,7 +464,7 @@ class NextWaveMainWindow(QMainWindow):
      self.engine.make_searchboxes(self.cx,self.cy)
 
  def reload_config(self):
-     filename = self.edit_xml.text()
+     filename = self.json_data["params"]["xml_file"]
      tree = ET.parse(filename)
      root = tree.getroot()
      all_params={}
@@ -501,16 +489,12 @@ class NextWaveMainWindow(QMainWindow):
      self.xml_params = all_params
      self.params_params = params_params
      self.xml_p = Parameter.create(name='xml_params', type='group', children=self.params_params)
-     self.params_new = self.xml_p.saveState()
+     self.params_xml_state = self.xml_p.saveState()
 
      self.xml_param_tree = ParameterTree()
      self.xml_param_tree.setParameters(self.xml_p, showTop=False)
-     self.layout_config.addWidget(self.xml_param_tree,1,0,-1,4)
-
      #print (self.xml_params['OPTICS_PupilDiameter'])
-     self.box_um = self.get_param_new("LENSLETS_LensletPitch")
-
-     self.setWindowTitle('NextWave: %s'%(self.xml_params["SessionName_name"]))
+     #self.box_um = self.get_param_xml("LENSLETS_LensletPitch")
 
  def params_apply_clicked(self):
      self.par= self.p.saveState()
@@ -523,8 +507,7 @@ class NextWaveMainWindow(QMainWindow):
 #def userSettings(self, tabIndex):
     #if tabIndex != 5:
      #self.param_tree.setParameters(self.p, showTop=False)
-
-
+ 
  # PANELS/layouts, etc.
  def initUI(self):
 
@@ -739,7 +722,7 @@ class NextWaveMainWindow(QMainWindow):
 
      ### DM Ops
      layout1 = QGridLayout(self.ops_dm)
-     self.chkLoop = QCheckBox("Close AO Loop")
+     #self.chkLoop = QCheckBox("Close AO Loop")
      layout1.addWidget(self.chkLoop,0,0)
 
      btn = QPushButton("Save flat")
@@ -886,18 +869,15 @@ class NextWaveMainWindow(QMainWindow):
 
      self.setCentralWidget(self.widget_main)
 
-     # Initial Setup, startup behavior
-     self.reload_config() # Load last selected XML
-     #self.tabs.setCurrentIndex(2) # Doesn't allocate enough space: first tab is better
-     self.engine.mode_init()
-     self.sockets.init()
-
      menu=self.menuBar().addMenu('&File')
      menu.addAction('&Export Centroids + Zernikes', self.export)
      menu.addAction('Run &Calibration', self.engine.do_calibration)
      menu.addAction('e&Xit', self.close)
 
      pixmap_label.setFocus()
+
+     self.layout_config.addWidget(self.xml_param_tree,1,0,-1,4)
+     self.setWindowTitle('NextWave: %s'%(self.xml_params["SessionName_name"]))
 
      self.setGeometry(2,2,MAIN_WIDTH_WIN,MAIN_HEIGHT_WIN)
      self.show()
@@ -1100,12 +1080,26 @@ class NextWaveMainWindow(QMainWindow):
  def closeEvent(self, event):
     self.close()
 
+ def initEngine(self):
+    self.engine = NextwaveEngineComm(self)
+    self.engine.init()
+    box_x,box_y,box_norm_x,box_norm_y=self.engine.make_searchboxes(self.cx,self.cy)
+
+    self.sockets = NextwaveSocketComm(self)
+
+#     self.reload_config() # Load last selected XML
+#     #self.tabs.setCurrentIndex(2) # Doesn't allocate enough space: first tab is better
+    self.engine.mode_init()
+
+    self.sockets.init()
+
 # rpyc servic definition
 # Doesn't let you access member variables, so seems kind of pointless
 import rpyc
 class MyService(rpyc.Service):
     def exposed_get_nextwave(self):
         return self.win
+
 def start_backdoor(win):
     # start the rpyc server
     from rpyc.utils.server import ThreadedServer
@@ -1120,6 +1114,10 @@ def main():
   app = QApplication(sys.argv)
   win = NextWaveMainWindow()
   win.app = app
+
+  win.params_json()
+  win.reload_config() # Read from XML file
+  win.initEngine()
   win.initUI()
 
   start_backdoor(win)

@@ -55,6 +55,8 @@ inline double time_highres() {
 #endif
 }
 
+void process_ui_commands(void); // Forward declr
+
 // Make a class to store AF arrays across process calls.
 // Thus memory isn't destroyed/erased constantly (causing Garbage Collection issues).
 // There are members having to do with the boxes (which are updated sporadically)
@@ -295,6 +297,9 @@ PLUGIN_API(centroiding,init,char *params)
   pShmem = (struct shmem_header*) shmem_region1.get_address();
   
   gaf=new af_instance();
+
+  process_ui_commands(); // First read/check opens the pipe that Python UI sockets needs
+
   return 0;
 }
 
@@ -433,19 +438,6 @@ int find_centroids_af(unsigned char *buffer, int width, int height) {
   memcpy(pShmemBoxes->centroid_y, host_y, sizeof(CALC_TYPE)*num_boxes);
   //memcpy(pShmemBoxes->mirror_voltages, host_mirror_voltages, sizeof(float)*nActuators);
 
-  /*
-  if (pShmem->mode == 3 || pShmem->mode==9 ) {
-	  // If closed loop, update refs
-	  
-	  gaf->refs_next = af::matmul(gaf->mirror_voltages, gaf->influence );
-	  gaf->ref_x_shift = gaf->refs_next( af::seq(0,673-1)) * (24000.0/10.0) * (992.0/1000.0); // TODO
-	  gaf->ref_y_shift = gaf->refs_next( af::seq(673,673*2-1)) * (24000.0/10.0) * (992.0/1000.0); // TODO
-	  
-	  // spdlog::info("influ0: {}", gaf->ref_x_shift(0) );
-	  spdlog::info("influ: {}", (float)af::max<float>(gaf->ref_x_shift));
-  }
-  */
-
 	if (pShmem->mode == 3 || pShmem->mode==9 ) { // Closed loop
 	
 		double mirror_min=10, mirror_max=-10, mirror_mean=0;
@@ -561,7 +553,6 @@ void process_ui_commands(void) {
 PLUGIN_API(centroiding,process,char *params)
 {
   process_ui_commands();
-
 
 	uint16_t nCurrRing = pShmem->current_frame;
 	uint16_t height = pShmem->dimensions[0];

@@ -93,13 +93,17 @@ class NextwaveEngineComm():
             fd3=os.open('/dev/shm/NW_BUFFER_BOXES', os.O_RDWR)
             self.shmem_boxes=mmap.mmap(fd3,MEM_LEN_BOXES)
 
-        self.init_params() # MAYBE do this for defaults
+        self.init_params()
 
     def init_params(self, overrides=None):
-        self.ccd_pixel = self.ui.get_param("system","pixel_pitch",True)
-        self.pupil_diam = self.ui.get_param("system","pupil_diam",True)
-        self.box_um = self.ui.get_param("system","lenslet_pitch",True)
-        self.focal = self.ui.get_param("system","focal_length",True)
+        #self.ccd_pixel = self.ui.get_param("system","pixel_pitch",True)
+        #self.pupil_diam = self.ui.get_param("system","pupil_diam",True)
+        #self.box_um = self.ui.get_param("system","lenslet_pitch",True)
+        #self.focal = self.ui.get_param("system","focal_length",True)
+        self.focal =     self.ui.get_param_xml("LENSLETS_LensletFocalLength")/1000.0
+        self.box_um =    self.ui.get_param_xml("LENSLETS_LensletPitch")
+        self.ccd_pixel = self.ui.get_param_xml("CAMERA1_CameraPixelPitch")
+        self.pupil_diam =self.ui.get_param_xml("OPTICS_PupilDiameter")
 
         # New method, not globall used yet:
         self.params = OpticsParams(self.ccd_pixel, self.pupil_diam, self.box_um, self.focal)

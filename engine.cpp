@@ -163,7 +163,7 @@ int load_module(std::string name, std::string params, std::list<struct module> &
   handle=dlopen(name.c_str(), RTLD_NOW|RTLD_LOCAL);
 #endif
 
-  if (handle<0) {
+  if (handle<(void*)0) {
     spdlog::error("Couldn't load '{}'\n",name);
     chkerr();
     return -1;
