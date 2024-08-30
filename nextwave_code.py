@@ -590,15 +590,15 @@ class NextwaveEngineComm():
             if n >0:
                 mirrors[n] = 0.15
                 
-            updater( "Calibrating %d (%f).."%(n, np.sum(mirrors)) )
+            updater( "Calibrating +%d (%f).."%(n, np.sum(mirrors)) )
 
             self.write_mirrors( mirrors )
             
             # First make sure mirrors are read in and programmed
             self.do_snap(0x40) # TODO: MODE_CALIBRATING
             self.do_snap(0x40) # TODO: MODE_CALIBRATING
-            self.do_snap(0x40) # TODO: MODE_CALIBRATING
-            time.sleep(0.1)
+            #self.do_snap(0x40) # TODO: MODE_CALIBRATING
+            #time.sleep(0.1)
             
             slopes_x[n] *= 0
             slopes_y[n] *= 0
@@ -626,15 +626,16 @@ class NextwaveEngineComm():
             
         np.savez("calib_p.npz",slopes_x, slopes_y);
         
-        for n in []: #np.arange(97): #len( mirrors ):
-            print( "Calibrating %d.."%n)
+        for n in np.arange(97): #len( mirrors ):
+            print( "Calibrating -%d.."%n)
             mirrors *= 0
             mirrors[n] = -0.2
             self.write_mirrors( mirrors )
             
             # First make sure mirrors are read in and programmed
             self.do_snap(0x40) # TODO: MODE_CALIBRATING
-            time.sleep(0.25)
+            self.do_snap(0x40) # TODO: MODE_CALIBRATING
+            #time.sleep(0.25)
             
             slopes_x[n] *= 0
             slopes_y[n] *= 0
@@ -642,7 +643,7 @@ class NextwaveEngineComm():
             for it in np.arange(NUM_ITS):
                 self.do_snap(0x40) # TODO: MODE_CALIBRATING
                 # The main loop will keep snapping and calc-ing, so we can just poll that occasionally
-                time.sleep(0.25) # TODO: better to wait for status/handshake
+                #time.sleep(0.25) # TODO: better to wait for status/handshake
                 SIZEOF_DOUBLE=8
                 fields=self.layout_boxes[1]            
                 self.shmem_boxes.seek(fields['delta_x']['bytenum_current'])

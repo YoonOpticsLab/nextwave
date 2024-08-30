@@ -298,7 +298,9 @@ PLUGIN_API(centroiding,init,char *params)
   
   gaf=new af_instance();
 
-  process_ui_commands(); // First read/check opens the pipe that Python UI sockets needs
+  //process_ui_commands(); // First read/check opens the pipe that Python UI sockets needs
+
+  spdlog::info("Ok");
 
   return 0;
 }
