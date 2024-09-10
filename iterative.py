@@ -1,6 +1,6 @@
-#import numpy as np
 from numpy import sqrt, zeros, concatenate
 
+# Taken from GYY's MATLAB code and converted to Python
 def extrapolate_zernikes(z_in,pupil_ratio):
     num_coeffs=z_in.shape[0]
     z=z_in * 0 # Will be replaced

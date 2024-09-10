@@ -49,12 +49,15 @@ class OpticsParams():
     def __init__(self,ccd_pixel,pupil_diam,box_um,focal):
         self.ccd_pixel = ccd_pixel
         self.pupil_diam = pupil_diam
-        self.pupil_radius_mm=self.pupil_diam / 2.0
-        self.pupil_radius_pixel=self.pupil_radius_mm * 1000 / self.ccd_pixel
         self.box_um = box_um
         self.focal = focal
+
+        # Computed:
+        self.pupil_radius_mm=self.pupil_diam / 2.0
+        self.pupil_radius_pixel=self.pupil_radius_mm * 1000 / self.ccd_pixel
         self.box_size_pixel=self.box_um / self.ccd_pixel
         self.ri_ratio = self.pupil_radius_pixel / self.box_size_pixel
+
 
 class NextwaveEngineComm():
     """ Class to manage:
@@ -105,7 +108,7 @@ class NextwaveEngineComm():
         self.ccd_pixel = self.ui.get_param_xml("CAMERA1_CameraPixelPitch")
         self.pupil_diam =self.ui.get_param_xml("OPTICS_PupilDiameter")
 
-        # New method, not globall used yet:
+        # New method, not used much yet:
         self.params = OpticsParams(self.ccd_pixel, self.pupil_diam, self.box_um, self.focal)
 
         if overrides:

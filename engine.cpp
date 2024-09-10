@@ -402,17 +402,18 @@ int main(int argc, char** argv)
 			) {
           pShmem1->mode = MODE_READY;
         } else {
-		
+
+          // Normal mode: continue processing...
 			// TODO: Some kind of problems in closed loop... going too fast? 
 			//std::this_thread::sleep_for(std::chrono::milliseconds(50));
 		}
 
-
     } else { // Not running at all. Sleep a bit until summoned.
-      bRunning=0;	  
-	  
-	  if (pShmem1->mode == MODE_OFF)
-		pShmem1->total_frames=0; // TODO: not sure if we want this long-term
+
+      if (pShmem1->mode == MODE_OFF)
+        pShmem1->total_frames=0; // TODO: not sure if we want this long-term
+
+      bRunning=0;
       std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
 
