@@ -14,6 +14,8 @@ import extract_memory
 import zernike_integrals
 import iterative
 
+import ffmpegcv # Read AVI... Better than OpenCV (built-in ffmpeg?)
+
 WINDOWS=(os.name == 'nt')
 
 NUM_ZERNIKES=67 # TODO
@@ -162,16 +164,12 @@ class NextwaveEngineComm():
             #self.update_zernike_svd() # TODO: maybe integrate into make_sb
             #self.send_searchboxes(self.shmem_boxes, self.box_x, self.box_y, self.layout_boxes)
 
-            mode=self.read_mode()
-            print ( "MODE: %d"%mode, end='')
             self.init_params( {'pupil_diam': self.iterative_size})
             self.mode_snap(False,False)
             mode=self.read_mode()
             # TODO: don't wait forever; lokcup
-            print ( "MODE: %d"%mode, end='')
             while( mode>1 ):
                 mode=self.read_mode()
-                #print ( "MODE: %d"%mode, end='')
                 time.sleep(0.005)
 
             self.receive_centroids()
@@ -315,6 +313,75 @@ class NextwaveEngineComm():
         #box_x =np.frombuffer(box_buf, dtype='uint8', count=NUM_BOXES )
 
         return box_x,box_y
+
+    def offline_frame(self,nframe):
+            fields=self.layout[1] # TODO: fix
+            dims=np.zeros(2,dtype='uint16')
+            dims[0]=self.offline_movie[nframe].shape[0]
+            dims[1]=self.offline_movie[nframe].shape[1]
+            self.shmem_hdr.seek(fields['dimensions']['bytenum_current']) #TODO: nicer
+            self.shmem_hdr.write(dims)
+            self.shmem_hdr.flush()
+
+            for nbuf in np.arange(4):
+                self.shmem_data.seek(nbuf*2048*2048)
+                self.shmem_data.write(self.offline_movie[nframe])
+                self.shmem_data.flush()
+
+
+    def load_offline(self,file_info):
+        fields=self.layout[1] # TODO: fix
+        # file_info: from dialog. Tuple: (list of files, file types)
+        if '.bin' in file_info[1]:
+            print("Offline: ",file_info[0][0])
+            #fil=open(file_info[0][0],'rb')
+            bytez=np.fromfile(file_info[0][0],'uint8')
+            width =int(np.sqrt(len(bytez)) ) #  Hopefully it's square
+            print( width )
+
+            dims=np.zeros(2,dtype='uint16')
+            dims[0]=width
+            dims[1]=width
+            #buf = ByteStream()
+            #buf.append(dims) 
+            self.shmem_hdr.seek(fields['dimensions']['bytenum_current']) #TODO: nicer
+            self.shmem_hdr.write(dims)
+            self.shmem_hdr.flush()
+
+            for nbuf in np.arange(4):
+                self.shmem_data.seek(nbuf*2048*2048)
+                self.shmem_data.write(bytez)
+                self.shmem_data.flush()
+
+        elif '.avi' in file_info[1]:
+            fname=file_info[0][0]
+            print("Offline movie: ",fname)
+
+            # Clear list (better in UI?)
+            idx=self.ui.layout_off.count()
+            while(idx > 0):
+                idx -= 1
+                widget1 = self.ui.layout_off.itemAt(idx).widget()
+                widget1.setParent(None)
+
+            vidin = ffmpegcv.VideoCapture(fname)
+            buf_movie=None
+
+            with vidin:
+                for nf,frame in enumerate(vidin):
+                    f1=frame.mean(2)[0:1024,0:1024]
+                    if buf_movie is None:
+                        buf_movie=np.zeros( (50,f1.shape[0],f1.shape[1]), dtype='uint8') # TODO: grow new chunk if necessary
+                    buf_movie[nf]=f1
+                    print(nf,end=' ')
+
+            print("Read %d frames of %dx%d"%(nf,f1.shape[0],f1.shape[1]) )
+            buf_movie=buf_movie[0:nf,:,:] # Trim to correct
+            self.offline_movie = buf_movie
+            self.ui.add_offline(buf_movie)
+
+    def offline_test(self,nframe):
+        print("hi")
 
     def send_searchboxes(self,shmem_boxes, box_x, box_y, layout_boxes):
         defs=layout_boxes[2]

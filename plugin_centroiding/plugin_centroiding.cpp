@@ -408,7 +408,7 @@ int find_centroids_af(unsigned char *buffer, int width, int height) {
   memcpy(gpShmemLog[gpShmemHeader->total_frames].centroid_x, host_delta_x, sizeof(CALC_TYPE)*num_boxes);
   memcpy(gpShmemLog[gpShmemHeader->total_frames].centroid_y, host_delta_y, sizeof(CALC_TYPE)*num_boxes);
 
-	spdlog::info("CEN good1");
+	//spdlog::info("CEN good1");
 
 #if 1
   // Assumed that the dimensions of infl match
@@ -417,14 +417,14 @@ int find_centroids_af(unsigned char *buffer, int width, int height) {
   gaf->slopes /= (24000.0/10.0) * (992.0/1000.0); 
   //gaf->slopes /= (focal_um/pupil_radius_um); //? * (height/1000.0); 
   
-	spdlog::info("CEN good2");
+	//spdlog::info("CEN good2");
 
 #if 0
   gaf->mirror_voltages = af::matmul(gaf->slopes, gaf->influence_inv );
   double *host_mirror_voltages = gaf->mirror_voltages.host<double>();
 #endif //0
 
-	spdlog::info("CEN good3");
+	//spdlog::info("CEN good3");
 #endif //0
   //spdlog::info( '{}',  (float)af::mean<float>(gaf->influence_inv) );
   //spdlog::info("INF MAX: {}", (float)af::max<float>(gaf->influence_inv));
@@ -574,12 +574,12 @@ PLUGIN_API(centroiding,process,char *params)
   struct shmem_boxes_header* pShmemBoxes = (struct shmem_boxes_header*) shmem_region3.get_address();
   //wait_for_lock(&pShmemBoxes->lock);
 
-  spdlog::info("ok1");
+  //spdlog::info("ok1");
 
 	memcpy((void*)buffer,
          ((const char *)(shmem_region2.get_address()))+height*width*nCurrRing, height*width);
 
-  spdlog::info("ok1.5");
+  //spdlog::info("ok1.5");
 
   if (params[0]=='I') {
     rcv_boxes(width);
@@ -587,10 +587,10 @@ PLUGIN_API(centroiding,process,char *params)
     spdlog::info("Centroiding Dims: {}x{} pixel0:{}", width, height, int(buffer[0])) ;
   }
 
-  spdlog::info("ok2");
+  //spdlog::info("ok2");
 
   find_centroids_af(buffer, width, height);
-  spdlog::info("ok3");
+  //spdlog::info("ok3");
 
   //unlock(&pShmemBoxes->lock);
 	return 0;

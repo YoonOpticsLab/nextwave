@@ -72,6 +72,7 @@ class NextWaveMainWindow(QMainWindow):
     self.box_info = -1
     self.box_info_dlg = BoxInfoDialog("HiINFO",self)
 
+    self.offline_curr=0
     self.chkLoop = QCheckBox("Close AO Loop") # This is needed for engine.mode_init, called in our init. Will be replaced by chkbox widget in our InitUI
 
  def params_json(self):
@@ -121,14 +122,14 @@ class NextWaveMainWindow(QMainWindow):
     self.updater_dm.start(self.get_param("UI","update_rate_dm"))
 
  def offline_load_image(self):
-    ffilt='Binary files (*.bin);; BMP Images (*.bmp);; All files (*.*)'
+    ffilt='Movies (*.avi);; Binary files (*.bin);; BMP Images (*.bmp);; files (*.*)'
     thedir = QFileDialog.getOpenFileNames(self, "Choose file in directory",
                 ".", ffilt );
 
-    if len(thedir)==0:
-        return
-    else:
-        print( thedir )
+    if len(thedir)>0:
+        print( thedir , thedir[0])
+        self.btn_off.setText(thedir[0][0])
+        self.engine.load_offline(thedir)
 
     return
 
@@ -137,9 +138,7 @@ class NextWaveMainWindow(QMainWindow):
     thedir = QFileDialog.getOpenFileNames(self, "Choose file in directory",
                 ".", ffilt );
 
-    if len(thedir)==0:
-        return
-    else:
+    if len(thedir)>0:
         print( thedir )
 
     return
@@ -507,7 +506,15 @@ class NextWaveMainWindow(QMainWindow):
 #def userSettings(self, tabIndex):
     #if tabIndex != 5:
      #self.param_tree.setParameters(self.p, showTop=False)
- 
+
+ def offline_move(self,n):
+  self.offline_curr += n
+  print("Offline move %d, curr=%d:"%(n,self.offline_curr) )
+
+ def offline_test(self):
+  print("Offline test")
+  self.engine.offline_test(self.offline_curr)
+
  # PANELS/layouts, etc.
  def initUI(self):
 
@@ -537,7 +544,7 @@ class NextWaveMainWindow(QMainWindow):
 
      #Scroll Area Properties
      self.scroll_central.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
-     self.scroll_central.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+     self.scroll_central.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
      self.scroll_central.setWidgetResizable(True)
      self.scroll_central.setWidget(self.pixmap_label)
      layout.addWidget(self.scroll_central,15)
@@ -826,30 +833,76 @@ class NextWaveMainWindow(QMainWindow):
      #layout1.addWidget(btn1,3,0,0,-1)
      #btn1.clicked.connect(self.offline_load_image)
 
-     lbl = QLabel("Spot image: ")
-     layout1.addWidget(lbl, 3,0)
-     self.offline_image = QLineEdit("spots.bin")
-     layout1.addWidget(self.offline_image, 3,1)
-     btn = QPushButton("...")
-     btn.clicked.connect(self.offline_load_image)
-     layout1.addWidget(btn, 3,2)
-     #btn = QPushButton("Edit+Reload")
-     #layout1.addWidget(btn, 3,3)
+     #lbl = QLabel("Spot image: ")
+     #layout1.addWidget(lbl, 1,0)
+     #self.offline_image_name = QLineEdit("spots.bin")
+     #layout1.addWidget(self.offline_image_name, 1,0)
+     self.btn_off = QPushButton("Load")
+     self.btn_off.clicked.connect(self.offline_load_image)
+     layout1.addWidget(self.btn_off, 1,0)
 
      lbl = QLabel("XML Config: ")
-     layout1.addWidget(lbl, 0,0)
-     self.offline_edit_xml = QLineEdit("c:\\file\\ao\\offline_config.xml")
-     layout1.addWidget(self.offline_edit_xml, 0,1)
-     btn = QPushButton("...")
-     btn.clicked.connect(self.offline_config)
-     layout1.addWidget(btn, 0,2)
-     btn = QPushButton("Edit+Reload")
-     layout1.addWidget(btn, 0,3)
+     #layout1.addWidget(lbl, 0,0)
+     #self.offline_edit_xml = QLineEdit("c:\\file\\ao\\offline_config.xml")
+     #layout1.addWidget(self.offline_edit_xml, 0,1)
+     #btn = QPushButton("...")
+     #btn.clicked.connect(self.offline_config)
+     #layout1.addWidget(btn, 0,2)
+     #btn = QPushButton("Edit+Reload")
+     #layout1.addWidget(btn, 0,3)
+
+     # Offline scroll image:
+     self.scroll_off = QScrollArea()
+
+     if False:
+      #pixmap_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
+      #pixmap_label.resize(SPOTS_WIDTH_WIN,SPOTS_HEIGHT_WIN)
+      #pixmap_off.setAlignment(Qt.AlignCenter)
+      #self.pixmap_off=pixmap_off
+
+      #pixmap_off = QLabel()
+      im_np = np.ones((QIMAGE_HEIGHT,QIMAGE_WIDTH),dtype='uint8')
+      #im_np = np.transpose(im_np, (1,0,2))
+      qimage = QImage(im_np, im_np.shape[1], im_np.shape[0],
+                      QImage.Format_Mono)
+      pixmap = QPixmap(qimage)
+      #pixmap = pixmap.scaled(SPOTS_WIDTH_WIN,SPOTS_HEIGHT_WIN, Qt.KeepAspectRatio)
+      pixmap_label.setPixmap(pixmap)
+      pixmap_label.mousePressEvent = self.butt
+
+     self.layout_off = QGridLayout()
+     for n in np.arange(50):
+        lbl = QLabel("Placeholder " + str(n) )
+        self.layout_off.addWidget(lbl, n, 0)
+        lbl = QLabel(str(n) )
+        self.layout_off.addWidget(lbl, n, 1)
+
+     #Scroll Area Properties
+     self.scroll_off.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
+     self.scroll_off.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
+     self.scroll_off.setWidgetResizable(True)
+
+     self.widget_off = QWidget()
+     self.scroll_off.setWidget(self.widget_off)
+     self.widget_off.setLayout(self.layout_off)
+
+     layout1.addWidget(self.scroll_off,2,0) #,-1,-1)
+
+     btn = QPushButton("\u2190") # l
+     layout1.addWidget(btn,3,0)
+     btn.clicked.connect(lambda: self.offline_move(-1) )
+     btn = QPushButton("\u2192") # l
+     layout1.addWidget(btn,3,2)
+     btn.clicked.connect(lambda: self.offline_move (1) )
+
+     btn = QPushButton("X") 
+     layout1.addWidget(btn,4,0)
+     btn.clicked.connect(lambda: self.offline_test() )
 
      #os.system('c:/tmp/sample.txt') # <- on windows this will launch the defalut editor
      self.param_tree_offline = ParameterTree()
      self.param_tree_offline.setParameters(self.p_offline, showTop=False)
-     layout1.addWidget(self.param_tree_offline,1,0,2,-1)
+     layout1.addWidget(self.param_tree_offline,5,0) #,2,-1)
 
      # Main Widget
      self.widget_main = QWidget()
@@ -869,7 +922,10 @@ class NextWaveMainWindow(QMainWindow):
      pixmap_label.setFocus()
 
      self.layout_config.addWidget(self.xml_param_tree,1,0,-1,4)
-     self.setWindowTitle('NextWave: %s'%(self.xml_params["SessionName_name"]))
+     try:
+        self.setWindowTitle('NextWave: %s'%(self.xml_params["SessionName_name"]))
+     except:
+        self.setWindowTitle('NextWave: %s'%("NONAME"))
 
      self.setGeometry(2,2,MAIN_WIDTH_WIN,MAIN_HEIGHT_WIN)
      self.show()
@@ -1100,6 +1156,42 @@ class NextWaveMainWindow(QMainWindow):
     self.engine.mode_init()
 
     #self.sockets.init() #Later
+
+
+ def foo(*arg, **kwargs):
+   ui=arg[0]
+   print("Bar", arg, kwargs)
+   lpos=arg[1].localPos()
+   gpos=arg[1].globalPos()
+   print(arg[1],lpos,gpos)
+   ui.engine.offline_frame(ui.offline_curr)
+
+ def add_offline(self,buf_movie):
+  self.offline_labels = [QLabel("Frame %02d"%n) for n in range(buf_movie.shape[0])]
+  self.offline_checks = [QCheckBox() for n in range(buf_movie.shape[0])]
+
+  for nf,frame in enumerate(buf_movie):
+                pixmap_l = QLabel()
+                #f1=np.array( np.log10(frame)/np.log10(255) * 255, dtype='uint8' )
+                f1=frame
+                qimage = QImage( f1, frame.shape[1], frame.shape[0], QImage.Format_Grayscale8)
+                pixmap = QPixmap(qimage)
+                pixmap = pixmap.scaled(200,200 , Qt.KeepAspectRatio) # TODO: Get size of widget
+                pixmap_l.setPixmap(pixmap)
+
+                if nf%4==0:
+                 self.offline_checks[nf].setChecked(True)
+
+                self.layout_off.addWidget(self.offline_labels[nf], nf, 0)
+                self.layout_off.addWidget(self.offline_checks[nf], nf, 1)
+                self.layout_off.addWidget(pixmap_l, nf, 2)
+
+                #pixmap_l.clicked.connect(lambda: self.offline_click(n) )
+                #pixmap_l.mousePressEvent = lambda: foo(self, n) #clicked.connect(lambda: self.offline_click(n) )
+                pixmap_l.mousePressEvent = self.foo #clicked.connect(lambda: self.offline_click(n) )
+
+ #def offline_click(self,nframe):
+  #print("Offline %d clicked"%nframe)
 
 # rpyc servic definition
 # Doesn't let you access member variables, so seems kind of pointless

@@ -139,6 +139,9 @@ DECL init(char *params)
 DECL process(char *params)
 {
   char *msg=socket_check(CAMERA_SOCKET);
+
+  //return 0; // Let the Python UI handle it.
+
   if (msg!=NULL) {
     spdlog::info("RAW: {}",msg);
     if (msg[0]=='E'){
