@@ -92,7 +92,7 @@ void read_file(std::string filename)
     rewind(fp);
 
     fread(buffer,1,height*width,fp); // only bytes
-    //spdlog::info("Read {} {} {} {}",filename,height, width, file_size);
+    spdlog::info("Read {} {} {} {}",filename,height, width, file_size);
   }
   fclose(fp);
 
@@ -115,6 +115,9 @@ pShmem->timestamps[nCurrRing] = (uint8_t)NW_STATUS_READ;
 pShmem->timestamps[nCurrRing] = time_highres();
 
  pShmem->lock = (uint8_t)0; // Everyone keep out until we are done!
+
+ // Prime the connection
+ //char *msg=socket_check(CAMERA_SOCKET);
 
   return; 
 }

@@ -312,6 +312,8 @@ int main(int argc, char** argv)
 
   while ( pShmem1->mode!=MODE_QUIT  ) {
 
+    //spdlog::info("Mode: {}, Frames lefT: {}", pShmem1->mode, pShmem1->frames_left);
+
     if (pShmem1->mode > MODE_READY ) {
 
       if (pShmem1->mode == MODE_RUNONCE_CENTROIDING_AO) {
@@ -348,6 +350,7 @@ int main(int argc, char** argv)
       uint16_t ms_times_100;
       double times_before[4]; //TODO
       for (struct module it: listModules) {
+        //spdlog::info("Before {} {} {}", pShmem1->total_frames, modnum, it.name );
           boost::chrono::high_resolution_clock::time_point time_before = boost::chrono::high_resolution_clock::now();
 
           int result=(*it.fp_do_process)((const char*)str_message);
@@ -363,6 +366,8 @@ int main(int argc, char** argv)
 
           boost::chrono::duration<double>time_since_start = time_before - time_start;
           times_before[modnum] = time_since_start.count();
+
+          //spdlog::info("After {} {} {}", pShmem1->total_frames, modnum, it.name );
 
           modnum++;
         }
@@ -393,7 +398,7 @@ int main(int argc, char** argv)
         pipeline_count += 1;
 
         pShmem1->frames_left--;
-        spdlog::info("Frames lefT: {}", pShmem1->frames_left);
+        //spdlog::info("Frames lefT: {}", pShmem1->frames_left);
 
       // Ran once, unarm
         if ( (pShmem1->mode & MODE_RUNONCE_CENTROIDING) ||

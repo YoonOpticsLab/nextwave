@@ -177,6 +177,7 @@ void rcv_boxes(int width) {
   struct shmem_header* pShmem = (struct shmem_header*) shmem_region1.get_address();
   struct shmem_boxes_header* pShmemBoxes = (struct shmem_boxes_header*) shmem_region3.get_address();
 
+  //focal_um=24000.0; // TODO
   num_boxes = pShmemBoxes->num_boxes;
   pixel_um = pShmemBoxes->pixel_um;
   pupil_radius_um = pShmemBoxes->pupil_radius_um;
@@ -203,7 +204,7 @@ void rcv_boxes(int width) {
 	//try {
 		//af::array box_x = af::array(box_size, num_boxes, local_refs); // pShmemBoxes->reference_x);
     //} catch (af::exception &e) { fprintf(stderr, "%s\n", e.what()); }
-#if 0
+#if 1
 	spdlog::info("RBf {} {} {}", box_size,num_boxes,pShmemBoxes->reference_x[0]);
 	//gaf->box_y = af::array(box_size,num_boxes,pShmemBoxes->reference_y);
 	spdlog::info("RB1");
@@ -218,7 +219,7 @@ void rcv_boxes(int width) {
   gaf->ref_x_shift=gaf->ref_x * 0;
   gaf->ref_y_shift=gaf->ref_y * 0;
 
-	spdlog::info("init: {}x{} {} {} {}\n", width,height,pShmemBoxes->box_x[0], pShmemBoxes->box_y[0]-box_size, pShmemBoxes->box_y[0]-box_size/2);
+	spdlog::info("init: {}x{} #:{} {} {} {}\n", width,height, num_boxes, pShmemBoxes->box_x[0], pShmemBoxes->box_y[0]-box_size, pShmemBoxes->box_y[0]-box_size/2);
 
   // Each box will have a set of 1D indices into its members
 	for (int ibox=0; ibox<num_boxes; ibox++) {
@@ -243,7 +244,7 @@ void rcv_boxes(int width) {
 	}
 	gaf->seq1 = af::array(box_size*box_size, num_boxes, nbuffer );
 
-  //spdlog::info("boxes: #={} size={} pupil={}", num_boxes, box_size, pupil_radius_pixels );
+  spdlog::info("boxes: #={} size={} pupil={}", num_boxes, box_size, pupil_radius_pixels );
   //spdlog::info("x0={} y0={}", x_ref0, y_ref0 );
 
 #if VERBOSE
@@ -407,14 +408,23 @@ int find_centroids_af(unsigned char *buffer, int width, int height) {
   memcpy(gpShmemLog[gpShmemHeader->total_frames].centroid_x, host_delta_x, sizeof(CALC_TYPE)*num_boxes);
   memcpy(gpShmemLog[gpShmemHeader->total_frames].centroid_y, host_delta_y, sizeof(CALC_TYPE)*num_boxes);
 
+	spdlog::info("CEN good1");
+
 #if 1
   // Assumed that the dimensions of infl match
   gaf->slopes = af::join(0, gaf->delta_x, gaf->delta_y);
   gaf->slopes = af::moddims(gaf->slopes,af::dim4(1,num_boxes*2,1,1) ); // like flatten, but in 2nd dimension
-  gaf->slopes /= (24000.0/10.0) * (992.0/1000.0); // TODO: use focal length, real pupil, etc. Check the equation
+  gaf->slopes /= (24000.0/10.0) * (992.0/1000.0); 
+  //gaf->slopes /= (focal_um/pupil_radius_um); //? * (height/1000.0); 
   
+	spdlog::info("CEN good2");
+
+#if 0
   gaf->mirror_voltages = af::matmul(gaf->slopes, gaf->influence_inv );
   double *host_mirror_voltages = gaf->mirror_voltages.host<double>();
+#endif //0
+
+	spdlog::info("CEN good3");
 #endif //0
   //spdlog::info( '{}',  (float)af::mean<float>(gaf->influence_inv) );
   //spdlog::info("INF MAX: {}", (float)af::max<float>(gaf->influence_inv));
@@ -435,12 +445,13 @@ int find_centroids_af(unsigned char *buffer, int width, int height) {
 	spdlog::info("Count: {}", (float)af::count<float>(sums_x));
 #endif
 
-#if 1 // memcpy back into shmem.. NEED!
   memcpy(pShmemBoxes->centroid_x, host_x, sizeof(CALC_TYPE)*num_boxes);
   memcpy(pShmemBoxes->centroid_y, host_y, sizeof(CALC_TYPE)*num_boxes);
+
+#if 0 // memcpy back into shmem.. NEED!
   //memcpy(pShmemBoxes->mirror_voltages, host_mirror_voltages, sizeof(float)*nActuators);
 
-	if (pShmem->mode == 3 || pShmem->mode==9 ) { // Closed loop
+	if ((pShmem->mode == 3 || pShmem->mode==9) && 0 ) { // Closed loop
 	
 		double mirror_min=10, mirror_max=-10, mirror_mean=0;
 		for (int i=0; i<nActuators; i++) {
@@ -472,12 +483,12 @@ int find_centroids_af(unsigned char *buffer, int width, int height) {
 		mirror_mean /= nActuators;
 	} // if closed loop
 
+  af::freeHost(host_mirror_voltages);
   //spdlog::info("Mirror {}:{}/{} 0:{}", (double)mirror_mean, (double)mirror_min, (double) mirror_max, (double)pShmemBoxes->mirror_voltages[0] );
 #endif //1
 
   af::freeHost(host_x);
   af::freeHost(host_y);
-  af::freeHost(host_mirror_voltages);
 
 	//spdlog::info("MirrorSHM {}:", (float) pShmemBoxes->mirror_voltages[0] );
 	
@@ -561,10 +572,14 @@ PLUGIN_API(centroiding,process,char *params)
 	uint16_t width = pShmem->dimensions[1];
 
   struct shmem_boxes_header* pShmemBoxes = (struct shmem_boxes_header*) shmem_region3.get_address();
-  wait_for_lock(&pShmemBoxes->lock);
+  //wait_for_lock(&pShmemBoxes->lock);
+
+  spdlog::info("ok1");
 
 	memcpy((void*)buffer,
          ((const char *)(shmem_region2.get_address()))+height*width*nCurrRing, height*width);
+
+  spdlog::info("ok1.5");
 
   if (params[0]=='I') {
     rcv_boxes(width);
@@ -572,9 +587,12 @@ PLUGIN_API(centroiding,process,char *params)
     spdlog::info("Centroiding Dims: {}x{} pixel0:{}", width, height, int(buffer[0])) ;
   }
 
-  find_centroids_af(buffer, width, height);
+  spdlog::info("ok2");
 
-  unlock(&pShmemBoxes->lock);
+  find_centroids_af(buffer, width, height);
+  spdlog::info("ok3");
+
+  //unlock(&pShmemBoxes->lock);
 	return 0;
 };
 

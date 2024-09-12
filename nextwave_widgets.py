@@ -43,8 +43,10 @@ class ZernikeDialog(QDialog):
             #layout.addRow(QLabel("Z%2d"%(nZernike)) , le)
             layout.addWidget(QLabel("Z%2d"%(nZernike+1)), nZernike+1, 0) #, le)
             layout.addWidget(QLabel("%+0.2f"%self.ui_parent.engine.zernikes[nZernike]), nZernike+1, 1) #, le)
-            layout.addWidget(self.chks[nZernike], nZernike+1, 2)
-            layout.addWidget(self.lines[nZernike], nZernike+1, 3)
+
+            if nZernike>=2:
+                layout.addWidget(self.chks[nZernike], nZernike+1, 2)
+                layout.addWidget(self.lines[nZernike], nZernike+1, 3)
 
             self.chks[nZernike].setChecked(True)
 

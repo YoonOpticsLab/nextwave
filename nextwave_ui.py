@@ -568,18 +568,6 @@ class NextWaveMainWindow(QMainWindow):
 
      l1 = QHBoxLayout()
 
-     self.chkFollow = QCheckBox("Boxes follow centroids")
-     self.chkFollow.stateChanged.connect(lambda:self.set_follow(self.chkFollow.isChecked()))
-     l1.addWidget(self.chkFollow)
-
-     btn = QPushButton("Search box shift")
-     btn.clicked.connect(lambda: self.show_zernike_dialog("Shift search boxes", self.engine.shift_search_boxes ) )
-     l1.addWidget(btn)
-
-     btn = QPushButton("Reference shift")
-     btn.clicked.connect(lambda: self.show_zernike_dialog("Shift references", self.shift_references ) )
-     l1.addWidget(btn)
-
      self.widget_op = QWidget()
      layout_op = QVBoxLayout()
      self.ops_pupil = QGroupBox('Pupil')
@@ -743,11 +731,15 @@ class NextWaveMainWindow(QMainWindow):
 
      btn = QPushButton("Reference shift")
      btn.clicked.connect(lambda: self.show_zernike_dialog("Shift references", self.engine.reset_references ) )
-     layout1.addWidget(btn, 1,1 )
+     layout1.addWidget(btn, 2,0 )
+
+     self.chkFollow = QCheckBox("Boxes follow centroids")
+     self.chkFollow.stateChanged.connect(lambda:self.set_follow(self.chkFollow.isChecked()))
+     layout1.addWidget(self.chkFollow, 1,3 )
 
      btn = QPushButton("Search box RESET")
      btn.clicked.connect(self.engine.reset_search_boxes )
-     layout1.addWidget(btn, 2,0 )
+     layout1.addWidget(btn, 1,1 )
 
      btn = QPushButton("Reference RESET")
      btn.clicked.connect(self.engine.reset_references )
@@ -1099,7 +1091,7 @@ class NextWaveMainWindow(QMainWindow):
  def initEngine(self):
     self.engine = NextwaveEngineComm(self)
     self.engine.init()
-    box_x,box_y,box_norm_x,box_norm_y=self.engine.make_searchboxes(self.cx,self.cy)
+    self.engine.make_searchboxes(self.cx,self.cy)
 
     self.sockets = NextwaveSocketComm(self)
 
@@ -1107,7 +1099,7 @@ class NextWaveMainWindow(QMainWindow):
 #     #self.tabs.setCurrentIndex(2) # Doesn't allocate enough space: first tab is better
     self.engine.mode_init()
 
-    self.sockets.init()
+    #self.sockets.init() #Later
 
 # rpyc servic definition
 # Doesn't let you access member variables, so seems kind of pointless

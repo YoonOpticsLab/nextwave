@@ -49,7 +49,7 @@ class NextwaveSocketComm():
         self.ui = ui
 
     def init(self):
-        if "plugin_flir" in self.ui.json_data:
+        if True: #"plugin_flir" in self.ui.json_data or "rawplayer" in self.ui.json_data:
             self.camera = SocketComponent(SOCKET_CAMERA)
             self.camera.init()
             time.sleep(0.5)
