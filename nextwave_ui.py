@@ -72,6 +72,8 @@ class NextWaveMainWindow(QMainWindow):
     self.box_info = -1
     self.box_info_dlg = BoxInfoDialog("HiINFO",self)
 
+    self.mode_offline = False
+
     self.offline_curr=0
     self.chkLoop = QCheckBox("Close AO Loop") # This is needed for engine.mode_init, called in our init. Will be replaced by chkbox widget in our InitUI
 
@@ -117,13 +119,14 @@ class NextWaveMainWindow(QMainWindow):
     self.p_offline = Parameter.create(name='params_offline', type='group', children=self.params_offline)
     self.params_offline = self.p_offline.saveState()
 
+
  def apply_params(self):
     self.updater.start(self.get_param("UI","update_rate"))
     self.updater_dm.start(self.get_param("UI","update_rate_dm"))
 
  def offline_load_image(self):
     ffilt='Movies (*.avi);; Binary files (*.bin);; BMP Images (*.bmp);; files (*.*)'
-    thedir = QFileDialog.getOpenFileNames(self, "Choose file in directory",
+    thedir = QFileDialog.getOpenFileNames(self, "Choose file",
                 ".", ffilt );
 
     if len(thedir)>0:
@@ -131,7 +134,15 @@ class NextWaveMainWindow(QMainWindow):
         self.btn_off.setText(thedir[0][0])
         self.engine.load_offline(thedir)
 
-    return
+ def offline_load_background(self):
+    ffilt='Movies (*.avi);; Binary files (*.bin);; BMP Images (*.bmp);; files (*.*)'
+    thedir = QFileDialog.getOpenFileNames(self, "Choose background file",
+                ".", ffilt );
+
+    if len(thedir)>0:
+        print( thedir , thedir[0])
+        self.btn_off_back.setText(thedir[0][0])
+        self.engine.load_offline_background(thedir)
 
  def offline_config(self):
     ffilt='XML config files (*.xml);; JSON config files (*.json);; All files (*.*)'
@@ -148,7 +159,10 @@ class NextWaveMainWindow(QMainWindow):
     # if self.engine.status ==  // TODO: see if engine is running before proceed
 
     image_pixels = self.engine.receive_image()
-    self.engine.receive_centroids()
+
+    if not self.mode_offline: # OFFLINE_MODE
+     self.engine.receive_centroids()
+
     self.engine.compute_zernikes()
 
     qimage = QImage(image_pixels, image_pixels.shape[1], image_pixels.shape[0],
@@ -259,6 +273,16 @@ class NextWaveMainWindow(QMainWindow):
         points_centroids=[QPointF(self.engine.centroids_x[n],self.engine.centroids_y[n]) for n in np.arange(self.engine.num_boxes)]
         painter.drawPoints(points_centroids)
 
+    # Centroids:
+    if self.draw_centroids and self.engine.mode>1:
+        try:
+         pen = QPen(Qt.green, 1.0)
+         painter.setPen(pen)
+         points_centroids=[QPointF(self.engine.est_x[n],self.engine.est_y[n]) for n in np.arange(self.engine.num_boxes)]
+         painter.drawPoints(points_centroids)
+        except:
+         pass
+
     if self.draw_crosshair:
         pen = QPen(Qt.red, 1.5)
         painter.setPen(pen)
@@ -275,6 +299,41 @@ class NextWaveMainWindow(QMainWindow):
 
         painter.drawLines(xlines)
 
+    #try:
+    if self.mode_offline:
+     #try:
+        pen = QPen(Qt.green, 1.5)
+        painter.setPen(pen)
+        CROSSHAIR_SIZE=50
+        cx=self.engine.cx_best #engine.opt1[0]
+        cy=self.engine.cy_best #engine.opt1[1]
+        rx=self.engine.opt1[2] * self.engine.box_size_pixel
+        #print(rx)
+        CROSSHAIR_SIZE=rx 
+        xlines=[QLineF(cx+0, # right
+                       cy-CROSSHAIR_SIZE,
+                       cx-0, # right
+                       cy+CROSSHAIR_SIZE),
+                QLineF(cx+CROSSHAIR_SIZE, # right
+                       cy+0,
+                       cx-CROSSHAIR_SIZE, # right
+                       cy-0),
+                QLineF(cx-rx/2**0.5,
+                       cy-rx/2**0.5,
+                       cx+rx/2**0.5,
+                       cy+rx/2**0.5),
+                QLineF(cx-rx/2**0.5,
+                       cy+rx/2**0.5,
+                       cx+rx/2**0.5,
+                       cy-rx/2**0.5)
+                ]
+        painter.drawLines(xlines)
+     #except:
+      #pass
+
+
+
+
         #im_buf=self.shmem_data.read(width*height)
     #bytez =np.frombuffer(im_buf, dtype='uint8', count=width*height )
     #ql1=[QLineF(100,100,150,150)]
@@ -290,6 +349,7 @@ class NextWaveMainWindow(QMainWindow):
         yUL=int( self.engine.box_y[self.box_info]-box_size_pixel//2 )
         #box_pix=self.engine.image.copy()
         box_pix=self.engine.image[ yUL:yUL+int(box_size_pixel), xUL:xUL+int(box_size_pixel) ].copy()
+        self.box_pix=box_pix
         # Centroid locations in this zoom box are relative to box upper left
         self.box_info_dlg.set_box(self.box_info, box_pix,
                                   self.engine.centroids_x[self.box_info]-xUL, self.engine.centroids_y[self.box_info]-yUL,
@@ -511,9 +571,12 @@ class NextWaveMainWindow(QMainWindow):
   self.offline_curr += n
   print("Offline move %d, curr=%d:"%(n,self.offline_curr) )
 
- def offline_test(self):
-  print("Offline test")
-  self.engine.offline_test(self.offline_curr)
+ def offline_goodbox(self):
+  self.engine.offline_goodbox(self.offline_curr)
+
+ def offline_nextbox(self):
+  print("Offline nextbox")
+  self.engine.offline_nextbox(self.offline_curr)
 
  # PANELS/layouts, etc.
  def initUI(self):
@@ -837,11 +900,15 @@ class NextWaveMainWindow(QMainWindow):
      #layout1.addWidget(lbl, 1,0)
      #self.offline_image_name = QLineEdit("spots.bin")
      #layout1.addWidget(self.offline_image_name, 1,0)
-     self.btn_off = QPushButton("Load")
+     self.btn_off = QPushButton("Load Offline Source")
      self.btn_off.clicked.connect(self.offline_load_image)
      layout1.addWidget(self.btn_off, 1,0)
 
-     lbl = QLabel("XML Config: ")
+     self.btn_off_back = QPushButton("Load Offline Background")
+     self.btn_off_back.clicked.connect(self.offline_load_background)
+     layout1.addWidget(self.btn_off_back, 2,0)
+
+     #lbl = QLabel("XML Config: ")
      #layout1.addWidget(lbl, 0,0)
      #self.offline_edit_xml = QLineEdit("c:\\file\\ao\\offline_config.xml")
      #layout1.addWidget(self.offline_edit_xml, 0,1)
@@ -886,23 +953,27 @@ class NextWaveMainWindow(QMainWindow):
      self.scroll_off.setWidget(self.widget_off)
      self.widget_off.setLayout(self.layout_off)
 
-     layout1.addWidget(self.scroll_off,2,0) #,-1,-1)
+     layout1.addWidget(self.scroll_off,3,0) #,-1,-1)
 
      btn = QPushButton("\u2190") # l
-     layout1.addWidget(btn,3,0)
+     layout1.addWidget(btn,4,0)
      btn.clicked.connect(lambda: self.offline_move(-1) )
      btn = QPushButton("\u2192") # l
-     layout1.addWidget(btn,3,2)
+     layout1.addWidget(btn,4,2)
      btn.clicked.connect(lambda: self.offline_move (1) )
 
-     btn = QPushButton("X") 
-     layout1.addWidget(btn,4,0)
-     btn.clicked.connect(lambda: self.offline_test() )
+     btn = QPushButton("Good") 
+     layout1.addWidget(btn,5,0)
+     btn.clicked.connect(lambda: self.offline_goodbox() )
+
+     btn = QPushButton("Next") 
+     layout1.addWidget(btn,5,1)
+     btn.clicked.connect(self.offline_nextbox)
 
      #os.system('c:/tmp/sample.txt') # <- on windows this will launch the defalut editor
      self.param_tree_offline = ParameterTree()
      self.param_tree_offline.setParameters(self.p_offline, showTop=False)
-     layout1.addWidget(self.param_tree_offline,5,0) #,2,-1)
+     #layout1.addWidget(self.param_tree_offline,5,0) #,2,-1)
 
      # Main Widget
      self.widget_main = QWidget()
@@ -1135,7 +1206,12 @@ class NextWaveMainWindow(QMainWindow):
     np.save('zterms',self.engine.zterms)
     np.save('zterms_inv',self.engine.zterms_inv)
 
-    np.savetxt('mirror_voltages.txt',self.engine.mirror_voltages)
+    try:
+     np.savetxt('mirror_voltages.txt',self.engine.mirror_voltages)
+    except:
+     pass
+
+    self.engine.dump_vars()
 
  def close(self):
     self.engine.send_quit() # Send stop command to engine
@@ -1169,6 +1245,13 @@ class NextWaveMainWindow(QMainWindow):
  def add_offline(self,buf_movie):
   self.offline_labels = [QLabel("Frame %02d"%n) for n in range(buf_movie.shape[0])]
   self.offline_checks = [QCheckBox() for n in range(buf_movie.shape[0])]
+
+  # Clear current list (better in UI?)
+  idx=self.layout_off.count()
+  while(idx > 0):
+   idx -= 1
+   widget1 = self.layout_off.itemAt(idx).widget()
+   widget1.setParent(None) # Removes the widget
 
   for nf,frame in enumerate(buf_movie):
                 pixmap_l = QLabel()

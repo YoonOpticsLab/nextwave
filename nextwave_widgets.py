@@ -118,7 +118,12 @@ class BoxInfoDialog(QDialog):
         self.setLayout(layout)
 
     def set_box(self,n,box_pix, cent_x, cent_y, centroid_x_abs,centroid_y_abs, box_x,box_y):
-        self.text_num.setText("n=%d"%n)
+        line1="n=%d"%n
+        try:
+            line1 += "(%f)"%self.ui_parent.engine.box_metrics[n]
+        except:
+            pass
+        self.text_num.setText(line1)
         self.text_box.setText("box center=(%0.3f,%0.3f)"%(box_x,box_y))
         self.text_centroid.setText("centroid=(%0.3f,%0.3f)"%(centroid_x_abs,centroid_y_abs))
         self.box_pix=box_pix
