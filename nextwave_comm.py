@@ -366,3 +366,13 @@ class NextwaveEngineComm():
         self.shmem_hdr.seek(fields['frames_left']['bytenum_current'])
         self.shmem_hdr.write(val.tobytes())
         self.shmem_hdr.flush()
+
+    def write_image(self,dims,bytez):
+        fields=self.layout[1] # TODO: fix
+        self.shmem_hdr.seek(fields['dimensions']['bytenum_current']) #TODO: nicer
+        self.shmem_hdr.write(dims)
+        self.shmem_hdr.flush()
+        for nbuf in np.arange(4):
+            self.shmem_data.seek(nbuf*2048*2048) # TODO
+            self.shmem_data.write(bytez)
+            self.shmem_data.flush()

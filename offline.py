@@ -83,7 +83,7 @@ class NextwaveOffline():
 
             #self.update_zernike_svd() # TODO: maybe integrate into make_sb
             #self.send_searchboxes(self.shmem_boxes, self.box_x, self.box_y, self.layout_boxes)
-            if self.ui.mode_offline:
+            if self.parent.ui.mode_offline:
                 self.iterative_offline()
                 return # Don't get boxes from engine
 
@@ -108,18 +108,11 @@ class NextwaveOffline():
         self.iterative_size = value
 
     def offline_frame(self,nframe):
-            fields=self.layout[1] # TODO: fix
-            dims=np.zeros(2,dtype='uint16')
-            dims[0]=self.offline_movie[nframe].shape[0]
-            dims[1]=self.offline_movie[nframe].shape[1]
-            self.shmem_hdr.seek(fields['dimensions']['bytenum_current']) #TODO: nicer
-            self.shmem_hdr.write(dims)
-            self.shmem_hdr.flush()
-
-            for nbuf in np.arange(4):
-                self.shmem_data.seek(nbuf*2048*2048)
-                self.shmem_data.write(self.offline_movie[nframe])
-                self.shmem_data.flush()
+        dims=np.zeros(2,dtype='uint16')
+        dims[0]=self.offline_movie[nframe].shape[0]
+        dims[1]=self.offline_movie[nframe].shape[1]
+        bytez=self.offline_movie[nframe]
+        self.parent.comm.write_image(dims,bytez)
 
     def load_offline_background(self,file_info):
         # file_info: from dialog. Tuple: (list of files, file types)
@@ -151,16 +144,15 @@ class NextwaveOffline():
                 self.offline_movie = self.offline_movie - offline_mean
                 self.offline_movie[ self.offline_movie<0] = 0
                 self.offline_movie = np.array( self.offline_movie, dtype='uint8')
-                self.ui.add_offline(buf_movie)
+                self.parent.ui.add_offline(buf_movie)
             else:
                 print("Sub whole movie")
                 subbed = np.array(self.offline_movie,dtype='int32') - self.offline_background
                 subbed[subbed<0]=0
                 subbed=np.array( subbed, dtype='uint8')
-                self.ui.add_offline( subbed)
+                self.parent.ui.add_offline( subbed)
 
     def load_offline(self,file_info):
-        fields=self.layout[1] # TODO: fix
         # file_info: from dialog. Tuple: (list of files, file types)
         fname = file_info[0][0]
         self.offline_fname = fname
@@ -194,20 +186,11 @@ class NextwaveOffline():
             dims=np.zeros(2,dtype='uint16')
             dims[0]=bytez.shape[0]
             dims[1]=bytez.shape[1]
-            #buf = ByteStream()
-            #buf.append(dims) 
-            self.shmem_hdr.seek(fields['dimensions']['bytenum_current']) #TODO: nicer
-            self.shmem_hdr.write(dims)
-            self.shmem_hdr.flush()
-
-            for nbuf in np.arange(4):
-                self.shmem_data.seek(nbuf*2048*2048)
-                self.shmem_data.write(bytez)
-                self.shmem_data.flush()
+            self.parent.comm.write_image(dims,bytez)
 
             buf_movie=np.array([im])
             self.offline_movie = buf_movie
-            self.ui.add_offline(buf_movie)
+            self.parent.ui.add_offline(buf_movie)
 
         elif '.avi' in file_info[1]:
             fname=file_info[0][0]
@@ -226,7 +209,7 @@ class NextwaveOffline():
             print("Read %d frames of %dx%d"%(nf,f1.shape[0],f1.shape[1]) )
             buf_movie=buf_movie[0:nf,:,:] # Trim to correct
             self.offline_movie = buf_movie
-            self.ui.add_offline(buf_movie)
+            self.parent.ui.add_offline(buf_movie)
 
         out_fname = self.offline_fname + "_zern.csv"
         self.f_out = open(out_fname,'w')
@@ -390,8 +373,8 @@ class NextwaveOffline():
 
         print( self.offline_movie.shape)
         for nframe in np.arange(self.offline_movie.shape[0]):
-            self.ui.offline_curr=nframe
-            self.offline_frame(self.ui.offline_curr)
+            self.parent.ui.offline_curr=nframe
+            self.offline_frame(self.parent.ui.offline_curr)
             self.offline_startbox()
             self.offline_auto()
 
@@ -421,8 +404,8 @@ class NextwaveOffline():
             #print( z_new[0:3])
             #z_new[0:2]=0 # Clear out tip/tilt. Use as center
 
-            self.ui.cx -= z_new[1] / self.focal * self.ccd_pixel
-            self.ui.cy += z_new[0] / self.focal * self.ccd_pixel
+            self.parent.ui.cx -= z_new[1] / self.focal * self.ccd_pixel
+            self.parent.ui.cy += z_new[0] / self.focal * self.ccd_pixel
             self.init_params( {'pupil_diam': self.iterative_size})
             self.make_searchboxes(pupil_radius_pixel=self.iterative_size/2.0*1000/self.ccd_pixel)
 
@@ -440,11 +423,11 @@ class NextwaveOffline():
             self.compute_zernikes()
             zs = self.zernikes
 
-            frame_name = self.offline_fname + "_%02d.png"%self.ui.offline_curr
-            self.ui.update_ui()
-            self.ui.image.save(frame_name)
+            frame_name = self.offline_fname + "_%02d.png"%self.parent.ui.offline_curr
+            self.parent.ui.update_ui()
+            self.parent.ui.image.save(frame_name)
 
-            s="%d,%d,%f,%d,%d,"%(self.ui.offline_curr,self.num_boxes,self.iterative_size,self.ui.cx,self.ui.cy)
+            s="%d,%d,%f,%d,%d,"%(self.parent.ui.offline_curr,self.num_boxes,self.iterative_size,self.parent.ui.cx,self.parent.ui.cy)
 
             for zern1 in self.zernikes:
                 s += "%0.6f,"%zern1
@@ -461,7 +444,7 @@ class NextwaveOffline():
             #self.offline_centroids()
             #self.offline_centroids_update()
 
-            #double_test = [self.ui.image, self.ui.image]
+            #double_test = [self.parent.ui.image, self.parent.ui.image]
 
             #with TiffImagePlugin.AppendingTiffWriter("./test.tiff",True) as tf:
                 #for im1 in double_test:
@@ -474,8 +457,8 @@ class NextwaveOffline():
         return 1
 
     def offline_startbox(self):
-        #self.ui.cx=518 # TODO
-        #self.ui.cy=491
+        #self.parent.ui.cx=518 # TODO
+        #self.parent.ui.cy=491
 
         self.pupil_radius_pixel = np.sqrt(600**2+600**2)
         self.make_searchboxes()
@@ -499,8 +482,8 @@ class NextwaveOffline():
         print("Startbox OK", opt1 )
         distances = (self.box_x - self.opt1[0])**2 + (self.box_y - self.opt1[1])**2
         box_min = np.argmin( (self.box_x - self.opt1[0])**2 + (self.box_y - self.opt1[1])**2 )
-        self.ui.cx = self.box_x[box_min]
-        self.ui.cy = self.box_y[box_min]
+        self.parent.ui.cx = self.box_x[box_min]
+        self.parent.ui.cy = self.box_y[box_min]
         self.cx_best = self.box_x[box_min]
         self.cy_best = self.box_y[box_min]
         print("Startbox OK", opt1, box_min)
@@ -512,17 +495,17 @@ class NextwaveOffline():
         self.offline_centroids_update()
 
         self.iterative_size = OFFLINE_ITERATIVE_START
-        self.ui.mode_offline=True
+        self.parent.ui.mode_offline=True
 
     def iterative_offline(self):
         pass
 
     def offline_goodbox(self,nframe):
-        nbox=self.ui.box_info
+        nbox=self.parent.ui.box_info
 
         GOOD_THRESH=0.25 # TODO
-        patch=self.ui.box_pix
-        self.good_template=self.metric_patch(self.ui.box_pix)
+        patch=self.parent.ui.box_pix
+        self.good_template=self.metric_patch(self.parent.ui.box_pix)
         #self.good_idx=np.where( self.good_template>GOOD_THRESH)[0][0]
         self.good_idx=int(len(self.good_template)*0.6) # TODO
         print("Goodbox", nbox,nframe,self.good_idx, patch.shape, self.box_size_pixel)

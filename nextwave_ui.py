@@ -128,7 +128,7 @@ class NextWaveMainWindow(QMainWindow):
     self.updater_dm.start(self.get_param("UI","update_rate_dm"))
 
  def offline_load_image(self):
-    ffilt='Movies (*.avi);; Binary files (*.bin);; BMP Images (*.bmp);; files (*.*)'
+    ffilt='BMP Images (*.bmp);; Movies (*.avi);; Binary files (*.bin);; files (*.*)'
     thedir = QFileDialog.getOpenFileNames(self, "Choose file",
                 ".", ffilt );
 
