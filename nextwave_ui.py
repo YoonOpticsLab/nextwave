@@ -69,6 +69,7 @@ class NextWaveMainWindow(QMainWindow):
     self.draw_arrows = False
     self.draw_crosshair = True
     self.iterative_first=True
+    self.draw_pupil=False
     self.box_info = -1
     self.box_info_dlg = BoxInfoDialog("HiINFO",self)
 
@@ -168,6 +169,7 @@ class NextWaveMainWindow(QMainWindow):
     qimage = QImage(image_pixels, image_pixels.shape[1], image_pixels.shape[0],
                  QImage.Format_Grayscale8)
     pixmap = QPixmap(qimage)
+    self.image = pixmap
 
     painter = QPainter()
     painter.begin(pixmap)
@@ -274,7 +276,7 @@ class NextWaveMainWindow(QMainWindow):
         painter.drawPoints(points_centroids)
 
     # Centroids:
-    if self.draw_centroids and self.engine.mode>1:
+    if self.draw_centroids and self.engine.mode>1 and False:
         try:
          pen = QPen(Qt.green, 1.0)
          painter.setPen(pen)
@@ -299,9 +301,7 @@ class NextWaveMainWindow(QMainWindow):
 
         painter.drawLines(xlines)
 
-    #try:
-    if self.mode_offline:
-     #try:
+    if self.draw_pupil:
         pen = QPen(Qt.green, 1.5)
         painter.setPen(pen)
         CROSSHAIR_SIZE=50
@@ -328,11 +328,6 @@ class NextWaveMainWindow(QMainWindow):
                        cy-rx/2**0.5)
                 ]
         painter.drawLines(xlines)
-     #except:
-      #pass
-
-
-
 
         #im_buf=self.shmem_data.read(width*height)
     #bytez =np.frombuffer(im_buf, dtype='uint8', count=width*height )
@@ -574,9 +569,9 @@ class NextWaveMainWindow(QMainWindow):
  def offline_goodbox(self):
   self.engine.offline_goodbox(self.offline_curr)
 
- def offline_nextbox(self):
-  print("Offline nextbox")
-  self.engine.offline_nextbox(self.offline_curr)
+ def offline_stepbox(self):
+  print("Offline stepbox")
+  self.engine.offline_stepbox() #self.offline_curr)
 
  # PANELS/layouts, etc.
  def initUI(self):
@@ -962,13 +957,21 @@ class NextWaveMainWindow(QMainWindow):
      layout1.addWidget(btn,4,2)
      btn.clicked.connect(lambda: self.offline_move (1) )
 
-     btn = QPushButton("Good") 
-     layout1.addWidget(btn,5,0)
-     btn.clicked.connect(lambda: self.offline_goodbox() )
+     btn = QPushButton("Run") 
+     layout1.addWidget(btn,5,2)
+     btn.clicked.connect(lambda: self.engine.offline_auto() )
 
-     btn = QPushButton("Next") 
+     btn = QPushButton("Auto2") 
+     layout1.addWidget(btn,5,3)
+     btn.clicked.connect(lambda: self.engine.offline_auto2() )
+
+     btn = QPushButton("Step") 
      layout1.addWidget(btn,5,1)
-     btn.clicked.connect(self.offline_nextbox)
+     btn.clicked.connect(self.offline_stepbox)
+
+     btn = QPushButton("Start") 
+     layout1.addWidget(btn,5,0)
+     btn.clicked.connect(lambda: self.engine.offline_startbox() )
 
      #os.system('c:/tmp/sample.txt') # <- on windows this will launch the defalut editor
      self.param_tree_offline = ParameterTree()
@@ -1141,6 +1144,8 @@ class NextWaveMainWindow(QMainWindow):
         self.draw_centroids = not( self.draw_centroids )
     elif event.key()==ord('X'):
         self.draw_crosshair = not( self.draw_crosshair )
+    elif event.key()==ord('P'):
+        self.draw_pupil = not( self.draw_pupil )
     elif event.key()==ord('H'):
         self.bar_plot.clamp_current_ylim()
     elif event.key()==ord('Q'):
@@ -1234,9 +1239,9 @@ class NextWaveMainWindow(QMainWindow):
     #self.sockets.init() #Later
 
 
- def foo(*arg, **kwargs):
+ def offline_image_click(*arg, **kwargs):
    ui=arg[0]
-   print("Bar", arg, kwargs)
+   #print("Bar", arg, kwargs)
    lpos=arg[1].localPos()
    gpos=arg[1].globalPos()
    print(arg[1],lpos,gpos)
@@ -1271,7 +1276,10 @@ class NextWaveMainWindow(QMainWindow):
 
                 #pixmap_l.clicked.connect(lambda: self.offline_click(n) )
                 #pixmap_l.mousePressEvent = lambda: foo(self, n) #clicked.connect(lambda: self.offline_click(n) )
-                pixmap_l.mousePressEvent = self.foo #clicked.connect(lambda: self.offline_click(n) )
+                pixmap_l.mousePressEvent = self.offline_image_click #clicked.connect(lambda: self.offline_click(n) )
+
+  self.offline_curr=0
+  self.engine.offline_frame(self.offline_curr)
 
  #def offline_click(self,nframe):
   #print("Offline %d clicked"%nframe)

@@ -21,11 +21,39 @@ import iterative
 
 import ffmpegcv # Read AVI... Better than OpenCV (built-in ffmpeg?)
 
+from PIL import Image, TiffImagePlugin
+
 WINDOWS=(os.name == 'nt')
 
-NUM_ZERNIKES=67 # TODO
+#NUM_ZERNIKES=67 # TODO
+MAX_ZERNIKES=65 # Absolute max for 10th order: np.sum( np.arange(10+1+1))-1 .first of 11th order is np.sum(np.arange(12)) )
+MAX_ORDER=10
+
+NUM_ZCS=21 # 
 START_ZC=1
-NUM_ZCS=68
+
+NACT_PER_NZERN=4
+
+GAUSS_SD=3
+BOX_THRESH=2.5
+
+OFFLINE_ITERATIVE_START=3.0
+OFFLINE_ITERATIVE_STEP=0.25
+
+
+        # Order copied from MATLAB code
+CVS_to_OSA_map = np.array([ 3, 2,
+                            5, 4, 6,
+                            9, 7, 8,10,
+                            15,13,11,12,14,
+                            21,19,17,16,18,20,
+                            27,25,23,22,24,26,28,
+                            35,33,31,29,30,32,34,36,
+                            45,43,41,39,37,38,40,42,44,
+                            55,53,51,49,47,46,48,50,52,54,
+                            65,63,61,59,57,56,58,60,62,64,66])
+CVS_to_OSA_map -= 2
+OSA_to_CVS_map = np.array( [np.where(CVS_to_OSA_map==n)[0][0] for n in np.arange(len(CVS_to_OSA_map))] ) # TODO
 
 #0=horizontal, 1=vertical,3=defocus?
 
@@ -102,7 +130,6 @@ class NextwaveEngineComm():
             self.shmem_boxes=mmap.mmap(fd3,MEM_LEN_BOXES)
 
         self.init_params()
-
     def init_params(self, overrides=None):
         #self.ccd_pixel = self.ui.get_param("system","pixel_pitch",True)
         #self.pupil_diam = self.ui.get_param("system","pupil_diam",True)
@@ -117,11 +144,15 @@ class NextwaveEngineComm():
         self.params = OpticsParams(self.ccd_pixel, self.pupil_diam, self.box_um, self.focal)
 
         if overrides:
-            self.pupil_diam=overrides['pupil_diam']
+            self.pupil_diam=overrides.get('pupil_diam',self.pupil_diam)
 
         self.pupil_radius_mm=self.pupil_diam / 2.0
         self.pupil_radius_pixel=self.pupil_radius_mm * 1000 / self.ccd_pixel
         self.box_size_pixel=self.box_um / self.ccd_pixel
+
+        if overrides:
+            self.box_size_pixel=overrides.get('box_size_pixel',self.box_size_pixel)
+
         self.ri_ratio = self.pupil_radius_pixel / self.box_size_pixel
         print( "Init:", self.ri_ratio, self.box_size_pixel, self.pupil_radius_pixel )
 
@@ -156,7 +187,7 @@ class NextwaveEngineComm():
 
     def circle_err(self,p):
         ssq=np.sum( (self.circle(*p)-self.desired) **2 )
-        print(p)
+        #print(p)
         return ssq
 
     def read_mode(self):
@@ -179,13 +210,14 @@ class NextwaveEngineComm():
             #print(self.iterative_size)
 
             self.make_searchboxes(cx,cy,pupil_radius_pixel=self.iterative_size/2.0*1000/self.ccd_pixel)
+            self.init_params( {'pupil_diam': self.iterative_size})
+
             #self.update_zernike_svd() # TODO: maybe integrate into make_sb
             #self.send_searchboxes(self.shmem_boxes, self.box_x, self.box_y, self.layout_boxes)
             if self.ui.mode_offline:
                 self.iterative_offline()
                 return # Don't get boxes from engine
 
-            self.init_params( {'pupil_diam': self.iterative_size})
             self.mode_snap(False,False)
             mode=self.read_mode()
             # TODO: don't wait forever; lokcup
@@ -198,7 +230,7 @@ class NextwaveEngineComm():
             zs = self.zernikes
 
             factor = self.iterative_size / (self.iterative_size+step)
-            z_new =  zs #iterative.extrapolate_zernikes(zs, factor)
+            z_new =  iterative.extrapolate_zernikes(zs, factor)
             #print( zs[5], zs[0:5] )
             #print( z_new[0:5] )
             self.shift_search_boxes(z_new,from_dialog=False)
@@ -216,7 +248,7 @@ class NextwaveEngineComm():
 
         #self.update_searchboxes()
 
-    def make_searchboxes(self,cx=None,cy=None,aperture=1.0,pupil_radius_pixel=None):
+    def make_searchboxes(self,cx=None,cy=None,aperture=1.0,pupil_radius_pixel=None, box_spacing_pixel=None):
         """
         Like the MATLAB code to make equally spaced boxes, but doesn't use loops.
         Instead builds and filters arrays
@@ -240,17 +272,18 @@ class NextwaveEngineComm():
 
         if pupil_radius_pixel is None:
             pupil_radius_pixel=self.pupil_radius_pixel
+
         box_size_pixel=self.box_size_pixel
+        if box_spacing_pixel is None:
+            box_spacing_pixel=box_size_pixel
 
-        ri_ratio = pupil_radius_pixel / box_size_pixel
+        ri_ratio = pupil_radius_pixel / box_spacing_pixel
 
-        print( pupil_radius_pixel, box_size_pixel, ri_ratio )
-
+        print( "Make SB ",pupil_radius_pixel, box_size_pixel, box_spacing_pixel, ri_ratio )
         aperture = ri_ratio * aperture
-        print( "Make:", pupil_radius_pixel, box_size_pixel, ri_ratio)
 
         # The max number of boxes possible + or -
-        max_boxes = np.ceil( pupil_radius_pixel/ box_size_pixel )
+        max_boxes = np.ceil( pupil_radius_pixel/ box_spacing_pixel )
 
         # All possible bilinear box
         boxes_x = np.arange(-max_boxes,max_boxes+1) # +1 to include +max_boxes number
@@ -273,7 +306,7 @@ class NextwaveEngineComm():
         print("NUM BOX:", num_boxes)
         box_zero = np.where(valid_x_norm**2+valid_y_norm**2==0)[0] # Index of zeroth (middle) element
 
-        MULT = ri_ratio * box_size_pixel
+        MULT = ri_ratio * box_spacing_pixel
         valid_x = valid_x_norm * MULT + cx
         valid_y = valid_y_norm * MULT + cy
 
@@ -290,12 +323,12 @@ class NextwaveEngineComm():
         self.norm_y = valid_y_norm
         self.initial_x = valid_x.copy()
         self.initial_y = valid_y.copy()
-        self.update_zernike_svd() # Precompute
-
         self.num_boxes= num_boxes
-
         self.centroids_x = np.zeros(num_boxes) + np.nan
         self.centroids_y = np.zeros(num_boxes) + np.nan
+
+        self.update_zernike_svd() # Precompute
+
 
         # Determine neighbors (for nan interpolation)
         self.neighbors = np.zeros( (self.num_boxes, 4), dtype='int32')
@@ -401,6 +434,8 @@ class NextwaveEngineComm():
     def load_offline(self,file_info):
         fields=self.layout[1] # TODO: fix
         # file_info: from dialog. Tuple: (list of files, file types)
+        fname = file_info[0][0]
+        self.offline_fname = fname
         if '.bin' in file_info[1]:
             print("Offline: ",file_info[0][0])
             #fil=open(file_info[0][0],'rb')
@@ -422,6 +457,30 @@ class NextwaveEngineComm():
                 self.shmem_data.write(bytez)
                 self.shmem_data.flush()
 
+        elif '.bmp' in file_info[1]:
+            print("Offline: ",file_info[0][0])
+
+            im = Image.open(file_info[0][0])
+            bytez = np.array(im) # TODO: assumes Im is already 8bit monochrome
+
+            dims=np.zeros(2,dtype='uint16')
+            dims[0]=bytez.shape[0]
+            dims[1]=bytez.shape[1]
+            #buf = ByteStream()
+            #buf.append(dims) 
+            self.shmem_hdr.seek(fields['dimensions']['bytenum_current']) #TODO: nicer
+            self.shmem_hdr.write(dims)
+            self.shmem_hdr.flush()
+
+            for nbuf in np.arange(4):
+                self.shmem_data.seek(nbuf*2048*2048)
+                self.shmem_data.write(bytez)
+                self.shmem_data.flush()
+
+            buf_movie=np.array([im])
+            self.offline_movie = buf_movie
+            self.ui.add_offline(buf_movie)
+
         elif '.avi' in file_info[1]:
             fname=file_info[0][0]
             print("Offline movie: ",fname)
@@ -440,6 +499,14 @@ class NextwaveEngineComm():
             buf_movie=buf_movie[0:nf,:,:] # Trim to correct
             self.offline_movie = buf_movie
             self.ui.add_offline(buf_movie)
+
+        out_fname = self.offline_fname + "_zern.csv"
+        self.f_out = open(out_fname,'w')
+        s="frame_num,num_boxes,pupil,cx,cy,"
+        for nz in np.arange(65):
+            s += "Z%d,"%(nz+1)
+        s += "\n"
+        self.f_out.write(s)
 
     def metric_patch(self,patch_orig):
         #filtd=gaussian_filter(buf_movie[nframe],3.0)
@@ -463,19 +530,17 @@ class NextwaveEngineComm():
         sizo=((siz-1)//2) 
         if np.prod(box_pix.shape) < 1:
             print("Too small")
-            return 0,0, 9997
-        print (box_pix.shape)
+            return 0,0, -997
         ind_max = np.unravel_index(np.argmax(box_pix, axis=None), box_pix.shape)
         local_pix=box_pix[ind_max[0]-sizo:ind_max[0]+sizo+1,ind_max[1]-sizo:ind_max[1]+sizo+1]
 
         if np.any( (ind_max[0]<sizo,ind_max[1]<sizo,ind_max[0]>=box_pix.shape[0]+sizo,ind_max[1] >= box_pix.shape[1]+sizo ) ):
-            return ind_max[1], ind_max[0],9999 # give up if too close to edge
+            return ind_max[1], ind_max[0],-999 # give up if too close to edge
 
         lf=local_pix.flatten()
 
         try:
             soln=np.matmul( lf, self.mati)
-            print("ok")
         except AttributeError:
             # Remake inverse matrix to fit quadratic
             idxs=np.arange(siz)-sizo
@@ -487,7 +552,7 @@ class NextwaveEngineComm():
             soln=np.matmul( lf, self.mati)
         except ValueError:
             # On the edge maybe?
-            return ind_max[1], ind_max[0],9998 # give up if too close to edge
+            return ind_max[1], ind_max[0],-998 # give up if too close to edge
 
             # Equivalent loopy code:
             #print(idxs)
@@ -505,26 +570,31 @@ class NextwaveEngineComm():
         goody=(2*soln[A]*soln[E]-soln[D]*soln[B])/det1
         goodx=(2*soln[C]*soln[D]-soln[E]*soln[B])/det1
 
+        # Peak location inside entire box:
+        goodx = goodx + ind_max[1]
+        goody = goody + ind_max[0]
+
         recon=np.matmul(soln,self.pm.T)
-        gof = np.sum( (lf - recon)**2/recon)
+        #gof = np.sum( (lf - recon)**2/recon)
+        xidx=int(round(goodx))
+        yidx=int(round(goody))
+        try:
+            gof = box_pix[yidx,xidx] - np.mean(box_pix)
+        except:
+            gof = 0
 
-        return ind_max[1]+goodx,ind_max[0]+goody,gof
+        return goodx,goody,gof
 
-    def offline_nextbox(self,nframe):
-        nbox_clicked=self.ui.box_info
-
-        for loop in [0,1]:
+    def offline_centroids(self,do_apply=True):
             self.box_metrics = np.zeros( self.num_boxes) 
             cenx=np.zeros( self.num_boxes ) / 0.0
             ceny=np.zeros( self.num_boxes ) / 0.0
             centroids=np.zeros(2)
-            GAUSS_SD=3
-            BOX_THRESH=-0.5
 
             for nbox in np.arange(self.num_boxes):
                 xUL=int( self.box_x[nbox]-self.box_size_pixel//2 )
                 yUL=int( self.box_y[nbox]-self.box_size_pixel//2 )
-                pix=self.image[ yUL:yUL+int(self.box_size_pixel), xUL:xUL+int(self.box_size_pixel) ] #.copy
+                pix=np.array(self.image[ yUL:yUL+int(self.box_size_pixel), xUL:xUL+int(self.box_size_pixel) ]).copy()
 
                 if True: #len(pix) > 100: #==self.box_size_pixel**2:
                     metric1=self.metric_patch(pix)
@@ -533,9 +603,10 @@ class NextwaveEngineComm():
                         val=self.metric_patch(pix)
                     except ValueError:
                         val = -999.0
-                    self.box_metrics[nbox]=val
+                    #self.box_metrics[nbox]=val
+                    self.box_metrics[nbox]=BOX_THRESH*2.0
 
-                if val>BOX_THRESH: # Valid boxes
+                if True: #val>BOX_THRESH: # Valid boxes
                     for ndim in []: #[0,1]: # Skip this code (max in seperate dims), use the code below which is 2D at-once
                         sig=np.mean(pix,ndim)
                         filtd=sig #gaussian_filter1d(sig,3) # if unfiltereted
@@ -554,45 +625,24 @@ class NextwaveEngineComm():
                     centroids=self.box_fit_gauss(pix,17)
                     cenx[nbox] = centroids[0] + xUL
                     ceny[nbox] = centroids[1] + yUL
-                    #self.box_metrics[nbox] = centroids[2] # gof
+                    self.box_metrics[nbox] = centroids[2] # gof
                     #print( centroids, end=' ' )
 
-            self.centroids_x=cenx
-            self.centroids_y=ceny
+                    if centroids[2] < BOX_THRESH:
+                        cenx[nbox] = np.nan
+                        ceny[nbox] = np.nan
 
-            desired = np.all((self.box_metrics > BOX_THRESH, np.isnan(cenx)==False ), 0) *1.0 # binarize 
+            self.cenx = cenx
+            self.ceny = ceny
 
-            print ( desired.shape, desired )
+            if do_apply:
+                self.centroids_x=self.cenx
+                self.centroids_y=self.ceny
 
-            #X,Y=np.meshgrid( np.arange(desired.shape[1]), np.arange(desired.shape[0]) )
-
-            guess =[ np.sum( desired*self.box_x / np.sum(desired ) ) ,
-                np.sum( desired*self.box_y / np.sum(desired ) ),
-                np.sqrt( np.sum(desired) / np. pi ) ]
-
-            self.desired=desired
-
-            opt1=minimize( self.circle_err, guess, method='Nelder-Mead')
-            self.opt1=opt1['x']
-
-            print("Nextbox OK", opt1 )
-            distances = (self.box_x - self.opt1[0])**2 + (self.box_y - self.opt1[1])**2
-            box_min = np.argmin( (self.box_x - self.opt1[0])**2 + (self.box_y - self.opt1[1])**2 )
-            self.ui.cx = self.box_x[box_min]
-            self.ui.cy = self.box_y[box_min]
-            self.cx_best = self.box_x[box_min]
-            self.cy_best = self.box_y[box_min]
-            print("Nextbox OK", opt1, box_min)
-
-            if loop==0:
-                #self.make_searchboxes()
-                try: # TODO
-                    self.make_searchboxes(pupil_radius_pixel=self.iterative_size/2.0*1000/self.ccd_pixel)
-                except:
-                    self.make_searchboxes()
-
+    def offline_centroids_update(self):
         self.compute_zernikes()
         zs = self.zernikes
+        print(  "in update:", zs[0:3])
 
         dx,dy=self.get_deltas(zs,from_dialog=False)
 
@@ -602,15 +652,138 @@ class NextwaveEngineComm():
         self.est_x =   self.box_x - dx*self.focal/self.ccd_pixel
         self.est_y =   self.box_y + dy*self.focal/self.ccd_pixel
 
-        try: # TODO
-            if self.iterative_size>0:
-                zs = self.zernikes
-                factor = self.iterative_size / (self.iterative_size+step)
-                z_new =  zs #iterative.extrapolate_zernikes(zs, factor)
-                self.shift_search_boxes(z_new,from_dialog=False)
-        except:
-            pass
+    def offline_auto2(self):
+        #self.make_searchboxes()
+        self.box_size_pixel = self.box_size_pixel - 5
 
+        self.offline_centroids() # TODO: DEBUG
+        self.offline_centroids_update();
+        return
+
+        print( self.offline_movie.shape)
+        for nframe in np.arange(self.offline_movie.shape[0]):
+            self.ui.offline_curr=nframe
+            self.offline_frame(self.ui.offline_curr)
+            self.offline_startbox()
+            self.offline_auto()
+
+    def offline_auto(self):
+        #it1=self.offline_stepbox()
+        #while it1>0:
+            #it1=self.offline_stepbox()
+        self.offline_centroids()
+        self.offline_centroids_update()
+        zs = self.zernikes
+        self.shift_search_boxes(zs,from_dialog=False) # Shift by appropriate number
+
+    def offline_stepbox(self):
+        self.offline_centroids()
+        self.offline_centroids_update()
+        zs = self.zernikes
+
+        it_size_pix=self.iterative_size / 2.0 * 1000.0/self.ccd_pixel
+        if it_size_pix < self.box_size_pixel * (self.opt1[2]+1.0):
+            factor = self.iterative_size / (self.iterative_size+OFFLINE_ITERATIVE_STEP)
+            #z_new =  iterative.extrapolate_zernikes(zs, factor)
+            z_new=zs
+            self.iterative_size += OFFLINE_ITERATIVE_STEP
+
+            #self.offline_centroids()
+            #self.offline_centroids_update()
+            #print( z_new[0:3])
+            #z_new[0:2]=0 # Clear out tip/tilt. Use as center
+
+            self.ui.cx -= z_new[1] / self.focal * self.ccd_pixel
+            self.ui.cy += z_new[0] / self.focal * self.ccd_pixel
+            self.init_params( {'pupil_diam': self.iterative_size})
+            self.make_searchboxes(pupil_radius_pixel=self.iterative_size/2.0*1000/self.ccd_pixel)
+
+            #print( z_new[0:10] )
+            #self.shift_search_boxes(z_new,from_dialog=False) # Shift by appropriate number
+
+            #self.offline_centroids()
+            #self.offline_centroids_update()
+
+            #zs = self.zernikes
+            #self.shift_search_boxes(zs,from_dialog=False) # Shift by appropriate number
+        else:
+            print ("Shrink!")
+
+            self.compute_zernikes()
+            zs = self.zernikes
+
+            frame_name = self.offline_fname + "_%02d.png"%self.ui.offline_curr
+            self.ui.update_ui()
+            self.ui.image.save(frame_name)
+
+            s="%d,%d,%f,%d,%d,"%(self.ui.offline_curr,self.num_boxes,self.iterative_size,self.ui.cx,self.ui.cy)
+
+            for zern1 in self.zernikes:
+                s += "%0.6f,"%zern1
+
+            s += '\n'
+            print(s)
+
+            self.f_out.write(s)
+            self.f_out.flush()
+
+            #self.box_size_pixel = int( self.box_size_pixel * 0.8 )
+            #self.init_params(overrides={'box_size_pixel': int(self.box_size_pixel*0.9)})
+            #self.make_searchboxes()
+            #self.offline_centroids()
+            #self.offline_centroids_update()
+
+            #double_test = [self.ui.image, self.ui.image]
+
+            #with TiffImagePlugin.AppendingTiffWriter("./test.tiff",True) as tf:
+                #for im1 in double_test:
+                    #im1.save(tf)
+                    #tf.newFrame()
+
+            return -1
+
+        print( self.opt1, self.iterative_size )
+        return 1
+
+    def offline_startbox(self):
+        #self.ui.cx=518 # TODO
+        #self.ui.cy=491
+
+        self.pupil_radius_pixel = np.sqrt(600**2+600**2)
+        self.make_searchboxes()
+
+        self.offline_centroids()
+        self.offline_centroids_update()
+
+        desired = np.all((self.box_metrics > BOX_THRESH, np.isnan(self.cenx)==False ), 0) *1.0 # binarize 
+
+        print ( desired.shape, desired )
+
+        guess =[ np.sum( desired*self.box_x / np.sum(desired ) ) ,
+            np.sum( desired*self.box_y / np.sum(desired ) ),
+            np.sqrt( np.sum(desired) / np. pi ) ]
+
+        self.desired=desired
+
+        opt1=minimize( self.circle_err, guess, method='Nelder-Mead')
+        self.opt1=opt1['x']
+
+        print("Startbox OK", opt1 )
+        distances = (self.box_x - self.opt1[0])**2 + (self.box_y - self.opt1[1])**2
+        box_min = np.argmin( (self.box_x - self.opt1[0])**2 + (self.box_y - self.opt1[1])**2 )
+        self.ui.cx = self.box_x[box_min]
+        self.ui.cy = self.box_y[box_min]
+        self.cx_best = self.box_x[box_min]
+        self.cy_best = self.box_y[box_min]
+        print("Startbox OK", opt1, box_min)
+
+        self.make_searchboxes() # Use new center
+        self.offline_centroids()
+        self.centroids_x=self.cenx
+        self.centroids_y=self.ceny
+        self.offline_centroids_update()
+
+        self.iterative_size = OFFLINE_ITERATIVE_START
         self.ui.mode_offline=True
 
     def iterative_offline(self):
@@ -670,7 +843,7 @@ class NextwaveEngineComm():
             shmem_boxes.flush()
 
         buf = ByteStream()
-        print(  "INF_INV %f"%np.max( self.influence_inv ) )
+        #print(  "INF_INV %f"%np.max( self.influence_inv ) )
         for item in self.influence_inv.T.flatten():
             buf.append(item, 'd')
         shmem_boxes.seek(fields['influence_inv']['bytenum_current'])
@@ -713,28 +886,62 @@ class NextwaveEngineComm():
         return centroids
 
     def update_zernike_svd(self):
-        lefts =  self.norm_x - 0.5/self.ri_ratio
-        rights = self.norm_x + 0.5/self.ri_ratio
+        lefts =    self.norm_x - 0.5/self.ri_ratio # (or 0.5 * self.box_size_pixel/self.pup)
+        rights =   self.norm_x + 0.5/self.ri_ratio
         ups =    -(self.norm_y + 0.5/self.ri_ratio)
         downs =  -(self.norm_y - 0.5/self.ri_ratio)
 
         # Compute all integrals for all box corners 
         lenslet_dx,lenslet_dy=zernike_integrals.zernike_integral_average_from_corners(
             lefts, rights, ups, downs, self.pupil_radius_mm)
-        lenslet_dx = lenslet_dx[START_ZC:NUM_ZCS,:].T
-        lenslet_dy = lenslet_dy[START_ZC:NUM_ZCS,:].T
 
-        #  Compute SVD of stacked X and Y
-        zpoly = np.hstack( (lenslet_dx.T, lenslet_dy.T ) ).T
-        [uu,ss,vv] = svd(zpoly,False)
+        # Remove piston
+        lenslet_dx = lenslet_dx[1:,:]
+        lenslet_dy = lenslet_dy[1:,:]
 
-        # Pre-compute&save the zterms that are multiplied with the slopes in realtime
-        ss_full = np.eye(ss.shape[0])*ss
-        leftside = lstsq(ss_full, vv, rcond=0)[0].T # Python equiv to MATLAB's vv/ss (solving system of eqns) is lstsq
-        # https://stackoverflow.com/questions/1001634/array-division-translating-from-matlab-to-python
-        self.zterms = np.matmul( leftside, uu.T)
-        self.zterms_inv = np.linalg.pinv(self.zterms)
-        np.save('zterms.npy',self.zterms)
+        # TODO: Dumb to make loop, making into function would be better
+        for nsubset in [0,1]:
+            nmax_from_boxes=int(self.num_boxes/NACT_PER_NZERN)
+            nmax_from_boxes= np.min( (nmax_from_boxes,MAX_ZERNIKES))
+            orders_max=np.cumsum(np.arange(MAX_ORDER+2)) - 1 # Last index in each order
+            valid_max = orders_max[nmax_from_boxes<=orders_max][0]
+            if nsubset==0:
+                nvalid = valid_max
+            if nsubset==1: #
+                nvalid = np.min( (20, nmax_from_boxes) )
+
+            dx_subset=lenslet_dx[0:nvalid,:]
+            dy_subset=lenslet_dy[0:nvalid,:]
+
+            #  Compute SVD of stacked X and Y
+            zpoly = np.hstack( (dx_subset, dy_subset ) ).T
+
+            # Pre-compute&save the zterms that are multiplied with the slopes in realtime
+            [uu,ss,vv] = svd(zpoly,False)
+
+            # Need to prevent over/underflow. Tiny ss's lead to huge/problematic zterms.
+            # https://scicomp.stackexchange.com/questions/26763/how-much-regularization-to-add-to-make-svd-stable
+            ss[ ss < 1e-10 ]=0
+
+            ss_full = np.eye(ss.shape[0])*ss
+            leftside = lstsq(ss_full, vv, rcond=0)[0].T # Python equiv to MATLAB's vv/ss (solving system of eqns) is lstsq
+            # https://stackoverflow.com/questions/1001634/array-division-translating-from-matlab-to-python
+            zterms = np.matmul( leftside, uu.T)
+            zterms_inv = np.linalg.pinv(zterms)
+
+            if nsubset==0:
+                self.zterms_full=zterms
+                self.zterms_full_inv=zterms_inv
+            elif nsubset==1:
+                self.zterms_20=zterms
+                self.zterms_20_inv=zterms_inv
+
+        # DBG:
+        self.lenslet_dx=lenslet_dx # Debugging
+        self.lenslet_dy=lenslet_dy
+        np.save('zterms_full.npy',self.zterms_full)
+        np.save('zterms_20.npy',self.zterms_20)
+        np.save('zpoly.npy',zpoly)
 
     def update_influence(self):
         #try:
@@ -777,19 +984,8 @@ class NextwaveEngineComm():
         self.spot_displace_y = spot_displace_y
         self.slope = slope
 
-        coeff=np.matmul(self.zterms,slope)
-
-        # TODO: only need to do this once
-        # Order copied from MATLAB code
-        self.CVS_to_OSA_map = np.array([3,2, 5,4,6, 9,7,8,10, 15,13,11,12,14,
-                                21,19,17,16,18,20,
-                                27,25,23,22,24,26,28, 35,33,31,29,30,32,34,36,
-                                45,43,41,39,37,38,40,42,44,
-                                55,53,51,49,47,46,48,50,52,54,
-                                65,63,61,59,57,56,58,60,62,64,66,67,68,69,70])
-        self.OSA_to_CVS_map = np.array( [np.where(self.CVS_to_OSA_map-2==n)[0][0] for n in np.arange(20)] ) # TODO
-        self.OSA_to_CVS_map += 2
-        self.zernikes=coeff[self.CVS_to_OSA_map[0:NUM_ZCS-1]-1-1] # Return value will is OSA
+        coeff=np.matmul(self.zterms_full,slope)
+        self.zernikes=coeff[CVS_to_OSA_map] # Return value will is OSA
 
     def autoshift_searchboxes(self):
         #shift_search_boxes(self,zs,from_dialog=True):
@@ -826,18 +1022,14 @@ class NextwaveEngineComm():
 
         return rms,rms5p,cylinder,sphere,axis
 
-    def get_deltas(self,zs,from_dialog):
-        zern_new = np.zeros(NUM_ZERNIKES)
-        if from_dialog:
-            # TODO: Figure out relation to OSA_to_CVS, etc.
-            dlg_fix=np.array([1,0,3,2,4,6,7,5,8,11,12,10,13,9,17,16,18,15,18,14],dtype='int')
-            zern_new[0:20]=np.array(zs[0:20])[dlg_fix]
-            zern_new[0:2]=0 # Remove tip/tilt
-        else:
-            dlg_fix=np.array([1,0,3,2,4,6,7,5,8,11,12,10,13,9,17,16,18,15,18,14],dtype='int')
-            zern_new[0:20]=np.array(zs[0:20])[dlg_fix]
-            zern_new[0:2]=0 # Remove tip/tilt
-        delta=np.matmul(self.zterms_inv,zern_new)
+    def get_deltas(self,zs,from_dialog,full=True):
+        #if from_dialog:
+
+        valid_idxs=np.arange(0,self.zterms_full_inv.shape[1] )
+        zern_new=np.array(zs[valid_idxs])[OSA_to_CVS_map[valid_idxs]]
+        zern_new[0:2]=0 # Remove tip/tilt
+
+        delta=np.matmul(self.zterms_full_inv,zern_new)
         num_boxes = self.box_x.shape[0]
         delta_y = delta[0:num_boxes] #/(self.ccd_pixel/self.focal)
         delta_x = delta[num_boxes:] #/(self.ccd_pixel/self.focal)
@@ -1045,8 +1237,7 @@ class NextwaveEngineComm():
         buf = ByteStream()
         #buf.append(0)  # Lock
         buf.append(255) # TODO: MODE from() file
-        #buf.append(1, 'H') # NUM BOXES. Hopefully doesn't matter
-        #buf.append(40, 'd')
+                                          #buf.append(1, 'H') # NUM BOXES. Hopefully does,n't matterr,self.iterative_size/2.0*100int(it_size_pix),self.ui.cx,self.ui.cy)
         #buf.append(500, 'd')
         self.shmem_hdr.seek(2) # TODO: get address
         self.shmem_hdr.write(buf)
