@@ -17,12 +17,14 @@ import json
 
 import matplotlib.cm as cmap
 
-from nextwave_code import NextwaveEngineComm
+from nextwave_code import NextwaveEngine
 from nextwave_sockets import NextwaveSocketComm
 
 from nextwave_widgets import ZernikeDialog, BoxInfoDialog, ActuatorPlot, MyBarWidget
 
 from threading import Thread
+
+from zernike_functions import calc_diopters
 
 import xml.etree.ElementTree as ET
 
@@ -365,7 +367,7 @@ class NextWaveMainWindow(QMainWindow):
         s += 'Z%2d=%+0.4f\n'%(n+1,self.engine.zernikes[n])
     self.text_status.setText(s)
 
-    rms,rms5p,cylinder,sphere,axis=self.engine.calc_diopters()
+    rms,rms5p,cylinder,sphere,axis=calc_diopters(self.engine.zernikes, self.engine.pupil_radius_mm)
     left_chars=15
     str_stats=f"{'RMS':<15}= {rms:3.2f}\n"
     str_stats+=f"{'HORMS':<15}= {rms5p:3.2f}\n"
@@ -1226,7 +1228,7 @@ class NextWaveMainWindow(QMainWindow):
     self.close()
 
  def initEngine(self):
-    self.engine = NextwaveEngineComm(self)
+    self.engine = NextwaveEngine(self)
     self.engine.init()
     self.engine.make_searchboxes(self.cx,self.cy)
 

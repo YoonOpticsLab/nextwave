@@ -16,8 +16,10 @@ import mmap
 import struct
 import extract_memory
 
-import zernike_integrals
+import zernike_functions
 import iterative
+
+from nextwave_comm import NextwaveEngineComm
 
 import ffmpegcv # Read AVI... Better than OpenCV (built-in ffmpeg?)
 
@@ -25,12 +27,6 @@ from PIL import Image, TiffImagePlugin
 
 WINDOWS=(os.name == 'nt')
 
-#NUM_ZERNIKES=67 # TODO
-MAX_ZERNIKES=65 # Absolute max for 10th order: np.sum( np.arange(10+1+1))-1 .first of 11th order is np.sum(np.arange(12)) )
-MAX_ORDER=10
-
-NUM_ZCS=21 # 
-START_ZC=1
 
 NACT_PER_NZERN=4
 
@@ -39,22 +35,6 @@ BOX_THRESH=2.5
 
 OFFLINE_ITERATIVE_START=3.0
 OFFLINE_ITERATIVE_STEP=0.25
-
-
-        # Order copied from MATLAB code
-CVS_to_OSA_map = np.array([ 3, 2,
-                            5, 4, 6,
-                            9, 7, 8,10,
-                            15,13,11,12,14,
-                            21,19,17,16,18,20,
-                            27,25,23,22,24,26,28,
-                            35,33,31,29,30,32,34,36,
-                            45,43,41,39,37,38,40,42,44,
-                            55,53,51,49,47,46,48,50,52,54,
-                            65,63,61,59,57,56,58,60,62,64,66])
-CVS_to_OSA_map -= 2
-OSA_to_CVS_map = np.array( [np.where(CVS_to_OSA_map==n)[0][0] for n in np.arange(len(CVS_to_OSA_map))] ) # TODO
-
 #0=horizontal, 1=vertical,3=defocus?
 
 '''
@@ -92,7 +72,8 @@ class OpticsParams():
         self.pupil_radius_pixel=self.pupil_radius_mm * 1000 / self.ccd_pixel
         self.box_size_pixel=self.box_um / self.ccd_pixel
         self.ri_ratio = self.pupil_radius_pixel / self.box_size_pixel
-class NextwaveEngineComm():
+
+class NextwaveEngine():
     """ Class to manage:
           - Structures needed for realtime engine (boxes/refs, computed centroids, etc.)
           - Communication with the realtime engine (comm. over shared memory)
@@ -102,34 +83,12 @@ class NextwaveEngineComm():
         # TODO:
         self.ui = ui
         self.mode = 0
+        self.comm = NextwaveEngineComm(self)
 
     def init(self):
-        self.layout=extract_memory.get_header_format('memory_layout.h')
-        self.layout_boxes=extract_memory.get_header_format('layout_boxes.h')
-
-        # Could be math in the defines for sizes, use eval
-        MEM_LEN=int( eval(self.layout[2]['SHMEM_HEADER_SIZE'] ) )
-        MEM_LEN_DATA=int(eval(self.layout[2]['SHMEM_BUFFER_SIZE'] ) )
-        MEM_LEN_BOXES=self.layout_boxes[0]
-        if WINDOWS:
-            # TODO: Get these all from the .h defines
-            self.shmem_hdr=mmap.mmap(-1,MEM_LEN,"NW_SRC0_HDR")
-            self.shmem_data=mmap.mmap(-1,MEM_LEN_DATA,"NW_SRC0_BUFFER")
-            self.shmem_boxes=mmap.mmap(-1,MEM_LEN_BOXES,"NW_BUFFER_BOXES")
-
-            #from multiprocessing import shared_memory
-            #self.shmem_hdr = shared_memory.SharedMemory(name="NW_SRC0_HDR" ).buf
-            #self.shmem_data = shared_memory.SharedMemory(name="NW_SRC0_BUFFER" ).buf
-            #self.shmem_boxes = shared_memory.SharedMemory(name="NW_BUFFER2").buf
-        else:
-            fd1=os.open('/dev/shm/NW_SRC0_HDR', os.O_RDWR)
-            self.shmem_hdr=mmap.mmap(fd1, MEM_LEN)
-            fd2=os.open('/dev/shm/NW_SRC0_BUFFER', os.O_RDWR)
-            self.shmem_data=mmap.mmap(fd2,MEM_LEN_DATA)
-            fd3=os.open('/dev/shm/NW_BUFFER_BOXES', os.O_RDWR)
-            self.shmem_boxes=mmap.mmap(fd3,MEM_LEN_BOXES)
-
+        self.comm.init()
         self.init_params()
+
     def init_params(self, overrides=None):
         #self.ccd_pixel = self.ui.get_param("system","pixel_pitch",True)
         #self.pupil_diam = self.ui.get_param("system","pupil_diam",True)
@@ -156,21 +115,9 @@ class NextwaveEngineComm():
         self.ri_ratio = self.pupil_radius_pixel / self.box_size_pixel
         print( "Init:", self.ri_ratio, self.box_size_pixel, self.pupil_radius_pixel )
 
-        if overrides:
-            bytez =np.array([self.num_boxes], dtype="uint16").tobytes() 
-            fields = self.layout_boxes[1]
-            self.shmem_boxes.seek(fields['num_boxes']['bytenum_current'])
-            self.shmem_boxes.write(bytez)
-            self.shmem_boxes.flush()
-            print( self.num_boxes)
-        #except:
-            #pass
-
         bytez =np.array([self.ccd_pixel, self.box_um, self.pupil_radius_mm], dtype='double').tobytes() 
-        fields = self.layout_boxes[1]
-        self.shmem_boxes.seek(fields['pixel_um']['bytenum_current'])
-        self.shmem_boxes.write(bytez)
-        self.shmem_boxes.flush()
+
+        self.comm.write_params(overrides)
 
     def iterative_run(self, cx, cy, step):
         return
@@ -357,7 +304,7 @@ class NextwaveEngineComm():
     def update_searchboxes(self):
         self.update_zernike_svd()
         self.update_influence();
-        self.send_searchboxes(self.shmem_boxes, self.box_x, self.box_y, self.layout_boxes)
+        self.comm.send_searchboxes(self.box_x, self.box_y)
         self.dump_vars()
 
     def rcv_searchboxes(self,shmem_boxes, layout, box_x, box_y, layout_boxes):
@@ -892,7 +839,7 @@ class NextwaveEngineComm():
         downs =  -(self.norm_y - 0.5/self.ri_ratio)
 
         # Compute all integrals for all box corners 
-        lenslet_dx,lenslet_dy=zernike_integrals.zernike_integral_average_from_corners(
+        lenslet_dx,lenslet_dy=zernike_functions.zernike_integral_average_from_corners(
             lefts, rights, ups, downs, self.pupil_radius_mm)
 
         # Remove piston
@@ -902,8 +849,8 @@ class NextwaveEngineComm():
         # TODO: Dumb to make loop, making into function would be better
         for nsubset in [0,1]:
             nmax_from_boxes=int(self.num_boxes/NACT_PER_NZERN)
-            nmax_from_boxes= np.min( (nmax_from_boxes,MAX_ZERNIKES))
-            orders_max=np.cumsum(np.arange(MAX_ORDER+2)) - 1 # Last index in each order
+            nmax_from_boxes= np.min( (nmax_from_boxes,zernike_functions.MAX_ZERNIKES))
+            orders_max=np.cumsum(np.arange(zernike_functions.MAX_ORDER+2)) - 1 # Last index in each order
             valid_max = orders_max[nmax_from_boxes<=orders_max][0]
             if nsubset==0:
                 nvalid = valid_max
@@ -985,48 +932,17 @@ class NextwaveEngineComm():
         self.slope = slope
 
         coeff=np.matmul(self.zterms_full,slope)
-        self.zernikes=coeff[CVS_to_OSA_map] # Return value will is OSA
+        self.zernikes=coeff[zernike_functions.CVS_to_OSA_map] # Return value will is OSA
 
     def autoshift_searchboxes(self):
         #shift_search_boxes(self,zs,from_dialog=True):
         pass
         #return
-
-    def calc_diopters(self):
-        radius = self.pupil_radius_mm
-        radius2 = radius*radius
-        EPS=1e-10
-        sqrt3=np.sqrt(3.0)
-        sqrt6=np.sqrt(6.0)
-        z3=self.zernikes[3-1]
-        z4=self.zernikes[4-1]
-        z5=self.zernikes[5-1]
-
-        J45 =  (-2.0 * sqrt6 / radius2) * z3
-        J180 = (-2.0 * sqrt6 / radius2) * z5
-        cylinder = (4.0 * sqrt6 / (radius * radius)) * np.sqrt((z3 * z3) + (z5 * z5))
-        sphere = (-4.0 * sqrt3 * z4 / (radius * radius)) - 0.5 * cylinder
-
-        if (np.abs(z5) <= EPS):
-            thetaRad = 1.0 if (np.abs(z3) > EPS) else -1.0
-            thetaRad *= float(np.pi) / 4.0
-        else:
-            thetaRad = 0.5 * np.arctan(J45 / J180)
-
-        axis = thetaRad * 180.0 / float(np.pi)
-        if (axis < 0.0):
-            axis += 180.0
-
-        rms=np.sqrt( np.nansum(self.zernikes[(3-1):]**2 ) )
-        rms5p=np.sqrt( np.nansum(self.zernikes[(6-1):]**2 ) )
-
-        return rms,rms5p,cylinder,sphere,axis
-
     def get_deltas(self,zs,from_dialog,full=True):
         #if from_dialog:
 
         valid_idxs=np.arange(0,self.zterms_full_inv.shape[1] )
-        zern_new=np.array(zs[valid_idxs])[OSA_to_CVS_map[valid_idxs]]
+        zern_new=np.array(zs[valid_idxs])[zernikes_functions.OSA_to_CVS_map[valid_idxs]]
         zern_new[0:2]=0 # Remove tip/tilt
 
         delta=np.matmul(self.zterms_full_inv,zern_new)
@@ -1060,46 +976,9 @@ class NextwaveEngineComm():
         return
 
     def receive_image(self):
-        # TODO: Wait until it's safe (unlocked)
-
-        #TODO. Could use this method to read everything into memory. Probably more efficient:
-        #self.shmem_hdr.seek(0)
-        #mem_header=self.shmem_hdr.read(MEM_LEN)
-
-        # This divider needs to match that in the engine code
-        self.fps0=extract_memory.get_array_item2(self.layout,self.shmem_hdr,'fps',0, False)/100.0
-        self.fps1=extract_memory.get_array_item2(self.layout,self.shmem_hdr,'fps',1, False)/100.0
-        self.fps2=extract_memory.get_array_item2(self.layout,self.shmem_hdr,'fps',2, False)/100.0
-
-        self.height=extract_memory.get_array_item2(self.layout,self.shmem_hdr,'dimensions',0, False)
-        self.width=extract_memory.get_array_item2(self.layout,self.shmem_hdr,'dimensions',1, False)
-
-        self.total_frames=extract_memory.get_array_item2(self.layout,self.shmem_hdr,'total_frames',0, False)
-
-        nwhich_buffer=extract_memory.get_array_item2(self.layout,self.shmem_hdr,'current_frame',0, False)
-        
-        self.shmem_data.seek(self.width*self.height*nwhich_buffer)
-        im_buf=self.shmem_data.read(self.width*self.height)
-        bytez =np.frombuffer(im_buf, dtype='uint8', count=self.width*self.height )
-        bytes2=np.reshape(bytez,( self.height,self.width)).copy()
-
-        bytesf = bytes2 / np.max(bytes2)
-
-        if False: #self.chkFollow.isChecked():
-            box_x,box_y=rcv_searchboxes(self.shmem_boxes, self.layout_boxes, 0, 0, 0 )
-            self.box_x = np.array(box_x)
-            self.box_y = np.array(box_y)
-
-        self.image = bytes2
-
-        return self.image
-
-    def write_mirrors(self,data):
-        bytez =np.array(data, dtype="double").tobytes() 
-        fields=self.layout_boxes[1] # TODO: fix
-        self.shmem_boxes.seek(fields['mirror_voltages']['bytenum_current'])
-        self.shmem_boxes.write(bytez)
-        self.shmem_boxes.flush()
+        return self.comm.receive_image()
+    def receive_centroids(self):
+        return self.comm.receive_centroids()
 
     def zero_do(self):
         self.write_mirrors( np.zeros(97) ) # TODO
@@ -1115,29 +994,29 @@ class NextwaveEngineComm():
         buf.append(mode) # TODO: MODE_CENTROIDING
         self.shmem_hdr.seek(2) #TODO: get address
         self.shmem_hdr.write(buf)
-        self.shmem_hdr.flush()    
-    
+        self.shmem_hdr.flush()
+
     def do_calibration(self,updater):
         mirrors = np.zeros( 98 ) # TODO
-        
+
         slopes_x=np.zeros( (98, self.num_boxes) )
         slopes_y=np.zeros( (98, self.num_boxes) )
         for n in np.arange(98): #len( mirrors ):
             mirrors *= 0
-            
+
             if n >0:
                 mirrors[n] = 0.15
-                
+
             updater( "Calibrating +%d (%f).."%(n, np.sum(mirrors)) )
 
             self.write_mirrors( mirrors )
-            
+
             # First make sure mirrors are read in and programmed
             self.do_snap(0x40) # TODO: MODE_CALIBRATING
             self.do_snap(0x40) # TODO: MODE_CALIBRATING
             #self.do_snap(0x40) # TODO: MODE_CALIBRATING
             #time.sleep(0.1)
-            
+
             slopes_x[n] *= 0
             slopes_y[n] *= 0
             NUM_ITS=3
@@ -1146,7 +1025,7 @@ class NextwaveEngineComm():
                 # The main loop will keep snapping and calc-ing, so we can just poll that occasionally
                 # time.sleep( 0.1 ) # TODO: better to wait for status/handshake
                 SIZEOF_DOUBLE=8
-                fields=self.layout_boxes[1]            
+                fields=self.layout_boxes[1]
                 self.shmem_boxes.seek(fields['delta_x']['bytenum_current'])
                 buf=self.shmem_boxes.read(self.num_boxes*SIZEOF_DOUBLE)
                 delta_x=struct.unpack_from(''.join((['d']*self.num_boxes)), buf)
@@ -1154,27 +1033,27 @@ class NextwaveEngineComm():
                 self.shmem_boxes.seek(fields['delta_y']['bytenum_current'])
                 buf=self.shmem_boxes.read(self.num_boxes*SIZEOF_DOUBLE)
                 delta_y=struct.unpack_from(''.join((['d']*self.num_boxes)), buf)
-                
+
                 print ( n, np.max( delta_x), np.min(delta_x), np.mean(delta_x) )
-                
+
                 slopes_x[n] += delta_x
                 slopes_y[n] += delta_y
             slopes_x[n] /= NUM_ITS
             slopes_y[n] /= NUM_ITS
-            
+
         np.savez("calib_p.npz",slopes_x, slopes_y);
-        
+
         for n in np.arange(97): #len( mirrors ):
             print( "Calibrating -%d.."%n)
             mirrors *= 0
             mirrors[n] = -0.2
             self.write_mirrors( mirrors )
-            
+
             # First make sure mirrors are read in and programmed
             self.do_snap(0x40) # TODO: MODE_CALIBRATING
             self.do_snap(0x40) # TODO: MODE_CALIBRATING
             #time.sleep(0.25)
-            
+
             slopes_x[n] *= 0
             slopes_y[n] *= 0
             NUM_ITS=3
@@ -1183,7 +1062,7 @@ class NextwaveEngineComm():
                 # The main loop will keep snapping and calc-ing, so we can just poll that occasionally
                 #time.sleep(0.25) # TODO: better to wait for status/handshake
                 SIZEOF_DOUBLE=8
-                fields=self.layout_boxes[1]            
+                fields=self.layout_boxes[1]
                 self.shmem_boxes.seek(fields['delta_x']['bytenum_current'])
                 buf=self.shmem_boxes.read(self.num_boxes*SIZEOF_DOUBLE)
                 delta_x=struct.unpack_from(''.join((['d']*self.num_boxes)), buf)
@@ -1191,57 +1070,17 @@ class NextwaveEngineComm():
                 self.shmem_boxes.seek(fields['delta_y']['bytenum_current'])
                 buf=self.shmem_boxes.read(self.num_boxes*SIZEOF_DOUBLE)
                 delta_y=struct.unpack_from(''.join((['d']*self.num_boxes)), buf)
-                
+
                 print ( n, np.max( delta_x), np.min(delta_x), np.mean(delta_x) )
-                
+
                 slopes_x[n] += delta_x
                 slopes_y[n] += delta_y
             slopes_x[n] /= NUM_ITS
             slopes_y[n] /= NUM_ITS
-            
-        np.savez("calib_n.npz",slopes_x, slopes_y);        
-            
-
-    def receive_centroids(self):
-        SIZEOF_DOUBLE=8
-        fields=self.layout_boxes[1]
-        self.shmem_boxes.seek(fields['centroid_x']['bytenum_current'])
-        buf=self.shmem_boxes.read(self.num_boxes*SIZEOF_DOUBLE)
-        self.centroids_x=struct.unpack_from(''.join((['d']*self.num_boxes)), buf)
-
-        self.shmem_boxes.seek(fields['centroid_y']['bytenum_current'])
-        buf=self.shmem_boxes.read(self.num_boxes*SIZEOF_DOUBLE)
-        self.centroids_y=struct.unpack_from(''.join((['d']*self.num_boxes)), buf)
-
-        self.shmem_boxes.seek(fields['delta_x']['bytenum_current'])
-        buf=self.shmem_boxes.read(self.num_boxes*SIZEOF_DOUBLE)
-        self.delta_x=struct.unpack_from(''.join((['d']*self.num_boxes)), buf)
-
-        self.shmem_boxes.seek(fields['delta_y']['bytenum_current'])
-        buf=self.shmem_boxes.read(self.num_boxes*SIZEOF_DOUBLE)
-        self.delta_y=struct.unpack_from(''.join((['d']*self.num_boxes)), buf)
-
-        self.shmem_boxes.seek(fields['mirror_voltages']['bytenum_current'])
-        buf=self.shmem_boxes.read(self.num_boxes*SIZEOF_DOUBLE)
-        #self.mirror_voltages=np.array( struct.unpack_from(''.join((['d']*self.nActuators)), buf) )
-
-        DEBUGGING=False
-        if DEBUGGING:
-            print (self.num_boxes, np.min(self.centroids_x), np.max(self.centroids_x)  )
-            for n in np.arange(self.num_boxes):
-                if np.isnan(self.centroids_x[n]):
-                    print( n, end=' ')
-                    print (self.num_boxes, self.centroids_x[100], self.centroids_y[100]  )
+        np.savez("calib_n.npz",slopes_x, slopes_y);
 
     def send_quit(self):
-        buf = ByteStream()
-        #buf.append(0)  # Lock
-        buf.append(255) # TODO: MODE from() file
-                                          #buf.append(1, 'H') # NUM BOXES. Hopefully does,n't matterr,self.iterative_size/2.0*100int(it_size_pix),self.ui.cx,self.ui.cy)
-        #buf.append(500, 'd')
-        self.shmem_hdr.seek(2) # TODO: get address
-        self.shmem_hdr.write(buf)
-        self.shmem_hdr.flush()
+        self.comm.set_mode(255)
 
     def mode_init(self):
         self.mode=1
@@ -1260,10 +1099,8 @@ class NextwaveEngineComm():
 
         val=3 if (self.ui.chkLoop.isChecked() and allow_AO) else 2
         buf = ByteStream()
-        buf.append(val) # TODO: MODE_CENTROIDING
-        self.shmem_hdr.seek(2) #TODO: get address
-        self.shmem_hdr.write(buf)
-        self.shmem_hdr.flush()
+
+        self.comm.set_mode(val)
 
     def mode_run(self, reinit=True, numruns=1):
         self.mode=3
@@ -1276,23 +1113,10 @@ class NextwaveEngineComm():
         val= np.array( numruns, dtype='uint64' )
         #val= np.array( self.ui.edit_num_runs.text(), dtype='uint64' )
         #buf.append(val.tobytes())
-        self.shmem_hdr.seek(fields['frames_left']['bytenum_current'])
-        self.shmem_hdr.write(val.tobytes())
-        self.shmem_hdr.flush()
+        self.comm.set_nframes(val)
 
         val=9 if self.ui.chkLoop.isChecked() else 8
-
-        buf = ByteStream()
-        buf.append(val) # TODO: Greater than MODE_CEN_ONE
-        self.shmem_hdr.seek(2) #TODO: get address
-        self.shmem_hdr.write(buf)
-        self.shmem_hdr.flush()
+        self.comm.set_mode(val)
 
     def mode_stop(self):
-        val=0
-        
-        buf = ByteStream()
-        buf.append(val) # TODO: Back to ready
-        self.shmem_hdr.seek(2) #TODO: get address
-        self.shmem_hdr.write(buf)
-        self.shmem_hdr.flush()
+        self.comm.set_mode(0)

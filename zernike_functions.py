@@ -1,5 +1,56 @@
 import numpy as np
 
+MAX_ZERNIKES=65 # Absolute max for 10th order: np.sum( np.arange(10+1+1))-1 .first of 11th order is np.sum(np.arange(12)) )
+MAX_ORDER=10
+
+NUM_ZCS=21 # 
+START_ZC=1
+
+# Order copied from MATLAB code
+CVS_to_OSA_map = np.array([ 3, 2,
+                            5, 4, 6,
+                            9, 7, 8,10,
+                            15,13,11,12,14,
+                            21,19,17,16,18,20,
+                            27,25,23,22,24,26,28,
+                            35,33,31,29,30,32,34,36,
+                            45,43,41,39,37,38,40,42,44,
+                            55,53,51,49,47,46,48,50,52,54,
+                            65,63,61,59,57,56,58,60,62,64,66])
+CVS_to_OSA_map -= 2
+OSA_to_CVS_map = np.array( [np.where(CVS_to_OSA_map==n)[0][0] for n in np.arange(len(CVS_to_OSA_map))] ) # TODO
+
+def calc_diopters(zernikes,pupil_radius_mm):
+    radius = pupil_radius_mm
+    radius2 = radius*radius
+    EPS=1e-10
+    sqrt3=np.sqrt(3.0)
+    sqrt6=np.sqrt(6.0)
+    z3=zernikes[3-1]
+    z4=zernikes[4-1]
+    z5=zernikes[5-1]
+
+    J45 =  (-2.0 * sqrt6 / radius2) * z3
+    J180 = (-2.0 * sqrt6 / radius2) * z5
+    cylinder = (4.0 * sqrt6 / (radius * radius)) * np.sqrt((z3 * z3) + (z5 * z5))
+    sphere = (-4.0 * sqrt3 * z4 / (radius * radius)) - 0.5 * cylinder
+
+    if (np.abs(z5) <= EPS):
+        thetaRad = 1.0 if (np.abs(z3) > EPS) else -1.0
+        thetaRad *= float(np.pi) / 4.0
+    else:
+        thetaRad = 0.5 * np.arctan(J45 / J180)
+
+    axis = thetaRad * 180.0 / float(np.pi)
+    if (axis < 0.0):
+        axis += 180.0
+
+        rms=np.sqrt( np.nansum(zernikes[(3-1):]**2 ) )
+        rms5p=np.sqrt( np.nansum(zernikes[(6-1):]**2 ) )
+
+        return rms,rms5p,cylinder,sphere,axis
+
+
 # These were copied directly from MATLAB Code Zernike_integral_[XY]
 # Only changes were: change "^" to "**"
 # Change parentheses in leftside using reg expression: s/intx(\(.*\))=/intx[\1]=/g
