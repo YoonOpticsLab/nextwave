@@ -24,7 +24,7 @@ from nextwave_widgets import ZernikeDialog, BoxInfoDialog, ActuatorPlot, MyBarWi
 
 from threading import Thread
 
-from zernike_functions import calc_diopters
+from zernike_functions import calc_rms
 
 import xml.etree.ElementTree as ET
 
@@ -72,6 +72,7 @@ class NextWaveMainWindow(QMainWindow):
     self.draw_crosshair = True
     self.iterative_first=True
     self.draw_pupil=False
+    self.draw_predicted=False
     self.box_info = -1
     self.box_info_dlg = BoxInfoDialog("HiINFO",self)
 
@@ -135,7 +136,8 @@ class NextWaveMainWindow(QMainWindow):
     if len(thedir)>0:
         print( thedir , thedir[0])
         self.btn_off.setText(thedir[0][0])
-        self.engine.load_offline(thedir)
+        self.engine.offline.load_offline(thedir)
+        self.mode_offline = True
 
  def offline_load_background(self):
     ffilt='Movies (*.avi);; Binary files (*.bin);; BMP Images (*.bmp);; files (*.*)'
@@ -277,15 +279,11 @@ class NextWaveMainWindow(QMainWindow):
         points_centroids=[QPointF(self.engine.centroids_x[n],self.engine.centroids_y[n]) for n in np.arange(self.engine.num_boxes)]
         painter.drawPoints(points_centroids)
 
-    # Centroids:
-    if self.draw_centroids and self.engine.mode>1 and False:
-        try:
+    if self.draw_predicted: # and self.engine.mode>1:
          pen = QPen(Qt.green, 1.0)
          painter.setPen(pen)
-         points_centroids=[QPointF(self.engine.est_x[n],self.engine.est_y[n]) for n in np.arange(self.engine.num_boxes)]
+         points_centroids=[QPointF(self.engine.offline.est_x[n],self.engine.offline.est_y[n]) for n in np.arange(self.engine.num_boxes)]
          painter.drawPoints(points_centroids)
-        except:
-         pass
 
     if self.draw_crosshair:
         pen = QPen(Qt.red, 1.5)
@@ -345,7 +343,7 @@ class NextWaveMainWindow(QMainWindow):
         xUL=int( self.engine.box_x[self.box_info]-box_size_pixel//2 )
         yUL=int( self.engine.box_y[self.box_info]-box_size_pixel//2 )
         #box_pix=self.engine.image.copy()
-        box_pix=self.engine.image[ yUL:yUL+int(box_size_pixel), xUL:xUL+int(box_size_pixel) ].copy()
+        box_pix=self.engine.image_bytes[ yUL:yUL+int(box_size_pixel), xUL:xUL+int(box_size_pixel) ].copy()
         self.box_pix=box_pix
         # Centroid locations in this zoom box are relative to box upper left
         self.box_info_dlg.set_box(self.box_info, box_pix,
@@ -367,7 +365,7 @@ class NextWaveMainWindow(QMainWindow):
         s += 'Z%2d=%+0.4f\n'%(n+1,self.engine.zernikes[n])
     self.text_status.setText(s)
 
-    rms,rms5p,cylinder,sphere,axis=calc_diopters(self.engine.zernikes, self.engine.pupil_radius_mm)
+    rms,rms5p,cylinder,sphere,axis=calc_rms(self.engine.zernikes, self.engine.pupil_radius_mm)
     left_chars=15
     str_stats=f"{'RMS':<15}= {rms:3.2f}\n"
     str_stats+=f"{'HORMS':<15}= {rms5p:3.2f}\n"
@@ -514,10 +512,12 @@ class NextWaveMainWindow(QMainWindow):
         self.params["children"][name_parent]["children"][name]["value"] = newval
 
  def pupil_changed(self):
+   return # require init
      #val=float( self.line_pupil_diam.text() )
      #print("From UI: %s"%val)
-     self.engine.init_params() # will read from UI
-     self.engine.make_searchboxes(self.cx,self.cy)
+     #self.engine.init_params() # will read from UI
+     #self.engine.make_searchboxes(self.cx,self.cy)
+  
 
  def reload_config(self):
      filename = self.json_data["params"]["xml_file"]
@@ -549,6 +549,10 @@ class NextWaveMainWindow(QMainWindow):
 
      self.xml_param_tree = ParameterTree()
      self.xml_param_tree.setParameters(self.xml_p, showTop=False)
+
+     pupil_diam =self.get_param_xml("OPTICS_PupilDiameter")
+     #self.line_pupil_diam.setText(str(pupil_diam ) )
+
      #print (self.xml_params['OPTICS_PupilDiameter'])
      #self.box_um = self.get_param_xml("LENSLETS_LensletPitch")
 
@@ -963,17 +967,21 @@ class NextWaveMainWindow(QMainWindow):
      layout1.addWidget(btn,5,2)
      btn.clicked.connect(lambda: self.engine.offline_auto() )
 
-     btn = QPushButton("Auto2") 
-     layout1.addWidget(btn,5,3)
-     btn.clicked.connect(lambda: self.engine.offline_auto2() )
+     self.chkOfflineAlgorithm = QCheckBox("Use offline algorithm")
+     self.chkOfflineAlgorithm.stateChanged.connect(self.offline_algorithm)
+     layout1.addWidget(self.chkOfflineAlgorithm,5,0)
 
-     btn = QPushButton("Step") 
-     layout1.addWidget(btn,5,1)
-     btn.clicked.connect(self.offline_stepbox)
+     #btn = QPushButton("Auto2") 
+     #layout1.addWidget(btn,5,3)
+     #btn.clicked.connect(lambda: self.engine.offline_auto2() )
 
-     btn = QPushButton("Start") 
-     layout1.addWidget(btn,5,0)
-     btn.clicked.connect(lambda: self.engine.offline_startbox() )
+     #btn = QPushButton("Step") 
+     #layout1.addWidget(btn,5,1)
+     #btn.clicked.connect(self.offline_stepbox)
+
+     #btn = QPushButton("Start") 
+     #layout1.addWidget(btn,5,0)
+     #btn.clicked.connect(lambda: self.engine.offline.offline_startbox() )
 
      #os.system('c:/tmp/sample.txt') # <- on windows this will launch the defalut editor
      self.param_tree_offline = ParameterTree()
@@ -1044,6 +1052,9 @@ class NextWaveMainWindow(QMainWindow):
  def zero_do(self):
      self.engine.zero_do()
      return
+
+ def offline_algorithm(self):
+     self.mode_offline = not self.mode_offline
 
  def iterative_step(self):
      try:
@@ -1142,6 +1153,8 @@ class NextWaveMainWindow(QMainWindow):
     elif event.key()==ord('B'):
         self.draw_boxes = not( self.draw_boxes )
         self.set_param("UI","show_boxes", not( self.get_param("UI","show_boxes") ) )
+    elif event.key()==ord('E'):
+        self.draw_predicted = not( self.draw_predicted )
     elif event.key()==ord('C'):
         self.draw_centroids = not( self.draw_centroids )
     elif event.key()==ord('X'):
@@ -1174,8 +1187,12 @@ class NextWaveMainWindow(QMainWindow):
         #elif event.key() == QtCore.Qt.Key_Enter:
 
  def mode_init(self):
+    pupil_diam = float(self.line_pupil_diam.text() )
+    self.engine.init_params( {'pupil_diam': pupil_diam})
+    self.engine.make_searchboxes() #cx,cy,pupil_radius_pixel=self.size/2.0*1000/self.ccd_pixel)
     #self.engine.mode_init()
-    self.sockets.init()
+    #self.sockets.init()
+
  def mode_snap(self):
     self.engine.mode_snap()
  def mode_run(self):
@@ -1313,6 +1330,7 @@ def main():
   win.initEngine()
   win.initUI()
 
+  win.sockets.init()
   start_backdoor(win)
 
   sys.exit(app.exec_())

@@ -97,6 +97,7 @@ class ZernikeDialog(QDialog):
         mainLayout.addWidget(self.buttonBox)
         self.setLayout(mainLayout)
 
+        # ZOOM box
 class BoxInfoDialog(QDialog):
     def __init__(self,titl,ui_parent):
         super().__init__()
@@ -149,7 +150,14 @@ class BoxInfoDialog(QDialog):
         points=[QPointF(self.cent_x,self.cent_y)]
         painter.drawPoints(points)
 
-        painter.end()
+        if self.ui_parent.draw_predicted and False: 
+            pen2 = QPen(Qt.green, 1.0)
+            painter.setPen(pen2)
+            points_centroids=[QPointF(
+                self.ui_parent.engine.offline.est_x[n],
+                self.ui_parent.engine.offline.est_y[n])
+                              for n in np.arange(self.ui_parent.engine.num_boxes)]
+            painter.drawPoints(points_centroids)
 
         pixmap = pixmap.scaled(200,200,Qt.KeepAspectRatio)
         self.image_label.setPixmap(pixmap)

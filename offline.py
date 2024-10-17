@@ -94,7 +94,7 @@ class NextwaveOffline():
                 mode=self.read_mode()
                 time.sleep(0.005)
 
-            self.receive_centroids()
+            #self.receive_centroids() # TODO
             self.compute_zernikes()
             zs = self.zernikes
 
@@ -297,71 +297,75 @@ class NextwaveOffline():
         return goodx,goody,gof
 
     def offline_centroids(self,do_apply=True):
-            self.box_metrics = np.zeros( self.num_boxes) 
-            cenx=np.zeros( self.num_boxes ) / 0.0
-            ceny=np.zeros( self.num_boxes ) / 0.0
-            centroids=np.zeros(2)
+        num_boxes = self.parent.num_boxes
 
-            for nbox in np.arange(self.num_boxes):
-                xUL=int( self.box_x[nbox]-self.box_size_pixel//2 )
-                yUL=int( self.box_y[nbox]-self.box_size_pixel//2 )
-                pix=np.array(self.image[ yUL:yUL+int(self.box_size_pixel), xUL:xUL+int(self.box_size_pixel) ]).copy()
+        self.box_metrics = np.zeros( num_boxes) 
+        cenx=np.full( num_boxes, np.nan )
+        ceny=np.full( num_boxes, np.nan )
+        centroids=np.zeros(2)
+        box_size_pixel = self.parent.box_size_pixel
 
-                if True: #len(pix) > 100: #==self.box_size_pixel**2:
-                    metric1=self.metric_patch(pix)
-                    try:
-                        #val = np.mean( (metric1[self.good_idx:]-self.good_template[self.good_idx:])**2)
-                        val=self.metric_patch(pix)
-                    except ValueError:
-                        val = -999.0
-                    #self.box_metrics[nbox]=val
-                    self.box_metrics[nbox]=BOX_THRESH*2.0
+        for nbox in np.arange(num_boxes):
+            xUL=int( self.parent.box_x[nbox]-box_size_pixel//2 )
+            yUL=int( self.parent.box_y[nbox]-box_size_pixel//2 )
+            im = self.parent.image_bytes
+            pix=np.array( im[ yUL:yUL+int(box_size_pixel), xUL:xUL+int(box_size_pixel) ]).copy()
 
-                if True: #val>BOX_THRESH: # Valid boxes
-                    for ndim in []: #[0,1]: # Skip this code (max in seperate dims), use the code below which is 2D at-once
-                        sig=np.mean(pix,ndim)
-                        filtd=sig #gaussian_filter1d(sig,3) # if unfiltereted
-                        xmax=np.argmax(filtd)
+            if True: #len(pix) > 100: #==self.box_size_pixel**2:
+                metric1=self.metric_patch(pix)
+                try:
+                    #val = np.mean( (metric1[self.good_idx:]-self.good_template[self.good_idx:])**2)
+                    val=self.metric_patch(pix)
+                except ValueError:
+                    val = -999.0
+                #self.box_metrics[nbox]=val
+                self.box_metrics[nbox]=BOX_THRESH*2.0
 
-                        if (xmax<5) or (xmax>self.box_size_pixel-5):
-                            continue
+            if True: #val>BOX_THRESH: # Valid boxes
+                for ndim in []: #[0,1]: # Skip this code (max in seperate dims), use the code below which is 2D at-once
+                    sig=np.mean(pix,ndim)
+                    filtd=sig #gaussian_filter1d(sig,3) # if unfiltereted
+                    xmax=np.argmax(filtd)
 
-                        xlocal=np.arange(xmax-5,xmax+5)
-                        a,b,c=np.polyfit(xlocal, filtd[xlocal], 2 )
-                        solution=(-b / (2*a) ) # Deriv=0 is peak of Quadratic
-                        #print( ax,xmax,solution)
-                        centroids[ndim]=solution
+                    if (xmax<5) or (xmax>box_size_pixel-5):
+                        continue
 
-                    pix=gaussian_filter(pix,GAUSS_SD) 
-                    centroids=self.box_fit_gauss(pix,17)
-                    cenx[nbox] = centroids[0] + xUL
-                    ceny[nbox] = centroids[1] + yUL
-                    self.box_metrics[nbox] = centroids[2] # gof
-                    #print( centroids, end=' ' )
+                    xlocal=np.arange(xmax-5,xmax+5)
+                    a,b,c=np.polyfit(xlocal, filtd[xlocal], 2 )
+                    solution=(-b / (2*a) ) # Deriv=0 is peak of Quadratic
+                    #print( ax,xmax,solution)
+                    centroids[ndim]=solution
 
-                    if centroids[2] < BOX_THRESH:
-                        cenx[nbox] = np.nan
-                        ceny[nbox] = np.nan
+                pix=gaussian_filter(pix,GAUSS_SD) 
+                centroids=self.box_fit_gauss(pix,17)
+                cenx[nbox] = centroids[0] + xUL
+                ceny[nbox] = centroids[1] + yUL
+                self.box_metrics[nbox] = centroids[2] # gof
+                #print( centroids, end=' ' )
 
-            self.cenx = cenx
-            self.ceny = ceny
+                if centroids[2] < BOX_THRESH:
+                    cenx[nbox] = np.nan
+                    ceny[nbox] = np.nan
 
-            if do_apply:
-                self.centroids_x=self.cenx
-                self.centroids_y=self.ceny
+        self.cenx = cenx
+        self.ceny = ceny
 
-    def offline_centroids_update(self):
-        self.compute_zernikes()
-        zs = self.zernikes
-        print(  "in update:", zs[0:3])
+        if do_apply:
+            self.parent.centroids_x=self.cenx
+            self.parent.centroids_y=self.ceny
 
-        dx,dy=self.get_deltas(zs,from_dialog=False)
+        self.parent.compute_zernikes()
+        self.zernikes = self.parent.zernikes # TODO: 
 
-        spot_displace_x =   self.ref_x - self.centroids_x
-        spot_displace_y = -(self.ref_y - self.centroids_y)
+    #def offline_centroids_update(self):
 
-        self.est_x =   self.box_x - dx*self.focal/self.ccd_pixel
-        self.est_y =   self.box_y + dy*self.focal/self.ccd_pixel
+        dx,dy=self.parent.get_deltas(self.zernikes,from_dialog=False)
+
+        spot_displace_x =   self.parent.ref_x - self.parent.centroids_x
+        spot_displace_y = -(self.parent.ref_y - self.parent.centroids_y)
+
+        self.est_x =  self.parent.box_x - dx*self.parent.focal/self.parent.ccd_pixel
+        self.est_y =  self.parent.box_y + dy*self.parent.focal/self.parent.ccd_pixel
 
     def offline_auto2(self):
         #self.make_searchboxes()
@@ -384,8 +388,9 @@ class NextwaveOffline():
             #it1=self.offline_stepbox()
         self.offline_centroids()
         self.offline_centroids_update()
-        zs = self.zernikes
-        self.shift_search_boxes(zs,from_dialog=False) # Shift by appropriate number
+
+        #zs = self.zernikes
+        #self.shift_search_boxes(zs,from_dialog=False) # Shift by appropriate number
 
     def offline_stepbox(self):
         self.offline_centroids()
@@ -406,8 +411,8 @@ class NextwaveOffline():
 
             self.parent.ui.cx -= z_new[1] / self.focal * self.ccd_pixel
             self.parent.ui.cy += z_new[0] / self.focal * self.ccd_pixel
-            self.init_params( {'pupil_diam': self.iterative_size})
-            self.make_searchboxes(pupil_radius_pixel=self.iterative_size/2.0*1000/self.ccd_pixel)
+            self.parent.init_params( {'pupil_diam': self.iterative_size})
+            self.parent.make_searchboxes(pupil_radius_pixel=self.iterative_size/2.0*1000/self.ccd_pixel)
 
             #print( z_new[0:10] )
             #self.shift_search_boxes(z_new,from_dialog=False) # Shift by appropriate number
@@ -427,7 +432,7 @@ class NextwaveOffline():
             self.parent.ui.update_ui()
             self.parent.ui.image.save(frame_name)
 
-            s="%d,%d,%f,%d,%d,"%(self.parent.ui.offline_curr,self.num_boxes,self.iterative_size,self.parent.ui.cx,self.parent.ui.cy)
+            s="%d,%d,%f,%d,%d,"%(self.parent.ui.offline_curr,self.parent.num_boxes,self.iterative_size,self.parent.ui.cx,self.parent.ui.cy)
 
             for zern1 in self.zernikes:
                 s += "%0.6f,"%zern1
@@ -461,7 +466,7 @@ class NextwaveOffline():
         #self.parent.ui.cy=491
 
         self.pupil_radius_pixel = np.sqrt(600**2+600**2)
-        self.make_searchboxes()
+        self.parent.make_searchboxes()
 
         self.offline_centroids()
         self.offline_centroids_update()

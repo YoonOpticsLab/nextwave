@@ -284,9 +284,9 @@ class NextwaveEngineComm():
             self.box_x = np.array(box_x)
             self.box_y = np.array(box_y)
 
-        self.parent.image = bytes2
+        self.parent.image_bytes = bytes2
 
-        return self.parent.image
+        return self.parent.image_bytes
 
     def write_mirrors(self,data):
         bytez =np.array(data, dtype="double").tobytes() 

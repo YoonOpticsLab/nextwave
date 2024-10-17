@@ -69,6 +69,9 @@ void read_file(std::string filename)
 	FILE *fp;
   struct stat st;
 
+  if (filename.length() == 0)
+    return;
+
   stat(filename.c_str(), &st);
   int file_size = st.st_size;
 
@@ -153,30 +156,33 @@ DECL process(char *params)
 
   read_file(gfilename);
 
-	// DC NEW
-	struct shmem_header* pShmem = (struct shmem_header*) shmem_region1.get_address();
+  if (gfilename.length()>0) {
+    // DC NEW
+    struct shmem_header* pShmem = (struct shmem_header*) shmem_region1.get_address();
 
-	pShmem->lock = (uint8_t)1; // Everyone keep out until we are done!
+    pShmem->lock = (uint8_t)1; // Everyone keep out until we are done!
 
-	// Don't need to write these each time:
-	pShmem->header_version = (uint8_t)NW_HEADER_VERSION;
-	pShmem->dimensions[0] = (uint16_t)height;
-	pShmem->dimensions[1] = (uint16_t)width;
-	pShmem->dimensions[2] = (uint16_t)0;
-	pShmem->dimensions[3] = (uint16_t)0;
-	pShmem->datatype_code = (uint8_t)7;
-	pShmem->max_frames = (uint8_t)NW_MAX_FRAMES;
+    // Don't need to write these each time:
+    pShmem->header_version = (uint8_t)NW_HEADER_VERSION;
+    pShmem->dimensions[0] = (uint16_t)height;
+    pShmem->dimensions[1] = (uint16_t)width;
+    pShmem->dimensions[2] = (uint16_t)0;
+    pShmem->dimensions[3] = (uint16_t)0;
+    pShmem->datatype_code = (uint8_t)7;
+    pShmem->max_frames = (uint8_t)NW_MAX_FRAMES;
 
-	// For current frame:
-	pShmem->current_frame = (uint8_t)nCurrRing;
-	pShmem->timestamps[nCurrRing] = (uint8_t)NW_STATUS_READ;
-	pShmem->timestamps[nCurrRing] = time_highres();
+    // For current frame:
+    pShmem->current_frame = (uint8_t)nCurrRing;
+    pShmem->timestamps[nCurrRing] = (uint8_t)NW_STATUS_READ;
+    pShmem->timestamps[nCurrRing] = time_highres();
 
-	memcpy( ((uint8_t *)(shmem_region2.get_address())+height*width*nCurrRing),
-		(unsigned char*)buffer,
-		height*width);
+    memcpy( ((uint8_t *)(shmem_region2.get_address())+height*width*nCurrRing),
+      (unsigned char*)buffer,
+      height*width);
 
-	pShmem->lock = (uint8_t)0; // Keep out until we are done!
+    pShmem->lock = (uint8_t)0; // Keep out until we are done!
+  }
+
 
 	nCurrRing += 1;
 	if (nCurrRing >= NW_MAX_FRAMES)

@@ -16,11 +16,11 @@ CVS_to_OSA_map = np.array([ 3, 2,
                             35,33,31,29,30,32,34,36,
                             45,43,41,39,37,38,40,42,44,
                             55,53,51,49,47,46,48,50,52,54,
-                            65,63,61,59,57,56,58,60,62,64,66])
+                            65,63,61,59,57,56,58,60,62,64,66], dtype='int')
 CVS_to_OSA_map -= 2
-OSA_to_CVS_map = np.array( [np.where(CVS_to_OSA_map==n)[0][0] for n in np.arange(len(CVS_to_OSA_map))] ) # TODO
+OSA_to_CVS_map = np.array( [np.where(CVS_to_OSA_map==n)[0][0] for n in np.arange(len(CVS_to_OSA_map))] , dtype='int') 
 
-def calc_diopters(zernikes,pupil_radius_mm):
+def calc_rms(zernikes,pupil_radius_mm):
     radius = pupil_radius_mm
     radius2 = radius*radius
     EPS=1e-10
@@ -45,10 +45,10 @@ def calc_diopters(zernikes,pupil_radius_mm):
     if (axis < 0.0):
         axis += 180.0
 
-        rms=np.sqrt( np.nansum(zernikes[(3-1):]**2 ) )
-        rms5p=np.sqrt( np.nansum(zernikes[(6-1):]**2 ) )
+    rms=np.sqrt( np.nansum(zernikes[(3-1):]**2 ) )
+    rms5p=np.sqrt( np.nansum(zernikes[(6-1):]**2 ) )
 
-        return rms,rms5p,cylinder,sphere,axis
+    return rms,rms5p,cylinder,sphere,axis
 
 
 # These were copied directly from MATLAB Code Zernike_integral_[XY]
