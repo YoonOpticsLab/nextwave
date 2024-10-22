@@ -138,12 +138,11 @@ class NextWaveMainWindow(QMainWindow):
         self.btn_off.setText(thedir[0][0])
         self.engine.offline.load_offline(thedir)
         self.mode_offline = True
+        self.chkOfflineAlgorithm.setChecked(True)
 
  def offline_load_background(self):
     ffilt='Movies (*.avi);; Binary files (*.bin);; BMP Images (*.bmp);; files (*.*)'
-    thedir = QFileDialog.getOpenFileNames(self, "Choose background file",
-                ".", ffilt );
-
+    thedir = QFileDialog.getOpenFileNames(self, "Choose background file", ".", ffilt );
     if len(thedir)>0:
         print( thedir , thedir[0])
         self.btn_off_back.setText(thedir[0][0])
@@ -389,7 +388,7 @@ class NextWaveMainWindow(QMainWindow):
         s+="%3.2f FPS (%04.2f ms: %04.1f+%04.2f ms)"%(1000/self.engine.fps0,self.engine.fps0, float(self.engine.fps1), float(self.engine.fps2)  )
         s+="\nFrames: %d"%self.engine.total_frames
     else:
-        s="0 fps"
+        s="0 fps. %d boxes. %d zern terms"%(self.engine.num_boxes, self.engine.zterms_full.shape[0] )
 
     self.label_status0.setText(s)
     self.label_status0.setStyleSheet("color: rgb(0, 255, 0); background-color: rgb(0,0,0);")
@@ -518,9 +517,24 @@ class NextWaveMainWindow(QMainWindow):
      #self.engine.init_params() # will read from UI
      #self.engine.make_searchboxes(self.cx,self.cy)
   
+ def init_config_ui(self):
+     self.layout_config.addWidget(self.xml_param_tree,1,0,-1,4)
+     try:
+        self.setWindowTitle('NextWave: %s'%(self.xml_params["SessionName_name"]))
+     except:
+        self.setWindowTitle('NextWave: %s'%("NONAME"))
 
- def reload_config(self):
-     filename = self.json_data["params"]["xml_file"]
+ def load_config(self):
+    ffilt='MiniWave Config (*.xml);;'
+    thedir = QFileDialog.getOpenFileNames(self, "Choose file", ".", ffilt );
+    if len(thedir)>0:
+        print( thedir , thedir[0])
+    self.reload_config(thedir[0][0])
+
+
+ def reload_config(self,filename=None):
+     if filename is None:
+         filename = self.json_data["params"]["xml_file"]
      tree = ET.parse(filename)
      root = tree.getroot()
      all_params={}
@@ -715,12 +729,16 @@ class NextWaveMainWindow(QMainWindow):
      layout1.addWidget(btn,4,4)
      btn.clicked.connect(lambda: self.iterative_step() )
 
+     btn = QPushButton("Reset")
+     layout1.addWidget(btn,4,5)
+     btn.clicked.connect(lambda: self.iterative_reset() )
+
      #btnIt1 = QPushButton("Step It+=0.5")
      #layout1.addWidget(btnIt1,3,1)
      #btnIt1.clicked.connect(self.run_iterative)
 
-     self.lblIt = QLabel("3.2")
-     layout1.addWidget(self.lblIt,4,5)
+     #self.lblIt = QLabel("3.2")
+     #layout1.addWidget(self.lblIt,4,5)
 
      ### Camera Ops
      layout1 = QGridLayout(self.ops_source)
@@ -849,9 +867,10 @@ class NextWaveMainWindow(QMainWindow):
      layout1.addWidget(lbl, 0,0)
      self.edit_xml = QLineEdit(self.json_data["params"]["xml_file"])
      layout1.addWidget(self.edit_xml, 0,1)
-     btn = QPushButton("...")
+     btn = QPushButton("Load")
      layout1.addWidget(btn, 0,2)
-     btn = QPushButton("Edit+Reload")
+     btn.clicked.connect(self.load_config)
+     btn = QPushButton("Edit")
      layout1.addWidget(btn, 0,3)
      btn.clicked.connect(self.reload_config)
      #os.system('c:/tmp/sample.txt') # <- on windows this will launch the defalut editor
@@ -963,9 +982,9 @@ class NextWaveMainWindow(QMainWindow):
      layout1.addWidget(btn,4,2)
      btn.clicked.connect(lambda: self.offline_move (1) )
 
-     btn = QPushButton("Run") 
-     layout1.addWidget(btn,5,2)
-     btn.clicked.connect(lambda: self.engine.offline_auto() )
+     #btn = QPushButton("Run") 
+     #layout1.addWidget(btn,5,2)
+     #btn.clicked.connect(lambda: self.engine.offline_auto() )
 
      self.chkOfflineAlgorithm = QCheckBox("Use offline algorithm")
      self.chkOfflineAlgorithm.stateChanged.connect(self.offline_algorithm)
@@ -1003,13 +1022,9 @@ class NextWaveMainWindow(QMainWindow):
      menu.addAction('Run &Calibration', self.do_calibration)
      menu.addAction('e&Xit', self.close)
 
-     pixmap_label.setFocus()
+     self.init_config_ui(self)
 
-     self.layout_config.addWidget(self.xml_param_tree,1,0,-1,4)
-     try:
-        self.setWindowTitle('NextWave: %s'%(self.xml_params["SessionName_name"]))
-     except:
-        self.setWindowTitle('NextWave: %s'%("NONAME"))
+     pixmap_label.setFocus()
 
      self.setGeometry(2,2,MAIN_WIDTH_WIN,MAIN_HEIGHT_WIN)
      self.show()
@@ -1054,18 +1069,28 @@ class NextWaveMainWindow(QMainWindow):
      return
 
  def offline_algorithm(self):
-     self.mode_offline = not self.mode_offline
+  self.mode_offline = self.chkOfflineAlgorithm.isChecked()
+
+ def iterative_reset(self):
+     pupil_diam = float(self.it_start.text())
+     self.engine.offline.iterative_size = pupil_diam
+     self.line_pupil_diam.setText('%2.2f'%(self.engine.offline.iterative_size) ) #+step) )
+     self.engine.init_params( {'pupil_diam': pupil_diam})
+     self.engine.make_searchboxes() #cx,cy,pupil_radius_pixel=self.size/2.0*1000/self.ccd_pixel)
 
  def iterative_step(self):
      try:
-         self.engine.iterative_size
+         self.engine.offline.iterative_size
      except:
-         self.engine.iterative_size = float(self.it_start.text())
+         self.engine.offline.iterative_size = float(self.it_start.text())
 
-     self.engine.iterative_step(self.cx, self.cy,
-                                float(self.it_step.text()), float(self.it_start.text()), float(self.it_stop.text()) )
+     step=float(self.it_step.text() )
+     self.engine.offline.offline_stepbox( step, float(self.it_stop.text()))
 
-     self.lblIt.setText('%2.2f'%self.engine.iterative_size)
+     #self.engine.iterative_step(self.cx, self.cy,
+                                #float(self.it_step.text()), float(self.it_start.text()), float(self.it_stop.text()) )
+
+     self.line_pupil_diam.setText('%2.2f'%(self.engine.offline.iterative_size) ) #+step) )
 
  def iterative_run(self):
     self.engine.iterative_size = float(self.it_start.text())
@@ -1110,6 +1135,10 @@ class NextWaveMainWindow(QMainWindow):
     self.cy += (dy * m)
     if do_update:
         self.engine.move_searchboxes(dx*m, dy*m)
+
+ def move_center_abs(self,x,y):
+    self.cx = x
+    self.cy = y
 
  def butt(self, event):
     print("clicked:", event.pos() )

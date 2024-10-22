@@ -124,6 +124,7 @@ class NextwaveEngine():
     def iterative_run(self, cx, cy, step):
         return
 
+    """
     def circle(self,cx,cy,rad):
         #X,Y=np.meshgrid( np.arange(self.desired.shape[1]), np.arange(self.desired.shape[0]) )
         X=self.box_x
@@ -144,7 +145,9 @@ class NextwaveEngine():
         buf=self.shmem_hdr.read(1)
         mode= struct.unpack('B',buf)[0]
         return mode
+    """
 
+    """
     def iterative_step(self, cx, cy, step, start, stop):
         if self.iterative_size>=stop:
             self.iterative_size = start
@@ -186,12 +189,15 @@ class NextwaveEngine():
 
     def set_iterative_size(self,value):
         self.iterative_size = value
+    """
 
     def move_searchboxes(self,dx,dy):
         self.box_x += dx
         self.box_y += dy
         self.ref_x += dx
         self.ref_y += dy
+        self.initial_x += dx # TODO: confirm good to move these
+        self.initial_y += dy # TODO: confirm good to move these
 
         #print( self.ref_x[0], self.ui.cx )
 
@@ -273,11 +279,10 @@ class NextwaveEngine():
         self.initial_x = valid_x.copy()
         self.initial_y = valid_y.copy()
         self.num_boxes= num_boxes
-        self.centroids_x = np.zeros(num_boxes) + np.nan
-        self.centroids_y = np.zeros(num_boxes) + np.nan
+        self.centroids_x = np.full(num_boxes, np.nan)
+        self.centroids_y = np.full(num_boxes, np.nan)
 
         self.update_zernike_svd() # Precompute
-
 
         # Determine neighbors (for nan interpolation)
         self.neighbors = np.zeros( (self.num_boxes, 4), dtype='int32')
@@ -423,7 +428,6 @@ class NextwaveEngine():
         #return
 
     def get_deltas(self,zs,from_dialog,full=True):
-        #if from_dialog:
         zs=np.array(zs)
         if len(zs)==20:
             mat1=self.zterms_20_inv
@@ -433,7 +437,7 @@ class NextwaveEngine():
         valid_idxs=np.arange(0,mat1.shape[1] )
         idxs_remap  = zernike_functions.OSA_to_CVS_map[valid_idxs]
         zern_new=zs[valid_idxs] [idxs_remap ]
-        zern_new[0:2]=0 # Remove tip/tilt TODO: Need to move the pupil center?
+        #zern_new[0:2]=0 # Remove tip/tilt TODO: Need to move the pupil center?
 
         delta=np.matmul(mat1,zern_new)
         num_boxes = self.box_x.shape[0]
@@ -451,6 +455,7 @@ class NextwaveEngine():
         dx,dy = self.get_deltas(zs,from_dialog)
         self.box_x = self.initial_x - dx
         self.box_y = self.initial_y + dy
+        #self.ui.move_center((round(zs[1]),round(zs[0]),do_update=False)
         self.update_searchboxes()
 
     def shift_references(self,zs,from_dialog=True):

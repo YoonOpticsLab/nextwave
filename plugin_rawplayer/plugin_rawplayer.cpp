@@ -181,12 +181,11 @@ DECL process(char *params)
       height*width);
 
     pShmem->lock = (uint8_t)0; // Keep out until we are done!
+
+    nCurrRing += 1;
+    if (nCurrRing >= NW_MAX_FRAMES)
+      nCurrRing = 0;
   }
-
-
-	nCurrRing += 1;
-	if (nCurrRing >= NW_MAX_FRAMES)
-    nCurrRing = 0;
 
 	return 0;
 };

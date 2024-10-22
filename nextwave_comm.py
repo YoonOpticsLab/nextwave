@@ -277,7 +277,11 @@ class NextwaveEngineComm():
         bytez =np.frombuffer(im_buf, dtype='uint8', count=self.width*self.height )
         bytes2=np.reshape(bytez,( self.height,self.width)).copy()
 
-        bytesf = bytes2 / np.max(bytes2)
+        if len(bytes2)>0:
+               bytesf = bytes2 / np.max(bytes2)
+        else:
+            bytes2 = np.zeros( (10,10));
+            bytesf = np.zeros( (10,10));
 
         if False: #self.chkFollow.isChecked():
             box_x,box_y=rcv_searchboxes(self.shmem_boxes, self.layout_boxes, 0, 0, 0 )

@@ -25,17 +25,10 @@ import ffmpegcv # Read AVI... Better than OpenCV (built-in ffmpeg?)
 
 from PIL import Image, TiffImagePlugin
 
-WINDOWS=(os.name == 'nt')
-
 GAUSS_SD=3
 BOX_THRESH=2.5
 
 OFFLINE_ITERATIVE_START=3.0
-OFFLINE_ITERATIVE_STEP=0.25
-#0=horizontal, 1=vertical,3=defocus?
-
-MEM_LEN=512
-MEM_LEN_DATA=2048*2048*4
 
 class NextwaveOffline():
     """ Class to manage:
@@ -260,7 +253,10 @@ class NextwaveOffline():
             self.pm=np.vstack( [XXf**2, XXf*YYf,YYf*YYf,XXf,YYf,[1]*len(XXf)] ).T # Matches Mulligan
             self.mati=np.linalg.pinv(self.pm).T
 
-            soln=np.matmul( lf, self.mati)
+            try:
+                soln=np.matmul( lf, self.mati)
+            except ValueError:
+                return ind_max[1], ind_max[0],-998 # give up if too close to edge
         except ValueError:
             # On the edge maybe?
             return ind_max[1], ind_max[0],-998 # give up if too close to edge
@@ -322,7 +318,7 @@ class NextwaveOffline():
                 self.box_metrics[nbox]=BOX_THRESH*2.0
 
             if True: #val>BOX_THRESH: # Valid boxes
-                for ndim in []: #[0,1]: # Skip this code (max in seperate dims), use the code below which is 2D at-once
+                for ndim in []: #[0,1]: # Skip this code (max in separate dims), use the code below which is 2D at-once
                     sig=np.mean(pix,ndim)
                     filtd=sig #gaussian_filter1d(sig,3) # if unfiltereted
                     xmax=np.argmax(filtd)
@@ -357,22 +353,19 @@ class NextwaveOffline():
         self.parent.compute_zernikes()
         self.zernikes = self.parent.zernikes # TODO: 
 
-    #def offline_centroids_update(self):
-
         dx,dy=self.parent.get_deltas(self.zernikes,from_dialog=False)
 
-        spot_displace_x =   self.parent.ref_x - self.parent.centroids_x
-        spot_displace_y = -(self.parent.ref_y - self.parent.centroids_y)
+        #spot_displace_x =   self.parent.ref_x - self.parent.centroids_x
+        #spot_displace_y = -(self.parent.ref_y - self.parent.centroids_y)
 
-        self.est_x =  self.parent.box_x - dx*self.parent.focal/self.parent.ccd_pixel
-        self.est_y =  self.parent.box_y + dy*self.parent.focal/self.parent.ccd_pixel
+        self.est_x =  self.parent.ref_x - dx
+        self.est_y =  self.parent.ref_y + dy
 
     def offline_auto2(self):
         #self.make_searchboxes()
         self.box_size_pixel = self.box_size_pixel - 5
 
         self.offline_centroids() # TODO: DEBUG
-        self.offline_centroids_update();
         return
 
         print( self.offline_movie.shape)
@@ -387,41 +380,41 @@ class NextwaveOffline():
         #while it1>0:
             #it1=self.offline_stepbox()
         self.offline_centroids()
-        self.offline_centroids_update()
 
         #zs = self.zernikes
         #self.shift_search_boxes(zs,from_dialog=False) # Shift by appropriate number
 
-    def offline_stepbox(self):
+    def offline_stepbox(self,step_size,max_size=6.4):
         self.offline_centroids()
-        self.offline_centroids_update()
         zs = self.zernikes
 
-        it_size_pix=self.iterative_size / 2.0 * 1000.0/self.ccd_pixel
-        if it_size_pix < self.box_size_pixel * (self.opt1[2]+1.0):
-            factor = self.iterative_size / (self.iterative_size+OFFLINE_ITERATIVE_STEP)
-            #z_new =  iterative.extrapolate_zernikes(zs, factor)
-            z_new=zs
-            self.iterative_size += OFFLINE_ITERATIVE_STEP
+        #max_size = self.box_size_pixel * (self.opt1[2]+1.0)
 
-            #self.offline_centroids()
-            #self.offline_centroids_update()
-            #print( z_new[0:3])
-            #z_new[0:2]=0 # Clear out tip/tilt. Use as center
+        ccd_pixel = self.parent.ccd_pixel
+        focal = self.parent.focal
 
-            self.parent.ui.cx -= z_new[1] / self.focal * self.ccd_pixel
-            self.parent.ui.cy += z_new[0] / self.focal * self.ccd_pixel
+        it_size_pix=self.iterative_size / 2.0 * 1000.0/ccd_pixel
+        if it_size_pix < max_size /2.0 * 1000 / ccd_pixel:
+            factor = self.iterative_size / (self.iterative_size+step_size)
+            z_new =  iterative.extrapolate_zernikes(zs, factor)
+
+            self.iterative_size += step_size 
+
+            self.parent.ui.cx -= int( z_new[1] / focal * ccd_pixel )
+            self.parent.ui.cy += int( z_new[0] / focal * ccd_pixel )
+
             self.parent.init_params( {'pupil_diam': self.iterative_size})
-            self.parent.make_searchboxes(pupil_radius_pixel=self.iterative_size/2.0*1000/self.ccd_pixel)
+            self.parent.make_searchboxes(pupil_radius_pixel=self.iterative_size/2.0*1000/ccd_pixel)
 
             #print( z_new[0:10] )
-            #self.shift_search_boxes(z_new,from_dialog=False) # Shift by appropriate number
+            # Truncate to 20 terms To use the reduced mattrix
+            z_bigger = np.zeros( self.parent.zterms_full.shape[0])
+            z_bigger[0:len(z_new)] = z_new
 
-            #self.offline_centroids()
-            #self.offline_centroids_update()
-
-            #zs = self.zernikes
-            #self.shift_search_boxes(zs,from_dialog=False) # Shift by appropriate number
+            self.parent.shift_search_boxes(z_bigger,from_dialog=False) 
+            self.offline_centroids()
+            zs = self.zernikes
+            self.parent.shift_search_boxes(zs,from_dialog=False) 
         else:
             print ("Shrink!")
 
@@ -447,7 +440,6 @@ class NextwaveOffline():
             #self.init_params(overrides={'box_size_pixel': int(self.box_size_pixel*0.9)})
             #self.make_searchboxes()
             #self.offline_centroids()
-            #self.offline_centroids_update()
 
             #double_test = [self.parent.ui.image, self.parent.ui.image]
 
@@ -458,7 +450,7 @@ class NextwaveOffline():
 
             return -1
 
-        print( self.opt1, self.iterative_size )
+        #print( self.opt1, self.iterative_size )
         return 1
 
     def offline_startbox(self):
@@ -469,7 +461,6 @@ class NextwaveOffline():
         self.parent.make_searchboxes()
 
         self.offline_centroids()
-        self.offline_centroids_update()
 
         desired = np.all((self.box_metrics > BOX_THRESH, np.isnan(self.cenx)==False ), 0) *1.0 # binarize 
 
@@ -497,7 +488,6 @@ class NextwaveOffline():
         self.offline_centroids()
         self.centroids_x=self.cenx
         self.centroids_y=self.ceny
-        self.offline_centroids_update()
 
         self.iterative_size = OFFLINE_ITERATIVE_START
         self.parent.ui.mode_offline=True
