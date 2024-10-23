@@ -115,14 +115,14 @@ class NextwaveEngine():
             self.box_size_pixel=overrides.get('box_size_pixel',self.box_size_pixel)
 
         self.ri_ratio = self.pupil_radius_pixel / self.box_size_pixel
-        print( "Init:", self.box_size_pixel, self.pupil_radius_pixel, self.ri_ratio )
+        #print( "Init:", self.box_size_pixel, self.pupil_radius_pixel, self.ri_ratio )
 
         bytez =np.array([self.ccd_pixel, self.box_um, self.pupil_radius_mm], dtype='double').tobytes() 
 
         self.comm.write_params(overrides)
 
     def iterative_run(self, cx, cy, step):
-        return
+        self.offline.offline_auto()
 
     """
     def circle(self,cx,cy,rad):
@@ -234,7 +234,7 @@ class NextwaveEngine():
 
         ri_ratio = pupil_radius_pixel / box_spacing_pixel
 
-        print( "Make SB ",pupil_radius_pixel, box_size_pixel, box_spacing_pixel, ri_ratio )
+        #print( "Make SB ",pupil_radius_pixel, box_size_pixel, box_spacing_pixel, ri_ratio )
         aperture = ri_ratio * aperture
 
         # The max number of boxes possible + or -
@@ -258,7 +258,7 @@ class NextwaveEngine():
 
         num_boxes=valid_x_norm.shape[0]
 
-        print("NUM BOX:", num_boxes)
+        #print("NUM BOX:", num_boxes)
         box_zero = np.where(valid_x_norm**2+valid_y_norm**2==0)[0] # Index of zeroth (middle) element
 
         MULT = ri_ratio * box_spacing_pixel
@@ -339,7 +339,7 @@ class NextwaveEngine():
             valid_max = orders_max[nmax_from_boxes<=orders_max][0]
             if nsubset==0:
                 nvalid = valid_max
-                print("Est. max zs:%d, Max Z (order):%d"%(nmax_from_boxes, valid_max) )
+                #print("Est. max zs:%d, Max Z (order):%d"%(nmax_from_boxes, valid_max) )
             if nsubset==1: #
                 nvalid = np.min( (20, nmax_from_boxes) )
 
@@ -372,9 +372,9 @@ class NextwaveEngine():
         # DBG:
         self.lenslet_dx=lenslet_dx # Debugging
         self.lenslet_dy=lenslet_dy
-        np.save('zterms_full.npy',self.zterms_full)
-        np.save('zterms_20.npy',self.zterms_20)
-        np.save('zpoly.npy',zpoly)
+        #np.save('zterms_full.npy',self.zterms_full)
+        #np.save('zterms_20.npy',self.zterms_20)
+        #np.save('zpoly.npy',zpoly)
 
     def update_influence(self):
         #try:
@@ -451,7 +451,7 @@ class NextwaveEngine():
 
 
     def shift_search_boxes(self,zs,from_dialog=True):
-        print( zs )
+        #print( zs )
         dx,dy = self.get_deltas(zs,from_dialog)
         self.box_x = self.initial_x - dx
         self.box_y = self.initial_y + dy

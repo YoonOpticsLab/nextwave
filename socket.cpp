@@ -52,10 +52,10 @@ Connection* theConnection=NULL;
 // HELPER, uses globals
 static char* socket_check(int port) {
 if (theConnection==NULL) {
-  spdlog::info("Before New connection {}", port );
+  //spdlog::info("Before New connection {}", port );
   // This blocks until receiver connects:
   theConnection = new Connection(port);
-  spdlog::info("Fater New connection {}", port );
+  //spdlog::info("Fater New connection {}", port );
   return NULL;
  } else {
   if (theConnection->available()>0 ) {

@@ -31,8 +31,8 @@ import xml.etree.ElementTree as ET
 WINDOWS=(os.name == 'nt')
 
 # TODO: Configurable?
-QIMAGE_HEIGHT=1000
-QIMAGE_WIDTH=1000
+QIMAGE_HEIGHT=1024
+QIMAGE_WIDTH=1024
 
 MAIN_HEIGHT_WIN=1024
 MAIN_WIDTH_WIN=1800
@@ -49,6 +49,13 @@ CAM_EXPO_MIN = 32./1000.0 # TODO
 CAM_EXPO_MAX = 100000 # TODO
 CAM_GAIN_MIN = 0
 CAM_GAIN_MAX = 9.83
+
+def clear_widget_list(layout1,nkeep=0):
+  idx=layout1.count()
+  while(nkeep > 0):
+   idx -= 1
+   widget1 = layout1.itemAt(idx).widget()
+   widget1.setParent(None) # Removes the widget
 
 class NextWaveMainWindow(QMainWindow):
  def __init__(self):
@@ -129,7 +136,7 @@ class NextWaveMainWindow(QMainWindow):
     self.updater_dm.start(self.get_param("UI","update_rate_dm"))
 
  def offline_load_image(self):
-    ffilt='BMP Images (*.bmp);; Movies (*.avi);; Binary files (*.bin);; files (*.*)'
+    ffilt=' Movies (*.avi);; BMP Images (*.bmp);; Binary files (*.bin);; files (*.*)'
     thedir = QFileDialog.getOpenFileNames(self, "Choose file",
                 ".", ffilt );
 
@@ -160,14 +167,11 @@ class NextWaveMainWindow(QMainWindow):
 
  def update_ui(self):
 
-    # if self.engine.status ==  // TODO: see if engine is running before proceed
-
     image_pixels = self.engine.receive_image()
 
     if not self.mode_offline: # OFFLINE_MODE
      self.engine.receive_centroids()
-
-    self.engine.compute_zernikes()
+     self.engine.compute_zernikes()
 
     qimage = QImage(image_pixels, image_pixels.shape[1], image_pixels.shape[0],
                  QImage.Format_Grayscale8)
@@ -527,10 +531,14 @@ class NextWaveMainWindow(QMainWindow):
  def load_config(self):
     ffilt='MiniWave Config (*.xml);;'
     thedir = QFileDialog.getOpenFileNames(self, "Choose file", ".", ffilt );
-    if len(thedir)>0:
-        print( thedir , thedir[0])
-    self.reload_config(thedir[0][0])
+    try:
+     filename = thedir[0][0]
+    except:
+     return # cancel
 
+    clear_widget_list(self.layout_config)
+    self.reload_config(filename)
+    self.edit_xml_filename.setText(filename)
 
  def reload_config(self,filename=None):
      if filename is None:
@@ -582,16 +590,22 @@ class NextWaveMainWindow(QMainWindow):
     #if tabIndex != 5:
      #self.param_tree.setParameters(self.p, showTop=False)
 
- def offline_move(self,n):
+ def offline_move(self,n,restore_mode=False):
   self.offline_curr += n
+  if self.offline_curr < 0:
+   self.offline_curr = 0
+  if self.offline_curr >= self.offline_nframes:
+   self.offline_curr = self.offline_nframes-1
+
   print("Offline move %d, curr=%d:"%(n,self.offline_curr) )
+  self.engine.offline_frame(self.offline_curr)
+
+  if restore_mode:
+   self.engine.offline.offline_navigate()
 
  def offline_goodbox(self):
-  self.engine.offline_goodbox(self.offline_curr)
-
- def offline_stepbox(self):
-  print("Offline stepbox")
-  self.engine.offline_stepbox() #self.offline_curr)
+  return
+  #self.engine.offline_goodbox(self.offline_curr)
 
  # PANELS/layouts, etc.
  def initUI(self):
@@ -714,9 +728,9 @@ class NextWaveMainWindow(QMainWindow):
      #btnFind.setStyleSheet("color : orange")
      #layout1.addWidget(btnFind,2,1)
 
-     self.it_start = QLineEdit("3")
+     self.it_start = QLineEdit("3.5")
      layout1.addWidget(self.it_start,4,0)
-     self.it_step = QLineEdit("0.5")
+     self.it_step = QLineEdit("0.25")
      layout1.addWidget(self.it_step,4,1)
      self.it_stop = QLineEdit("6.4")
      layout1.addWidget(self.it_stop,4,2)
@@ -732,6 +746,25 @@ class NextWaveMainWindow(QMainWindow):
      btn = QPushButton("Reset")
      layout1.addWidget(btn,4,5)
      btn.clicked.connect(lambda: self.iterative_reset() )
+
+     btn = QPushButton("Startbox")
+     layout1.addWidget(btn,4,6)
+     btn.clicked.connect(lambda: self.engine.offline.offline_startbox() )
+
+     btn = QPushButton("\u2190") # left
+     layout1.addWidget(btn,5,3)
+     btn.clicked.connect(lambda: self.offline_move(-1,True) )
+     btn = QPushButton("\u2192") # right
+     layout1.addWidget(btn,5,4)
+     btn.clicked.connect(lambda: self.offline_move (1,True) )
+
+     btn = QPushButton("Autoall")
+     layout1.addWidget(btn,5,5)
+     btn.clicked.connect(lambda: self.engine.offline.offline_autoall() )
+
+     btn = QPushButton("Save")
+     layout1.addWidget(btn,5,6)
+     btn.clicked.connect(lambda: self.engine.offline.offline_serialize() )
 
      #btnIt1 = QPushButton("Step It+=0.5")
      #layout1.addWidget(btnIt1,3,1)
@@ -865,16 +898,16 @@ class NextWaveMainWindow(QMainWindow):
      layout1 = QGridLayout(pages[2])
      lbl = QLabel("XML Config: ")
      layout1.addWidget(lbl, 0,0)
-     self.edit_xml = QLineEdit(self.json_data["params"]["xml_file"])
-     layout1.addWidget(self.edit_xml, 0,1)
-     btn = QPushButton("Load")
+     self.edit_xml_filename = QLineEdit(self.json_data["params"]["xml_file"])
+     layout1.addWidget(self.edit_xml_filename, 0,1)
+     btn = QPushButton("Select")
      layout1.addWidget(btn, 0,2)
      btn.clicked.connect(self.load_config)
-     btn = QPushButton("Edit")
-     layout1.addWidget(btn, 0,3)
-     btn.clicked.connect(self.reload_config)
-     #os.system('c:/tmp/sample.txt') # <- on windows this will launch the defalut editor
+     #btn = QPushButton("Edit")
+     #layout1.addWidget(btn, 0,3)
+     #btn.clicked.connect(self.reload_config)
      self.layout_config = layout1
+     self.init_config_ui()
 
      # Settings
      layout1 = QGridLayout(pages[1])
@@ -928,41 +961,9 @@ class NextWaveMainWindow(QMainWindow):
      self.btn_off_back.clicked.connect(self.offline_load_background)
      layout1.addWidget(self.btn_off_back, 2,0)
 
-     #lbl = QLabel("XML Config: ")
-     #layout1.addWidget(lbl, 0,0)
-     #self.offline_edit_xml = QLineEdit("c:\\file\\ao\\offline_config.xml")
-     #layout1.addWidget(self.offline_edit_xml, 0,1)
-     #btn = QPushButton("...")
-     #btn.clicked.connect(self.offline_config)
-     #layout1.addWidget(btn, 0,2)
-     #btn = QPushButton("Edit+Reload")
-     #layout1.addWidget(btn, 0,3)
-
      # Offline scroll image:
      self.scroll_off = QScrollArea()
-
-     if False:
-      #pixmap_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
-      #pixmap_label.resize(SPOTS_WIDTH_WIN,SPOTS_HEIGHT_WIN)
-      #pixmap_off.setAlignment(Qt.AlignCenter)
-      #self.pixmap_off=pixmap_off
-
-      #pixmap_off = QLabel()
-      im_np = np.ones((QIMAGE_HEIGHT,QIMAGE_WIDTH),dtype='uint8')
-      #im_np = np.transpose(im_np, (1,0,2))
-      qimage = QImage(im_np, im_np.shape[1], im_np.shape[0],
-                      QImage.Format_Mono)
-      pixmap = QPixmap(qimage)
-      #pixmap = pixmap.scaled(SPOTS_WIDTH_WIN,SPOTS_HEIGHT_WIN, Qt.KeepAspectRatio)
-      pixmap_label.setPixmap(pixmap)
-      pixmap_label.mousePressEvent = self.butt
-
      self.layout_off = QGridLayout()
-     for n in np.arange(50):
-        lbl = QLabel("Placeholder " + str(n) )
-        self.layout_off.addWidget(lbl, n, 0)
-        lbl = QLabel(str(n) )
-        self.layout_off.addWidget(lbl, n, 1)
 
      #Scroll Area Properties
      self.scroll_off.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
@@ -975,37 +976,19 @@ class NextWaveMainWindow(QMainWindow):
 
      layout1.addWidget(self.scroll_off,3,0) #,-1,-1)
 
-     btn = QPushButton("\u2190") # l
+     btn = QPushButton("\u2190") # left
      layout1.addWidget(btn,4,0)
      btn.clicked.connect(lambda: self.offline_move(-1) )
-     btn = QPushButton("\u2192") # l
-     layout1.addWidget(btn,4,2)
+     btn = QPushButton("\u2192") # right
+     layout1.addWidget(btn,4,1)
      btn.clicked.connect(lambda: self.offline_move (1) )
-
-     #btn = QPushButton("Run") 
-     #layout1.addWidget(btn,5,2)
-     #btn.clicked.connect(lambda: self.engine.offline_auto() )
 
      self.chkOfflineAlgorithm = QCheckBox("Use offline algorithm")
      self.chkOfflineAlgorithm.stateChanged.connect(self.offline_algorithm)
      layout1.addWidget(self.chkOfflineAlgorithm,5,0)
 
-     #btn = QPushButton("Auto2") 
-     #layout1.addWidget(btn,5,3)
-     #btn.clicked.connect(lambda: self.engine.offline_auto2() )
-
-     #btn = QPushButton("Step") 
-     #layout1.addWidget(btn,5,1)
-     #btn.clicked.connect(self.offline_stepbox)
-
-     #btn = QPushButton("Start") 
-     #layout1.addWidget(btn,5,0)
-     #btn.clicked.connect(lambda: self.engine.offline.offline_startbox() )
-
-     #os.system('c:/tmp/sample.txt') # <- on windows this will launch the defalut editor
      self.param_tree_offline = ParameterTree()
      self.param_tree_offline.setParameters(self.p_offline, showTop=False)
-     #layout1.addWidget(self.param_tree_offline,5,0) #,2,-1)
 
      # Main Widget
      self.widget_main = QWidget()
@@ -1022,7 +1005,6 @@ class NextWaveMainWindow(QMainWindow):
      menu.addAction('Run &Calibration', self.do_calibration)
      menu.addAction('e&Xit', self.close)
 
-     self.init_config_ui(self)
 
      pixmap_label.setFocus()
 
@@ -1072,33 +1054,13 @@ class NextWaveMainWindow(QMainWindow):
   self.mode_offline = self.chkOfflineAlgorithm.isChecked()
 
  def iterative_reset(self):
-     pupil_diam = float(self.it_start.text())
-     self.engine.offline.iterative_size = pupil_diam
-     self.line_pupil_diam.setText('%2.2f'%(self.engine.offline.iterative_size) ) #+step) )
-     self.engine.init_params( {'pupil_diam': pupil_diam})
-     self.engine.make_searchboxes() #cx,cy,pupil_radius_pixel=self.size/2.0*1000/self.ccd_pixel)
+     self.engine.offline.offline_reset()
 
  def iterative_step(self):
-     try:
-         self.engine.offline.iterative_size
-     except:
-         self.engine.offline.iterative_size = float(self.it_start.text())
-
-     step=float(self.it_step.text() )
-     self.engine.offline.offline_stepbox( step, float(self.it_stop.text()))
-
-     #self.engine.iterative_step(self.cx, self.cy,
-                                #float(self.it_step.text()), float(self.it_start.text()), float(self.it_stop.text()) )
-
-     self.line_pupil_diam.setText('%2.2f'%(self.engine.offline.iterative_size) ) #+step) )
+    self.engine.offline.iterative_step_good()
 
  def iterative_run(self):
-    self.engine.iterative_size = float(self.it_start.text())
-
-    while (self.engine.iterative_size != float(self.it_stop.text())):
-        self.iterative_step()
-        self.update_ui()
-        self.repaint()
+    self.engine.offline.iterative_run_good()
 
  def autoshift_search_boxes(self):
      self.engine.autoshift_search_boxes()
@@ -1219,6 +1181,10 @@ class NextWaveMainWindow(QMainWindow):
     pupil_diam = float(self.line_pupil_diam.text() )
     self.engine.init_params( {'pupil_diam': pupil_diam})
     self.engine.make_searchboxes() #cx,cy,pupil_radius_pixel=self.size/2.0*1000/self.ccd_pixel)
+
+    ##if self.sockets is None:
+        #self.sockets = NextwaveSocketComm(self)
+        #self.sockets.init()
     #self.engine.mode_init()
     #self.sockets.init()
 
@@ -1279,10 +1245,10 @@ class NextWaveMainWindow(QMainWindow):
     self.engine.make_searchboxes(self.cx,self.cy)
 
     self.sockets = NextwaveSocketComm(self)
+    self.engine.mode_init()
 
 #     self.reload_config() # Load last selected XML
 #     #self.tabs.setCurrentIndex(2) # Doesn't allocate enough space: first tab is better
-    self.engine.mode_init()
 
     #self.sockets.init() #Later
 
@@ -1296,15 +1262,12 @@ class NextWaveMainWindow(QMainWindow):
    ui.engine.offline_frame(ui.offline_curr)
 
  def add_offline(self,buf_movie):
+  self.offline_nframes = buf_movie.shape[0]
   self.offline_labels = [QLabel("Frame %02d"%n) for n in range(buf_movie.shape[0])]
   self.offline_checks = [QCheckBox() for n in range(buf_movie.shape[0])]
 
   # Clear current list (better in UI?)
-  idx=self.layout_off.count()
-  while(idx > 0):
-   idx -= 1
-   widget1 = self.layout_off.itemAt(idx).widget()
-   widget1.setParent(None) # Removes the widget
+  clear_widget_list(self.layout_off)
 
   for nf,frame in enumerate(buf_movie):
                 pixmap_l = QLabel()
@@ -1322,15 +1285,10 @@ class NextWaveMainWindow(QMainWindow):
                 self.layout_off.addWidget(self.offline_checks[nf], nf, 1)
                 self.layout_off.addWidget(pixmap_l, nf, 2)
 
-                #pixmap_l.clicked.connect(lambda: self.offline_click(n) )
-                #pixmap_l.mousePressEvent = lambda: foo(self, n) #clicked.connect(lambda: self.offline_click(n) )
-                pixmap_l.mousePressEvent = self.offline_image_click #clicked.connect(lambda: self.offline_click(n) )
+                pixmap_l.mousePressEvent = self.offline_image_click 
 
   self.offline_curr=0
   self.engine.offline_frame(self.offline_curr)
-
- #def offline_click(self,nframe):
-  #print("Offline %d clicked"%nframe)
 
 # rpyc servic definition
 # Doesn't let you access member variables, so seems kind of pointless
