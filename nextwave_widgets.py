@@ -7,6 +7,11 @@ from PyQt5.QtCore import Qt, QTimer, QEvent, QLineF, QPointF, pyqtSignal
 import PyQt5.QtGui as QtGui
 import PyQt5.QtCore as QtCore
 
+#from PyQt5 import QtCore, QtWidgets
+
+#from PyQt5.QtWidgets import QApplication, QDialog, QLabel, QVBoxLayout
+
+
 import pyqtgraph as pg
 from pyqtgraph.parametertree import Parameter, ParameterTree
 
@@ -159,6 +164,7 @@ class BoxInfoDialog(QDialog):
                               for n in np.arange(self.ui_parent.engine.num_boxes)]
             painter.drawPoints(points_centroids)
 
+        painter.end()
         pixmap = pixmap.scaled(200,200,Qt.KeepAspectRatio)
         self.image_label.setPixmap(pixmap)
 
@@ -273,3 +279,32 @@ class MyBarWidget(pg.PlotWidget):
         else:
             self.ylim_manual = None # Toggle
         return
+
+import matplotlib
+matplotlib.use('Qt5Agg')
+from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg
+from matplotlib.figure import Figure
+
+class MplCanvas(FigureCanvasQTAgg):
+
+    def __init__(self, parent=None, width=5, height=4, dpi=100):
+        fig = Figure(figsize=(width, height), dpi=dpi)
+        self.axes = fig.add_subplot(111)
+        super(MplCanvas, self).__init__(fig)
+
+class OfflineDialog(QDialog):
+    def __init__(self):
+        super().__init__()
+
+        self.setWindowTitle("Low order aberrations across frames")
+
+        self.sc = MplCanvas(self, width=5, height=4, dpi=100)
+        #self.sc.axes.plot([0,1,2,3,4], [10,1,20,3,40])
+        #self.setCentralWidget(sc)
+
+        # Create a layout for the dialog
+        layout = QVBoxLayout()
+        layout.addWidget(self.sc)
+
+        # Set the layout for the dialog
+        self.setLayout(layout)

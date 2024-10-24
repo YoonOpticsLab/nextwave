@@ -616,6 +616,35 @@ class NextwaveOffline():
         self.good_idx=int(len(self.good_template)*0.6) # TODO
         #print("Goodbox", nbox,nframe,self.good_idx, patch.shape, self.box_size_pixel)
 
+    def show_dialog(self):
+        nums = np.random.rand(5)*10
+        print( nums )
+        self.parent.ui.offline_dialog.sc.axes.clear();
+
+        diams=np.array([self.saver.data[key1]['pupil_diam'] for key1 in self.saver.data.keys()])
+        zerns=np.array([self.saver.data[key1]['zernikes'][0:10] for key1 in self.saver.data.keys()])
+
+        radius2 = (diams/2) ** 2
+        sqrt3=np.sqrt(3.0)
+        sqrt6=np.sqrt(6.0)
+        z3=zerns[:,3-1]
+        z4=zerns[:,4-1]
+        z5=zerns[:,5-1]
+
+        J45 =  (-2.0 * sqrt6 / radius2) * z3
+        J180 = (-2.0 * sqrt6 / radius2) * z5
+        cylinder = (4.0 * sqrt6 / radius2) * np.sqrt((z3 * z3) + (z5 * z5))
+        sphere = (-4.0 * sqrt3 / radius2) *z4 - 0.5 * cylinder
+
+        self.parent.ui.offline_dialog.sc.axes.plot( J45, 'x-', label='J45')
+        self.parent.ui.offline_dialog.sc.axes.plot( J180, 's-', label='J180')
+        self.parent.ui.offline_dialog.sc.axes.plot( sphere, 'o-', label='Sphere')
+        self.parent.ui.offline_dialog.sc.axes.legend(loc='best', fontsize=16)
+        self.parent.ui.offline_dialog.sc.axes.set_xlabel('Frame #', fontsize=16)
+        self.parent.ui.offline_dialog.sc.axes.set_ylabel('Diopters', fontsize=16)
+        self.parent.ui.offline_dialog.sc.axes.grid()
+        self.parent.ui.offline_dialog.sc.draw()
+        self.parent.ui.offline_dialog.show()
 
 """    # @jit(nopython=True)
     def find_centroids(boxes,data,weighted_x,weighted_y,nboxes):

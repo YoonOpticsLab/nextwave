@@ -20,7 +20,7 @@ import matplotlib.cm as cmap
 from nextwave_code import NextwaveEngine
 from nextwave_sockets import NextwaveSocketComm
 
-from nextwave_widgets import ZernikeDialog, BoxInfoDialog, ActuatorPlot, MyBarWidget
+from nextwave_widgets import ZernikeDialog, BoxInfoDialog, ActuatorPlot, MyBarWidget, OfflineDialog
 
 from threading import Thread
 
@@ -87,6 +87,11 @@ class NextWaveMainWindow(QMainWindow):
 
     self.offline_curr=0
     self.chkLoop = QCheckBox("Close AO Loop") # This is needed for engine.mode_init, called in our init. Will be replaced by chkbox widget in our InitUI
+
+    self.offline_dialog = OfflineDialog()
+
+    self.scale_num=2
+    self.scales=[512,768,1024,1536,2048]
 
  def params_json(self):
     f=open("./config.json")
@@ -358,7 +363,7 @@ class NextWaveMainWindow(QMainWindow):
     else:
         self.box_info_dlg.hide()
 
-    #pixmap = pixmap.scaled(SPOTS_WIDTH_WIN,SPOTS_HEIGHT_WIN, Qt.KeepAspectRatio)
+    pixmap = pixmap.scaled(self.scales[self.scale_num], self.scales[self.scale_num], Qt.KeepAspectRatio)
     self.widget_centrals.setMinimumWidth(SPOTS_WIDTH_WIN_MINIMUM)
     self.pixmap_label.setPixmap(pixmap)
     #print ('%0.2f'%bytez.mean(),end=' ', flush=True);
@@ -766,6 +771,10 @@ class NextWaveMainWindow(QMainWindow):
      layout1.addWidget(btn,5,6)
      btn.clicked.connect(lambda: self.engine.offline.offline_serialize() )
 
+     btn = QPushButton("Dialog")
+     layout1.addWidget(btn,5,1)
+     btn.clicked.connect(lambda: self.engine.offline.show_dialog() )
+
      #btnIt1 = QPushButton("Step It+=0.5")
      #layout1.addWidget(btnIt1,3,1)
      #btnIt1.clicked.connect(self.run_iterative)
@@ -1154,6 +1163,14 @@ class NextWaveMainWindow(QMainWindow):
         self.draw_pupil = not( self.draw_pupil )
     elif event.key()==ord('H'):
         self.bar_plot.clamp_current_ylim()
+    elif event.key()==ord('+'):
+        self.scale_num += 1
+        if self.scale_num>len(self.scales):
+         self.scale_num=self.scales
+    elif event.key()==ord('-'):
+        self.scale_num -= 1
+        if self.scale_num<0:
+         self.scale_num==0
     elif event.key()==ord('Q'):
         self.close()
     elif event.key()==Qt.Key_Control:
