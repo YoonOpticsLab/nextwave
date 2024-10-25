@@ -102,6 +102,7 @@ class NextWaveMainWindow(QMainWindow):
 
     self.cx=self.json_data["params"]["cx"]
     self.cy=self.json_data["params"]["cy"]
+    self.pupil_diam=self.json_data["params"]["pupil_diam"]
     self.offline_only=self.json_data["params"]["offline_only"]
 
     self.params = [
@@ -204,13 +205,13 @@ class NextWaveMainWindow(QMainWindow):
                        self.engine.centroids_y[n]) for n in np.arange(0,self.engine.num_boxes)]
         painter.drawLines(arrows)
 
-    if self.draw_refs and self.engine.mode>1:
+    if self.draw_refs and self.engine.num_boxes>0: # and self.engine.mode>1:
         pen = QPen(Qt.green, 2.0)
         painter.setPen(pen)
         points_ref=[QPointF(self.engine.ref_x[n],self.engine.ref_y[n]) for n in np.arange(self.engine.ref_x.shape[0])]
         painter.drawPoints(points_ref)
 
-    if self.draw_boxes and self.engine.mode>1:
+    if self.draw_boxes and self.engine.num_boxes>0: # and self.engine.mode>1:
     #if self.get_param("UI","show_boxes"):
 
         dark_blue = QtGui.QColor.fromRgb(0,0,200)
@@ -253,7 +254,7 @@ class NextWaveMainWindow(QMainWindow):
                        self.engine.box_y[n]-box_size_pixel//2-BOX_BORDER) for n in idx_bads]
         painter.drawLines(bad_boxes)
 
-    if self.box_info>=0:
+    if self.box_info>=0 and self.engine.num_boxes>0:
         pen = QPen(Qt.yellow, 1.00, Qt.SolidLine)
         painter.setPen(pen)
         BOX_BORDER=2
@@ -281,7 +282,7 @@ class NextWaveMainWindow(QMainWindow):
         painter.drawLines(boxes1)
 
     # Centroids:
-    if self.draw_centroids and self.engine.mode>1:
+    if self.draw_centroids and self.engine.num_boxes>0: #and self.engine.mode>1:
         #for ncen,cen in enumerate(self.centroids_x):
             #if np.isnan(cen):
                 #print(ncen,end=' ')
@@ -391,6 +392,7 @@ class NextWaveMainWindow(QMainWindow):
 
     self.line_centerx.setText(str(self.cx) )
     self.line_centery.setText(str(self.cy) )
+    self.line_pupil_diam.setText(str(self.pupil_diam) )
 
     if not self.offline_only:
       if self.engine.fps0!=0:
@@ -618,7 +620,7 @@ class NextWaveMainWindow(QMainWindow):
   if self.offline_curr >= self.offline_nframes:
    self.offline_curr = self.offline_nframes-1
 
-  print("Offline move %d, curr=%d:"%(n,self.offline_curr) )
+  #print("Offline move %d, curr=%d:"%(n,self.offline_curr) )
   self.engine.offline_frame(self.offline_curr)
 
   if restore_mode:
@@ -1286,13 +1288,14 @@ class NextWaveMainWindow(QMainWindow):
     #self.sockets.init() #Later
 
 
- def offline_image_click(*arg, **kwargs):
+ """def offline_image_click(*arg, **kwargs):
    ui=arg[0]
    #print("Bar", arg, kwargs)
    lpos=arg[1].localPos()
    gpos=arg[1].globalPos()
    print(arg[1],lpos,gpos)
    ui.engine.offline_frame(ui.offline_curr)
+ """
 
  def add_offline(self,buf_movie):
   self.offline_nframes = buf_movie.shape[0]
@@ -1318,7 +1321,7 @@ class NextWaveMainWindow(QMainWindow):
                 self.layout_off.addWidget(self.offline_checks[nf], nf, 1)
                 self.layout_off.addWidget(pixmap_l, nf, 2)
 
-                pixmap_l.mousePressEvent = self.offline_image_click 
+                #pixmap_l.mousePressEvent = self.offline_image_click 
 
   self.offline_curr=0
   self.engine.offline_frame(self.offline_curr)

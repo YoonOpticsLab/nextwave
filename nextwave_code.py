@@ -90,7 +90,8 @@ class NextwaveEngine():
         self.zernikes = None
 
     def init(self):
-        self.comm.init()
+        if not self.ui.offline_only:
+            self.comm.init()
         self.init_params()
 
     def init_params(self, overrides=None):
@@ -121,7 +122,8 @@ class NextwaveEngine():
 
         bytez =np.array([self.ccd_pixel, self.box_um, self.pupil_radius_mm], dtype='double').tobytes() 
 
-        self.comm.write_params(overrides)
+        if not self.ui.offline_only:
+            self.comm.write_params(overrides)
 
     def iterative_run(self, cx, cy, step):
         self.offline.offline_auto()
@@ -236,7 +238,6 @@ class NextwaveEngine():
 
         ri_ratio = pupil_radius_pixel / box_spacing_pixel
 
-        #print( "Make SB ",pupil_radius_pixel, box_size_pixel, box_spacing_pixel, ri_ratio )
         aperture = ri_ratio * aperture
 
         # The max number of boxes possible + or -
@@ -260,7 +261,6 @@ class NextwaveEngine():
 
         num_boxes=valid_x_norm.shape[0]
 
-        #print("NUM BOX:", num_boxes)
         box_zero = np.where(valid_x_norm**2+valid_y_norm**2==0)[0] # Index of zeroth (middle) element
 
         MULT = ri_ratio * box_spacing_pixel
@@ -285,6 +285,8 @@ class NextwaveEngine():
         self.centroids_y = np.full(num_boxes, np.nan)
 
         self.update_zernike_svd() # Precompute
+
+        print( "Make SB ",pupil_radius_pixel, box_size_pixel, box_spacing_pixel, ri_ratio, num_boxes, self.zterms_full.shape )
 
         # Determine neighbors (for nan interpolation)
         self.neighbors = np.zeros( (self.num_boxes, 4), dtype='int32')
@@ -380,7 +382,7 @@ class NextwaveEngine():
         #np.save('zpoly.npy',zpoly)
 
     def update_influence(self):
-        return
+        return # TODO: Check for AO and pull correct file
         #try:
         influence = np.loadtxt(self.ui.json_data["params"]["influence_file"], skiprows=1)
         #except:

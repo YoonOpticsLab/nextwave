@@ -32,8 +32,8 @@ def calc_rms(zernikes,pupil_radius_mm):
 
     J45 =  (-2.0 * sqrt6 / radius2) * z3
     J180 = (-2.0 * sqrt6 / radius2) * z5
-    cylinder = (4.0 * sqrt6 / (radius * radius)) * np.sqrt((z3 * z3) + (z5 * z5))
-    sphere = (-4.0 * sqrt3 * z4 / (radius * radius)) - 0.5 * cylinder
+    cylinder = (4.0 * sqrt6 / radius2) * np.sqrt((z3 * z3) + (z5 * z5))
+    sphere = (-4.0 * sqrt3 * z4 / radius2) - 0.5 * cylinder
 
     if (np.abs(z5) <= EPS):
         thetaRad = 1.0 if (np.abs(z3) > EPS) else -1.0

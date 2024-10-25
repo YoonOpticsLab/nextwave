@@ -24,6 +24,7 @@ class NextwaveEngineComm():
     """
     def __init__(self,parent):
         self.parent = parent
+        self.ui = parent.ui
 
     def init(self):
         self.layout=extract_memory.get_header_format('memory_layout.h')
@@ -257,21 +258,23 @@ class NextwaveEngineComm():
                     print (num_boxes, self.centroids_x[100], self.centroids_y[100]  )
 
     def send_quit(self):
-        buf = ByteStream()
-        #buf.append(0)  # Lock
-        buf.append(255) # TODO: MODE from() file
-                                          #buf.append(1, 'H') # NUM BOXES. Hopefully does,n't matterr,self.iterative_size/2.0*100int(it_size_pix),self.ui.cx,self.ui.cy)
-        #buf.append(500, 'd')
-        self.shmem_hdr.seek(2) # TODO: get address
-        self.shmem_hdr.write(buf)
-        self.shmem_hdr.flush()
+        if not self.ui.offline_only:
+            buf = ByteStream()
+            #buf.append(0)  # Lock
+            buf.append(255) # TODO: MODE from() file
+                                            #buf.append(1, 'H') # NUM BOXES. Hopefully does,n't matterr,self.iterative_size/2.0*100int(it_size_pix),self.ui.cx,self.ui.cy)
+            #buf.append(500, 'd')
+            self.shmem_hdr.seek(2) # TODO: get address
+            self.shmem_hdr.write(buf)
+            self.shmem_hdr.flush()
 
     def set_mode(self, val):
-        buf = ByteStream()
-        buf.append(val) # TODO: MODE_CENTROIDING
-        self.shmem_hdr.seek(2) #TODO: get address
-        self.shmem_hdr.write(buf)
-        self.shmem_hdr.flush()
+        if not self.ui.offline_only:
+            buf = ByteStream()
+            buf.append(val) # TODO: MODE_CENTROIDING
+            self.shmem_hdr.seek(2) #TODO: get address
+            self.shmem_hdr.write(buf)
+            self.shmem_hdr.flush()
 
     def set_nframes(self, val):
         #val= np.array( self.ui.edit_num_runs.text(), dtype='uint64' )
@@ -281,11 +284,14 @@ class NextwaveEngineComm():
         self.shmem_hdr.flush()
 
     def write_image(self,dims,bytez):
-        fields=self.layout[1] # TODO: fix
-        self.shmem_hdr.seek(fields['dimensions']['bytenum_current']) #TODO: nicer
-        self.shmem_hdr.write(dims)
-        self.shmem_hdr.flush()
-        for nbuf in np.arange(4):
-            self.shmem_data.seek(nbuf*2048*2048) # TODO
-            self.shmem_data.write(bytez)
-            self.shmem_data.flush()
+        if self.ui.offline_only:
+            self.ui.image_pixels = bytez
+        else:
+            fields=self.layout[1] # TODO: fix
+            self.shmem_hdr.seek(fields['dimensions']['bytenum_current']) #TODO: nicer
+            self.shmem_hdr.write(dims)
+            self.shmem_hdr.flush()
+            for nbuf in np.arange(4):
+                self.shmem_data.seek(nbuf*2048*2048) # TODO
+                self.shmem_data.write(bytez)
+                self.shmem_data.flush()

@@ -24,7 +24,7 @@ from nextwave_comm import NextwaveEngineComm
 
 import ffmpegcv # Read AVI... Better than OpenCV (built-in ffmpeg?)
 
-#from PIL import Image, TiffImagePlugin
+from PIL import Image, TiffImagePlugin # Needed
 
 GAUSS_SD=3
 BOX_THRESH=2.0
@@ -134,8 +134,6 @@ class NextwaveOffline():
             self.parent.make_searchboxes(cx,cy,pupil_radius_pixel=self.iterative_size/2.0*1000/self.ccd_pixel)
             self.parent.init_params( {'pupil_diam': self.iterative_size})
 
-            #self.update_zernike_svd() # TODO: maybe integrate into make_sb
-            #self.send_searchboxes(self.shmem_boxes, self.box_x, self.box_y, self.layout_boxes)
             if self.parent.ui.mode_offline:
                 self.iterative_offline()
                 return # Don't get boxes from engine
@@ -224,16 +222,7 @@ class NextwaveOffline():
             dims[0]=width
             dims[1]=width
             self.dims = dims
-            #buf = ByteStream()
-            #buf.append(dims) 
-            self.shmem_hdr.seek(fields['dimensions']['bytenum_current']) #TODO: nicer
-            self.shmem_hdr.write(dims)
-            self.shmem_hdr.flush()
-
-            for nbuf in np.arange(4):
-                self.shmem_data.seek(nbuf*2048*2048)
-                self.shmem_data.write(bytez)
-                self.shmem_data.flush()
+            self.parent.comm.write_image(dims,bytez)
 
         elif '.bmp' in file_info[1]:
             print("Offline: ",file_info[0][0])
