@@ -145,7 +145,7 @@ class NextWaveMainWindow(QMainWindow):
     self.updater_dm.start(self.get_param("UI","update_rate_dm"))
 
  def offline_load_image(self):
-    ffilt=' Movies (*.avi);; BMP Images (*.bmp);; Binary files (*.bin);; files (*.*)'
+    ffilt=' Movies (*.avi);; BMP Images (*.bmp);; BMP Directory (*.bmp);; Binary files (*.bin);; files (*.*)'
     thedir = QFileDialog.getOpenFileNames(self, "Choose file",
                 ".", ffilt );
 
@@ -162,7 +162,7 @@ class NextWaveMainWindow(QMainWindow):
     if len(thedir)>0:
         print( thedir , thedir[0])
         self.btn_off_back.setText(thedir[0][0])
-        self.engine.load_offline_background(thedir)
+        self.engine.offline.load_offline_background(thedir)
 
  def offline_config(self):
     ffilt='XML config files (*.xml);; JSON config files (*.json);; All files (*.*)'
@@ -176,12 +176,11 @@ class NextWaveMainWindow(QMainWindow):
 
  def update_ui(self):
 
-    if not self.mode_offline and not self.offline_only:
-      image_pixels = self.engine.receive_image()
+    image_pixels = self.engine.receive_image()
+
+    if not self.mode_offline and not self.offline_only: # TODO: Put offline intelligence into engine itself
       self.engine.receive_centroids()
       self.engine.compute_zernikes()
-    else:
-      image_pixels = self.image_pixels
 
     qimage = QImage(image_pixels, image_pixels.shape[1], image_pixels.shape[0],
                  QImage.Format_Grayscale8)
@@ -390,9 +389,12 @@ class NextWaveMainWindow(QMainWindow):
         self.text_stats.setText(str_stats)
         #self.text_stats.setHtml(str_stats) # TODO: To get other colors, can embed <font color="red">TEXT</font><br>, etc.
 
-    self.line_centerx.setText(str(self.cx) )
-    self.line_centery.setText(str(self.cy) )
-    self.line_pupil_diam.setText(str(self.pupil_diam) )
+    if not self.line_centerx.isModified():
+      self.line_centerx.setText(str(self.cx) )
+    if not self.line_centery.isModified():
+      self.line_centery.setText(str(self.cy) )
+    if not self.line_pupil_diam.isModified():
+      self.line_pupil_diam.setText(str(self.engine.pupil_diam) )
 
     if not self.offline_only:
       if self.engine.fps0!=0:
@@ -408,7 +410,10 @@ class NextWaveMainWindow(QMainWindow):
           s="Offline. %d boxes. %d zern terms"%(self.engine.num_boxes, self.engine.zterms_full.shape[0] )
     else:
         if self.engine.num_boxes>0:
-          s="Offline. %d boxes. %d zern terms"%(self.engine.num_boxes, self.engine.zterms_full.shape[0] )
+          try:
+            s="Offline. %d boxes. %d zern terms"%(self.engine.num_boxes, self.engine.zterms_full.shape[0] )
+          except AttributeError:
+            s="Offline. %d boxes. (please init)"%(self.engine.num_boxes )
         else:
           s="Ready."
 
@@ -623,6 +628,8 @@ class NextWaveMainWindow(QMainWindow):
   #print("Offline move %d, curr=%d:"%(n,self.offline_curr) )
   self.engine.offline_frame(self.offline_curr)
 
+  self.lbl_frame_curr.setText("%d/%d"%(self.offline_curr+1,self.offline_nframes) )
+
   if restore_mode:
    self.engine.offline.offline_navigate()
 
@@ -655,7 +662,7 @@ class NextWaveMainWindow(QMainWindow):
      pixmap = QPixmap(qimage)
      #pixmap = pixmap.scaled(SPOTS_WIDTH_WIN,SPOTS_HEIGHT_WIN, Qt.KeepAspectRatio)
      pixmap_label.setPixmap(pixmap)
-     pixmap_label.mousePressEvent = self.butt
+     pixmap_label.mousePressEvent = self.button_clicked
 
      #Scroll Area Properties
      self.scroll_central.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
@@ -758,27 +765,31 @@ class NextWaveMainWindow(QMainWindow):
      self.it_stop = QLineEdit("6.4")
      layout1.addWidget(self.it_stop,4,2)
 
-     btn = QPushButton("Run")
+     btn = QPushButton("Start")
      layout1.addWidget(btn,4,3)
+     btn.clicked.connect(lambda: self.engine.offline.offline_startbox() )
+
+     btn = QPushButton("Run")
+     layout1.addWidget(btn,4,4)
      btn.clicked.connect(lambda: self.iterative_run() )
 
      btn = QPushButton("Step")
-     layout1.addWidget(btn,4,4)
+     layout1.addWidget(btn,4,5)
      btn.clicked.connect(lambda: self.iterative_step() )
 
      btn = QPushButton("Reset")
-     layout1.addWidget(btn,4,5)
+     layout1.addWidget(btn,4,6)
      btn.clicked.connect(lambda: self.iterative_reset() )
 
-     btn = QPushButton("Startbox")
-     layout1.addWidget(btn,4,6)
-     btn.clicked.connect(lambda: self.engine.offline.offline_startbox() )
-
      btn = QPushButton("\u2190") # left
-     layout1.addWidget(btn,5,3)
+     layout1.addWidget(btn,5,1)
      btn.clicked.connect(lambda: self.offline_move(-1,True) )
+
+     self.lbl_frame_curr = QLabel()
+     layout1.addWidget(self.lbl_frame_curr,5,0)
+
      btn = QPushButton("\u2192") # right
-     layout1.addWidget(btn,5,4)
+     layout1.addWidget(btn,5,2)
      btn.clicked.connect(lambda: self.offline_move (1,True) )
 
      btn = QPushButton("Autoall")
@@ -790,7 +801,7 @@ class NextWaveMainWindow(QMainWindow):
      btn.clicked.connect(lambda: self.engine.offline.offline_serialize() )
 
      btn = QPushButton("Dialog")
-     layout1.addWidget(btn,5,1)
+     layout1.addWidget(btn,5,4)
      btn.clicked.connect(lambda: self.engine.offline.show_dialog() )
 
      #btnIt1 = QPushButton("Step It+=0.5")
@@ -1003,12 +1014,12 @@ class NextWaveMainWindow(QMainWindow):
 
      layout1.addWidget(self.scroll_off,3,0) #,-1,-1)
 
-     btn = QPushButton("\u2190") # left
-     layout1.addWidget(btn,4,0)
-     btn.clicked.connect(lambda: self.offline_move(-1) )
-     btn = QPushButton("\u2192") # right
-     layout1.addWidget(btn,4,1)
-     btn.clicked.connect(lambda: self.offline_move (1) )
+     #btn = QPushButton("\u2190") # left
+     #layout1.addWidget(btn,4,0)
+     #btn.clicked.connect(lambda: self.offline_move(-1) )
+     #btn = QPushButton("\u2192") # right
+     #layout1.addWidget(btn,4,1)
+     #btn.clicked.connect(lambda: self.offline_move (1) )
 
      self.chkOfflineAlgorithm = QCheckBox("Use offline algorithm")
      self.chkOfflineAlgorithm.stateChanged.connect(self.offline_algorithm)
@@ -1029,9 +1040,9 @@ class NextWaveMainWindow(QMainWindow):
 
      menu=self.menuBar().addMenu('&File')
      menu.addAction('&Export Centroids + Zernikes', self.export)
+     menu.addAction('Export All &Zernikes', self.export_all)
      menu.addAction('Run &Calibration', self.do_calibration)
      menu.addAction('e&Xit', self.close)
-
 
      pixmap_label.setFocus()
 
@@ -1129,7 +1140,7 @@ class NextWaveMainWindow(QMainWindow):
     self.cx = x
     self.cy = y
 
- def butt(self, event):
+ def button_clicked(self, event):
     print("clicked:", event.pos() )
     x_scaled =event.pos().x() #/ SPOTS_WIDTH_WIN*992 # TODO: use image size
     y_scaled =event.pos().y() #/ SPOTS_WIDTH_WIN*992 # TODO: use image size
@@ -1235,37 +1246,14 @@ class NextWaveMainWindow(QMainWindow):
  def export(self):
     default_filename="centroids.dat"
     filename, _ = QFileDialog.getSaveFileName(
-        self, "Save audio file", default_filename, "Audio Files (*.mp3)"
+        self, "Save centroids file", default_filename, "Centroids Files (*.dat)"
     )
+
     if filename:
-        fil = open(filename,'wt')
+      self.engine.export_centroids(filename)
 
-        fil.writelines( '[image size = %dx%d]\n'%(self.engine.width,self.engine.height))
-        fil.writelines( '[pupil = %f,%d,%d]\n'%(self.engine.pupil_diam,self.cx,self.cy))
-        for nbox in np.arange( len(self.engine.ref_x)):
-            # TODO: Valid or invalid
-            fil.writelines('%d\t%.12f\t%.12f\t%.12f\t%.12f\t\n'%(1,self.engine.ref_x[nbox], self.engine.ref_y[nbox],
-                                                     self.engine.centroids_x[nbox], self.engine.centroids_y[nbox] ) )
-        fil.close()
-
-    filename="zernikes.txt"
-    fil = open(filename,'wt')
-    for val in self.engine.zernikes:
-        fil.writelines('%f\n'%val)
-    fil.close()
-
-    np.save('dx',self.engine.spot_displace_x)
-    np.save('dy',self.engine.spot_displace_y)
-    np.save('slope',self.engine.slope)
-    np.save('zterms',self.engine.zterms)
-    np.save('zterms_inv',self.engine.zterms_inv)
-
-    try:
-     np.savetxt('mirror_voltages.txt',self.engine.mirror_voltages)
-    except:
-     pass
-
-    self.engine.dump_vars()
+ def export_all(self):
+    self.engine.offline.export_all_zernikes()
 
  def close(self):
     self.engine.send_quit() # Send stop command to engine

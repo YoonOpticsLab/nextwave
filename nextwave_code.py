@@ -125,76 +125,6 @@ class NextwaveEngine():
         if not self.ui.offline_only:
             self.comm.write_params(overrides)
 
-    def iterative_run(self, cx, cy, step):
-        self.offline.offline_auto()
-
-    """
-    def circle(self,cx,cy,rad):
-        #X,Y=np.meshgrid( np.arange(self.desired.shape[1]), np.arange(self.desired.shape[0]) )
-        X=self.box_x
-        Y=self.box_y
-        r=np.sqrt((X-cx-1.0*np.sign(X))**2+(cy-Y+1.0*np.sign(Y))**2) # 0.5 fudge
-        result=(r<rad)*1.0
-        return result
-
-        #downs =  -(self.norm_y - 0.5/self.ri_ratio)
-
-    def circle_err(self,p):
-        ssq=np.sum( (self.circle(*p)-self.desired) **2 )
-        #print(p)
-        return ssq
-
-    def read_mode(self):
-        self.shmem_hdr.seek(2) #TODO: get address
-        buf=self.shmem_hdr.read(1)
-        mode= struct.unpack('B',buf)[0]
-        return mode
-    """
-
-    """
-    def iterative_step(self, cx, cy, step, start, stop):
-        if self.iterative_size>=stop:
-            self.iterative_size = start
-        elif self.iterative_size+step > stop:
-            self.iterative_size = stop
-        else:
-            self.iterative_size += step
-
-        #while self.iterative_size<9:
-        if True:
-            #self.iterative_size += step
-            #print(self.iterative_size)
-
-            self.make_searchboxes(cx,cy,pupil_radius_pixel=self.iterative_size/2.0*1000/self.ccd_pixel)
-            self.init_params( {'pupil_diam': self.iterative_size})
-
-            #self.update_zernike_svd() # TODO: maybe integrate into make_sb
-            #self.send_searchboxes(self.shmem_boxes, self.box_x, self.box_y, self.layout_boxes)
-            if self.ui.mode_offline:
-                self.iterative_offline()
-                return # Don't get boxes from engine
-
-            self.mode_snap(False,False)
-            mode=self.read_mode()
-            # TODO: don't wait forever; lokcup
-            while( mode>1 ):
-                mode=self.read_mode()
-                time.sleep(0.005)
-
-            self.receive_centroids()
-            self.compute_zernikes()
-            zs = self.zernikes
-
-            factor = self.iterative_size / (self.iterative_size+step)
-            z_new =  iterative.extrapolate_zernikes(zs, factor)
-            #print( zs[5], zs[0:5] )
-            #print( z_new[0:5] )
-            self.shift_search_boxes(z_new,from_dialog=False)
-
-    def set_iterative_size(self,value):
-        self.iterative_size = value
-    """
-
     def move_searchboxes(self,dx,dy):
         self.box_x += dx
         self.box_y += dy
@@ -477,9 +407,6 @@ class NextwaveEngine():
     def reset_references(self):
         return
 
-    def offline_auto2(self):
-        self.offline.offline_centroids()
-
     def receive_image(self):
         return self.comm.receive_image()
     def receive_centroids(self):
@@ -537,3 +464,34 @@ class NextwaveEngine():
 
     def mode_stop(self):
         self.comm.set_mode(0)
+
+    def export_centroids(self,centroids_filename):
+        fil = open(centroids_filename,'wt')
+
+        fil.writelines( '[image size = %dx%d]\n'%(self.image_bytes.shape[0],self.image_bytes.shape[1]))
+        fil.writelines( '[pupil = %f,%d,%d]\n'%(self.ui.pupil_diam,self.ui.cx,self.ui.cy))
+        for nbox in np.arange( len(self.ref_x)):
+            # TODO: Valid or invalid
+            fil.writelines('%d\t%.12f\t%.12f\t%.12f\t%.12f\t\n'%(
+                (self.spot_displace_interpolated[nbox]==0)*1,self.ref_x[nbox], self.ref_y[nbox],
+                           self.centroids_x[nbox], self.centroids_y[nbox] ) )
+        fil.close()
+
+        filename="zernikes.txt"
+        fil = open(filename,'wt')
+        for val in self.zernikes:
+            fil.writelines('%f\n'%val)
+        fil.close()
+
+        np.save('dx',self.spot_displace_x)
+        np.save('dy',self.spot_displace_y)
+        np.save('slope',self.slope)
+        np.save('zterms_full',self.zterms_full)
+        np.save('zterms_inv',self.zterms_inv)
+
+        try:
+            np.savetxt('mirror_voltages.txt',self.mirror_voltages)
+        except:
+            pass
+
+        self.engine.dump_vars()

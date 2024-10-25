@@ -57,7 +57,10 @@ class info_saver():
         #print( 'saved: ', data_record, flush=True)
 
     def load1(self,nframe):
-        data_record = self.data[nframe]
+        try:
+            data_record = self.data[nframe]
+        except KeyError:
+            return None# If this record doesn't exist, just ignore
         self.engine.box_x = data_record['box_x']
         self.engine.box_y = data_record['box_y']
         self.engine.ref_x = data_record['ref_x']
@@ -68,22 +71,34 @@ class info_saver():
         self.offline.est_y = data_record['est_y']
         self.ui.cx = data_record['cx']
         self.ui.cy = data_record['cy']
+        self.engine.pupil_diam = data_record['pupil_diam']
         self.engine.zernikes = data_record['zernikes']
 
         self.engine.num_boxes = len( self.engine.centroids_x)
+        return data_record
 
-        self.ui.line_pupil_diam.setText('%2.2f'%data_record['pupil_diam'] )
+    def printable1(self,nframe):
+        data_record=self.load1(nframe)
+        if not data_record is None:
+            s=("%d,%0.3f,%d,%d,")%(nframe+1,data_record['pupil_diam'],data_record['cx'],data_record['cy'])
+            for nz1,z1 in enumerate(data_record['zernikes']):
+                s += "%0.6f,"%(z1)
+        else:
+            s='%d,'%nframe
+        return s
 
     def serialize(self):
         self.fname = self.offline.offline_fname+'.pkl'
         with open(self.fname,'wb') as f:
             pickle.dump(self.data, f)
+        f.close()
 
     def unserialize(self):
         self.fname = self.offline.offline_fname+'.pkl'
         try:
             with open(self.fname,'rb') as f:
                 self.data = pickle.load(f)
+            f.close() 
         except FileNotFoundError:
             self.data = {}
 
@@ -168,7 +183,6 @@ class NextwaveOffline():
         self.parent.comm.write_image(dims,bytez)
         self.ui.image_pixels = bytez
 
-
     def load_offline_background(self,file_info):
         # file_info: from dialog. Tuple: (list of files, file types)
         if '.bin' in file_info[1]:
@@ -182,7 +196,8 @@ class NextwaveOffline():
 
             with vidin:
                 for nf,frame in enumerate(vidin):
-                    f1=frame.mean(2)[0:1024,0:1024] # Avg RGB. TODO: crop hard-code
+                    #f1=frame.mean(2)[0:1024,0:1024] # Avg RGB. TODO: crop hard-code
+                    f1=frame.mean(2)
                     if buf_movie is None:
                         buf_movie=np.zeros( (50,f1.shape[0],f1.shape[1]), dtype='uint8') # TODO: grow new chunk if necessary
                     buf_movie[nf]=f1
@@ -225,20 +240,20 @@ class NextwaveOffline():
             self.parent.comm.write_image(dims,bytez)
 
         elif '.bmp' in file_info[1]:
-            print("Offline: ",file_info[0][0])
+            buf_movie=None
+            for nf,frame1 in enumerate(file_info[0]):
+                print("Offline: ",nf,frame1)
+                im = Image.open(frame1)
+                f1 = np.array(im) # TODO: assumes Im is already 8bit monochrome
+                if buf_movie is None:
+                        buf_movie=np.zeros( (50,f1.shape[0],f1.shape[1]), dtype='uint8') # TODO: grow new chunk if necessary
+                buf_movie[nf]=f1
 
-            im = Image.open(file_info[0][0])
-            bytez = np.array(im) # TODO: assumes Im is already 8bit monochrome
-
-            dims=np.zeros(2,dtype='uint16')
-            dims[0]=bytez.shape[0]
-            dims[1]=bytez.shape[1]
-            self.dims=dims
-            self.parent.comm.write_image(dims,bytez)
-
-            buf_movie=np.array([im])
+            print("Read %d frames of %dx%d"%(nf,f1.shape[0],f1.shape[1]) )
+            buf_movie=buf_movie[0:nf,:,:] # Trim to correct
             self.offline_movie = buf_movie
             self.parent.ui.add_offline(buf_movie)
+            self.dims=np.array([buf_movie.shape[1],buf_movie.shape[2]])
 
         elif '.avi' in file_info[1]:
             fname=file_info[0][0]
@@ -248,7 +263,7 @@ class NextwaveOffline():
 
             with vidin:
                 for nf,frame in enumerate(vidin):
-                    f1=frame.mean(2)[0:1024,0:1024] # Avg RGB. TODO: crop hard-code
+                    f1=frame.mean(2) #[0:1024,0:1024] # Avg RGB. TODO: crop hard-code
                     if buf_movie is None:
                         buf_movie=np.zeros( (50,f1.shape[0],f1.shape[1]), dtype='uint8') # TODO: grow new chunk if necessary
                     buf_movie[nf]=f1
@@ -262,16 +277,23 @@ class NextwaveOffline():
 
         self.max_frame = buf_movie.shape[0]
 
-        if False:
-            out_fname = self.offline_fname + "_zern.csv"
-            self.f_out = open(out_fname,'w')
-            s="frame_num,num_boxes,pupil,cx,cy,"
-            for nz in np.arange(65):
-                s += "Z%d,"%(nz+1)
-                s += "\n"
-            self.f_out.write(s)
-
         self.saver.unserialize() # Load previous if they exist
+        self.saver.load1(0) # Restore if possible
+
+    def export_all_zernikes(self):
+        out_fname = self.offline_fname + "_zern.csv"
+        self.f_out = open(out_fname,'w')
+        s="frame_num,pupil_diam_mm,cx,cy,"
+        for nz in np.arange(65):
+            s += "Z%d,"%(nz+1)
+        s += "\n"
+        self.f_out.write(s)
+
+        for nframe in np.arange(self.max_frame):
+            s=self.saver.printable1(nframe)
+            s += "\n"
+            self.f_out.write(s)
+        self.f_out.close()
 
     def metric_patch(self,patch_orig):
         #filtd=gaussian_filter(buf_movie[nframe],3.0)
@@ -407,20 +429,6 @@ class NextwaveOffline():
         self.est_x =  self.parent.ref_x - dx
         self.est_y =  self.parent.ref_y + dy
 
-    def offline_auto2(self):
-        #self.make_searchboxes()
-        self.box_size_pixel = self.box_size_pixel - 5
-
-        self.offline_centroids() # TODO: DEBUG
-        return
-
-        print( self.offline_movie.shape)
-        for nframe in np.arange(self.offline_movie.shape[0]):
-            self.parent.ui.offline_curr=nframe
-            self.offline_frame(self.parent.ui.offline_curr)
-            self.offline_startbox()
-            self.offline_auto()
-
     def offline_auto(self):
         it1=self.offline_stepbox()
         while it1>0:
@@ -520,6 +528,7 @@ class NextwaveOffline():
      pupil_diam = float(self.parent.ui.it_start.text())
      self.iterative_size = pupil_diam
      self.iterative_size_pixels = self.iterative_size/2.0 * 1000 / self.parent.ccd_pixel
+     self.parent.pupil_diam = pupil_diam
      self.parent.ui.line_pupil_diam.setText('%2.2f'%(self.iterative_size) ) 
      self.parent.init_params( {'pupil_diam': pupil_diam})
      self.parent.make_searchboxes() 
@@ -570,6 +579,7 @@ class NextwaveOffline():
         #self.parent.centroids_x=self.cenx
         #self.parent.centroids_y=self.ceny
 
+        self.parent.ui.it_stop.setText('%2.2f'%(self.iterative_max) ) 
         self.parent.ui.mode_offline=True
 
     def iterative_offline(self):

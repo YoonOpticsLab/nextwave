@@ -162,6 +162,14 @@ class NextwaveEngineComm():
         shmem_boxes.flush()
 
     def receive_image(self):
+        if self.parent.ui.mode_offline or self.parent.ui.offline_only:
+            # Assume it's already been written directly into image_bytes by offline processes
+            try:
+                return self.parent.image_bytes
+            except AttributeError:
+                self.parent.image_bytes=np.random.randint(0, 255, size=(1000,1000) )
+                return self.parent.image_bytes
+
         # TODO: Wait until it's safe (unlocked)
 
         #TODO. Could use this method to read everything into memory. Probably more efficient:
@@ -285,7 +293,8 @@ class NextwaveEngineComm():
 
     def write_image(self,dims,bytez):
         if self.ui.offline_only:
-            self.ui.image_pixels = bytez
+            #self.ui.image_pixels = bytez
+            self.parent.image_bytes = bytez
         else:
             fields=self.layout[1] # TODO: fix
             self.shmem_hdr.seek(fields['dimensions']['bytenum_current']) #TODO: nicer

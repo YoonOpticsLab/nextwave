@@ -155,7 +155,7 @@ class BoxInfoDialog(QDialog):
         points=[QPointF(self.cent_x,self.cent_y)]
         painter.drawPoints(points)
 
-        if self.ui_parent.draw_predicted and False: 
+        if self.ui_parent.draw_predicted: 
             pen2 = QPen(Qt.green, 1.0)
             painter.setPen(pen2)
             points_centroids=[QPointF(
