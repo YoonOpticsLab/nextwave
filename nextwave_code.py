@@ -86,6 +86,8 @@ class NextwaveEngine():
         self.mode = 0
         self.comm = NextwaveEngineComm(self)
         self.offline = NextwaveOffline(self)
+        self.num_boxes = 0
+        self.zernikes = None
 
     def init(self):
         self.comm.init()
@@ -313,9 +315,10 @@ class NextwaveEngine():
 
     def update_searchboxes(self):
         self.update_zernike_svd()
-        self.update_influence();
-        self.comm.send_searchboxes(self.box_x, self.box_y)
-        self.dump_vars()
+        if not self.ui.offline_only:
+            self.update_influence();
+            self.comm.send_searchboxes(self.box_x, self.box_y)
+        #self.dump_vars() # DEBUGGING
 
     def update_zernike_svd(self):
         lefts =    self.norm_x - 0.5/self.ri_ratio # (or 0.5 * self.box_size_pixel/self.pup)
@@ -377,6 +380,7 @@ class NextwaveEngine():
         #np.save('zpoly.npy',zpoly)
 
     def update_influence(self):
+        return
         #try:
         influence = np.loadtxt(self.ui.json_data["params"]["influence_file"], skiprows=1)
         #except:

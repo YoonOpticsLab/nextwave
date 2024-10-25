@@ -24,7 +24,7 @@ from nextwave_comm import NextwaveEngineComm
 
 import ffmpegcv # Read AVI... Better than OpenCV (built-in ffmpeg?)
 
-from PIL import Image, TiffImagePlugin
+#from PIL import Image, TiffImagePlugin
 
 GAUSS_SD=3
 BOX_THRESH=2.0
@@ -97,6 +97,8 @@ class NextwaveOffline():
     def __init__(self,parent):
         # TODO:
         self.parent = parent
+        self.engine = self.parent
+        self.ui = self.parent.ui
         self.saver = info_saver(self)
 
     def iterative_run(self, cx, cy, step):
@@ -166,6 +168,8 @@ class NextwaveOffline():
         bytez=self.offline_movie[nframe]
         self.im = bytez
         self.parent.comm.write_image(dims,bytez)
+        self.ui.image_pixels = bytez
+
 
     def load_offline_background(self,file_info):
         # file_info: from dialog. Tuple: (list of files, file types)

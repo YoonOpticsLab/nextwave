@@ -93,6 +93,8 @@ class NextWaveMainWindow(QMainWindow):
     self.scale_num=2
     self.scales=[512,768,1024,1536,2048]
 
+    self.image_pixels = np.zeros( (10,10))
+
  def params_json(self):
     f=open("./config.json")
     self.json_data = json.load(f)
@@ -100,6 +102,7 @@ class NextWaveMainWindow(QMainWindow):
 
     self.cx=self.json_data["params"]["cx"]
     self.cy=self.json_data["params"]["cy"]
+    self.offline_only=self.json_data["params"]["offline_only"]
 
     self.params = [
         {'name': 'UI', 'type': 'group', 'title':'User interface', 'children': [
@@ -172,11 +175,12 @@ class NextWaveMainWindow(QMainWindow):
 
  def update_ui(self):
 
-    image_pixels = self.engine.receive_image()
-
-    if not self.mode_offline: # OFFLINE_MODE
-     self.engine.receive_centroids()
-     self.engine.compute_zernikes()
+    if not self.mode_offline and not self.offline_only:
+      image_pixels = self.engine.receive_image()
+      self.engine.receive_centroids()
+      self.engine.compute_zernikes()
+    else:
+      image_pixels = self.image_pixels
 
     qimage = QImage(image_pixels, image_pixels.shape[1], image_pixels.shape[0],
                  QImage.Format_Grayscale8)
@@ -368,40 +372,52 @@ class NextWaveMainWindow(QMainWindow):
     self.pixmap_label.setPixmap(pixmap)
     #print ('%0.2f'%bytez.mean(),end=' ', flush=True);
 
-    s=""
-    for n in np.arange(13):
-        s += 'Z%2d=%+0.4f\n'%(n+1,self.engine.zernikes[n])
-    self.text_status.setText(s)
+    #s=""
+    #for n in np.arange(13):
+        #s += 'Z%2d=%+0.4f\n'%(n+1,self.engine.zernikes[n])
+    #self.text_status.setText(s)
 
-    rms,rms5p,cylinder,sphere,axis=calc_rms(self.engine.zernikes, self.engine.pupil_radius_mm)
-    left_chars=15
-    str_stats=f"{'RMS':<15}= {rms:3.2f}\n"
-    str_stats+=f"{'HORMS':<15}= {rms5p:3.2f}\n"
-    str_stats+=f"{'Sphere(+cyl)':<15}= {sphere:3.2f}\n"
-    #str_stats+=f"{'Sphere(-cyl)':<15}= {sphere:3.2f}\n"
-    str_stats+=f"{'Cylinder':<15}= {cylinder:3.2f}\n"
-    str_stats+=f"{'Axis(-cyl)':<15}= {axis:3.2f}\n"
-    self.text_stats.setText(str_stats)
-    #self.text_stats.setHtml(str_stats) # TODO: To get other colors, can embed <font color="red">TEXT</font><br>, etc.
+    if not self.engine.zernikes is None:
+        rms,rms5p,cylinder,sphere,axis=calc_rms(self.engine.zernikes, self.engine.pupil_radius_mm)
+        left_chars=15
+        str_stats=f"{'RMS':<15}= {rms:3.2f}\n"
+        str_stats+=f"{'HORMS':<15}= {rms5p:3.2f}\n"
+        str_stats+=f"{'Sphere(+cyl)':<15}= {sphere:3.2f}\n"
+        #str_stats+=f"{'Sphere(-cyl)':<15}= {sphere:3.2f}\n"
+        str_stats+=f"{'Cylinder':<15}= {cylinder:3.2f}\n"
+        str_stats+=f"{'Axis(-cyl)':<15}= {axis:3.2f}\n"
+        self.text_stats.setText(str_stats)
+        #self.text_stats.setHtml(str_stats) # TODO: To get other colors, can embed <font color="red">TEXT</font><br>, etc.
 
     self.line_centerx.setText(str(self.cx) )
     self.line_centery.setText(str(self.cy) )
 
-    if self.engine.fps0!=0:
-        # TODO: get state
-        s=""
-        if self.engine.mode==3:
-            s+="Running "
-        if self.chkLoop.isChecked():
-            s += "(AO) "
-        s+="%3.2f FPS (%04.2f ms: %04.1f+%04.2f ms)"%(1000/self.engine.fps0,self.engine.fps0, float(self.engine.fps1), float(self.engine.fps2)  )
-        s+="\nFrames: %d"%self.engine.total_frames
+    if not self.offline_only:
+      if self.engine.fps0!=0:
+          # TODO: get state
+          s=""
+          if self.engine.mode==3:
+              s+="Running "
+          if self.chkLoop.isChecked():
+              s += "(AO) "
+          s+="%3.2f FPS (%04.2f ms: %04.1f+%04.2f ms)"%(1000/self.engine.fps0,self.engine.fps0, float(self.engine.fps1), float(self.engine.fps2)  )
+          s+="\nFrames: %d"%self.engine.total_frames
+      else:
+          s="Offline. %d boxes. %d zern terms"%(self.engine.num_boxes, self.engine.zterms_full.shape[0] )
     else:
-        s="0 fps. %d boxes. %d zern terms"%(self.engine.num_boxes, self.engine.zterms_full.shape[0] )
+        if self.engine.num_boxes>0:
+          s="Offline. %d boxes. %d zern terms"%(self.engine.num_boxes, self.engine.zterms_full.shape[0] )
+        else:
+          s="Ready."
 
     self.label_status0.setText(s)
     self.label_status0.setStyleSheet("color: rgb(0, 255, 0); background-color: rgb(0,0,0);")
 
+    if not self.engine.zernikes is None:
+     if len(self.engine.zernikes)>0:
+      self.show_zernike_plot()
+
+ def show_zernike_plot(self):
     # TODO: Perhaps move all this code into the bar_plot object itself??
     self.bar_plot.clear()
 
@@ -685,10 +701,10 @@ class NextWaveMainWindow(QMainWindow):
 
      panel_names = ["Operation", "Settings", "Config", "Offline"]
      pages = [QWidget(tabs) for nam in panel_names]
-     pages[0].setLayout(layout_op)
      for n, tabnames in enumerate(panel_names):
          tabs.addTab(pages[n], tabnames)
 
+     pages[0].setLayout(layout_op)
      ### Pupil ops
      layout1 = QGridLayout(self.ops_pupil)
 
@@ -1259,10 +1275,10 @@ class NextWaveMainWindow(QMainWindow):
  def initEngine(self):
     self.engine = NextwaveEngine(self)
     self.engine.init()
-    self.engine.make_searchboxes(self.cx,self.cy)
-
-    self.sockets = NextwaveSocketComm(self)
-    self.engine.mode_init()
+    if not self.offline_only:
+       self.engine.make_searchboxes(self.cx,self.cy)
+       self.sockets = NextwaveSocketComm(self)
+       self.engine.mode_init()
 
 #     self.reload_config() # Load last selected XML
 #     #self.tabs.setCurrentIndex(2) # Doesn't allocate enough space: first tab is better
@@ -1334,7 +1350,8 @@ def main():
   win.initEngine()
   win.initUI()
 
-  win.sockets.init()
+  if not win.offline_only:
+      win.sockets.init()
   start_backdoor(win)
 
   sys.exit(app.exec_())
