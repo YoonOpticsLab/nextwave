@@ -129,21 +129,23 @@ class NextwaveEngineComm():
         shmem_boxes.write(buf)
         shmem_boxes.flush()
 
-        if True:
+        try: # TODO: Better to have an "if ready"
+            if True:
+                buf = ByteStream()
+                for item in self.parent.influence.T.flatten():
+                    buf.append(item, 'd')
+                shmem_boxes.seek(fields['influence']['bytenum_current'])
+                shmem_boxes.write(buf)
+                shmem_boxes.flush()
+
             buf = ByteStream()
-            for item in self.parent.influence.T.flatten():
+            for item in self.parent.influence_inv.T.flatten():
                 buf.append(item, 'd')
-            shmem_boxes.seek(fields['influence']['bytenum_current'])
+            shmem_boxes.seek(fields['influence_inv']['bytenum_current'])
             shmem_boxes.write(buf)
             shmem_boxes.flush()
-
-        buf = ByteStream()
-        #print(  "INF_INV %f"%np.max( self.influence_inv ) )
-        for item in self.parent.influence_inv.T.flatten():
-            buf.append(item, 'd')
-        shmem_boxes.seek(fields['influence_inv']['bytenum_current'])
-        shmem_boxes.write(buf)
-        shmem_boxes.flush()
+        except AttributeError:
+            pass # Probably missing influence function. Hasn't been calc'ed yet.
 
         # Write header last, so the engine knows when we are ready
         buf = ByteStream()
@@ -154,8 +156,11 @@ class NextwaveEngineComm():
         buf.append(self.parent.box_um, 'd')
         buf.append(self.parent.pupil_radius_pixel*self.parent.ccd_pixel, 'd')
 
-        buf.append(self.parent.nTerms, 'H')
-        buf.append(self.parent.nActuators, 'H')
+        try: #TODO: Better to have a "if Ready"
+            buf.append(self.parent.nTerms, 'H')
+            buf.append(self.parent.nActuators, 'H')
+        except AttributeError:
+            pass # Ok if these aren't ready yet
 
         shmem_boxes.seek(0)
         shmem_boxes.write(buf)

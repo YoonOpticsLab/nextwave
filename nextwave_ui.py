@@ -628,7 +628,7 @@ class NextWaveMainWindow(QMainWindow):
   #print("Offline move %d, curr=%d:"%(n,self.offline_curr) )
   self.engine.offline_frame(self.offline_curr)
 
-  self.lbl_frame_curr.setText("%d/%d"%(self.offline_curr+1,self.offline_nframes) )
+  self.lbl_frame_curr.setText("%d/%d"%(self.offline_curr,self.offline_nframes) )
 
   if restore_mode:
    self.engine.offline.offline_navigate()

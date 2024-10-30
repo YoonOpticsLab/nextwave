@@ -80,7 +80,7 @@ class info_saver():
     def printable1(self,nframe):
         data_record=self.load1(nframe)
         if not data_record is None:
-            s=("%d,%0.3f,%d,%d,")%(nframe+1,data_record['pupil_diam'],data_record['cx'],data_record['cy'])
+            s=("%d,%0.3f,%d,%d,")%(nframe,data_record['pupil_diam'],data_record['cx'],data_record['cy'])
             for nz1,z1 in enumerate(data_record['zernikes']):
                 s += "%0.6f,"%(z1)
         else:
@@ -204,7 +204,7 @@ class NextwaveOffline():
                     #print(nf,end=' ')
 
             print("Background: read %d frames of %dx%d"%(nf,f1.shape[0],f1.shape[1]) )
-            buf_movie=buf_movie[0:nf,:,:] # Trim to correct
+            buf_movie=buf_movie[0:nf+1,:,:] # Trim to correct
             self.offline_background = buf_movie
 
             if self.offline_movie.shape[0] != self.offline_background.shape[0]:
