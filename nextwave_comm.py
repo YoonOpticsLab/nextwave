@@ -261,7 +261,7 @@ class NextwaveEngineComm():
 
         self.shmem_boxes.seek(fields['mirror_voltages']['bytenum_current'])
         buf=self.shmem_boxes.read(num_boxes*SIZEOF_DOUBLE)
-        #self.mirror_voltages=np.array( struct.unpack_from(''.join((['d']*self.nActuators)), buf) )
+        self.mirror_voltages=np.array( struct.unpack_from(''.join((['d']*self.parent.nActuators)), buf) )
 
         DEBUGGING=False
         if DEBUGGING:
