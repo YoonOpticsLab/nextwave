@@ -72,6 +72,7 @@ class NextwaveEngine():
         self.offline = NextwaveOffline(self)
         self.num_boxes = 0
         self.zernikes = None
+        self.defocus = 0
 
     def init(self):
         if not self.ui.offline_only:
@@ -86,7 +87,7 @@ class NextwaveEngine():
         self.focal =     self.ui.get_param_xml("LENSLETS_LensletFocalLength")/1000.0
         self.box_um =    self.ui.get_param_xml("LENSLETS_LensletPitch")
         self.ccd_pixel = self.ui.get_param_xml("CAMERA1_CameraPixelPitch")
-        self.pupil_diam =self.ui.get_param_xml("OPTICS_PupilDiameter")
+        self.pupil_diam =self.ui.get_param_xml("OPTICS_PupilDiameter") * self.ui.get_param_xml("OPTICS_PupilMagnificationFactor")
 
         if overrides:
             self.pupil_diam=overrides.get('pupil_diam',self.pupil_diam)
@@ -297,14 +298,16 @@ class NextwaveEngine():
 
     def update_influence(self):
         #try: # TODO: check that file exists, etc.
-        influence = np.loadtxt(self.ui.json_data["params"]["influence_file"], skiprows=1)
+        influence = np.loadtxt(self.ui.json_data["params"]["influence_file"], skiprows=0)
         #except:
             #influence = np.random.normal ( loc=0, scale=0.01, size=(97, self.num_boxes * 2)  )
-        valid_idx=np.sum(influence**2,0)>0 # TODO... base on pupil size or something?
-        self.influence = influence[:, valid_idx]
-        self.influence_inv = np.linalg.pinv(self.influence) # pseudoinverse
+        #valid_idx=np.sum(influence**2,0)>0 # TODO... base on pupil size or something?
+        self.influence = np.zeros( (97, influence.shape[1]) ) #influence[:, valid_idx]
+        self.influence[ 0:influence.shape[0] ] = influence
+        self.influence_inv = self.influence.T
         self.nActuators=self.influence.shape[0]
         self.nTerms=self.influence.shape[1]
+        np.save('influ', self.influence_inv )
 
     def compute_zernikes(self):
         # find slope
@@ -368,6 +371,26 @@ class NextwaveEngine():
         self.zs = zs
         return delta_x,delta_y
 
+    def defocus_plus(self):
+        zs= np.zeros(20)
+        self.defocus += 0.1
+        zs[3] = self.defocus
+        dx,dy = self.get_deltas(zs)
+        self.box_x = self.initial_x - dx
+        self.box_y = self.initial_y + dy
+        self.comm.send_searchboxes(self.box_x, self.box_y)
+        print(self.defocus)
+
+    def defocus_minus(self):
+        zs= np.zeros(20)
+        self.defocus -= 0.1
+        zs[3] = self.defocus
+        dx,dy = self.get_deltas(zs)
+        self.box_x = self.initial_x - dx
+        self.box_y = self.initial_y + dy
+        self.comm.send_searchboxes(self.box_x, self.box_y)
+        print(self.defocus)
+
 
     def shift_search_boxes(self,zs,from_dialog=True):
         #print( zs )
@@ -396,8 +419,11 @@ class NextwaveEngine():
         if self.ui.mode_offline==False: # If in offline, don't keep grabbing centroids from C++ engine
             return self.comm.receive_centroids()
 
+    def flat_do(self):
+        self.comm.flat_do()
+
     def zero_do(self):
-        self.write_mirrors( np.zeros(97) ) # TODO
+        self.comm.zero_do()
 
     def flat_do(self):
         self.write_mirrors( self.mirror_state_flat )
@@ -466,12 +492,12 @@ class NextwaveEngine():
         np.save('dx',self.spot_displace_x)
         np.save('dy',self.spot_displace_y)
         np.save('slope',self.slope)
-        np.save('zterms_full',self.zterms_full)
-        np.save('zterms_inv',self.zterms_inv)
+        #np.save('zterms_full',self.zterms_full)
+        #np.save('zterms_inv',self.zterms_inv)
 
         try:
-            np.savetxt('mirror_voltages.txt',self.mirror_voltages)
+            np.savetxt('mirror_voltages.txt',self.comm.mirror_voltages)
         except:
             pass
 
-        self.engine.dump_vars()
+        self.dump_vars()

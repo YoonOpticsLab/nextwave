@@ -890,7 +890,7 @@ class NextWaveMainWindow(QMainWindow):
      layout1.addWidget(btn, 1,0 )
 
      btn = QPushButton("Reference shift")
-     btn.clicked.connect(lambda: self.show_zernike_dialog("Shift references", self.engine.reset_references ) )
+     btn.clicked.connect(lambda: self.show_zernike_dialog("Shift references", self.engine.shift_references ) )
      layout1.addWidget(btn, 2,0 )
 
      self.chkFollow = QCheckBox("Boxes follow centroids")
@@ -904,6 +904,15 @@ class NextWaveMainWindow(QMainWindow):
      btn = QPushButton("Reference RESET")
      btn.clicked.connect(self.engine.reset_references )
      layout1.addWidget(btn, 2,1 )
+
+     btn = QPushButton("+")
+     btn.clicked.connect(self.engine.defocus_plus )
+     layout1.addWidget(btn, 2,3 )
+     
+     btn = QPushButton("-")
+     btn.clicked.connect(self.engine.defocus_minus )
+     layout1.addWidget(btn, 2,2 )
+
 
      self.widget_mode_buttons = QWidget()
      layoutStatusButtons = QHBoxLayout(self.widget_mode_buttons)
@@ -1072,7 +1081,9 @@ class NextWaveMainWindow(QMainWindow):
  def slider_exposure_changed(self):
      scaled = 10**( float( self.slider_exposure.value())/100.0*np.log10(CAM_EXPO_MAX/CAM_EXPO_MIN)+np.log10(CAM_EXPO_MIN))
      self.exposure.setValue(scaled)
-     self.sockets.camera.send(b"E=%f\x00"%(scaled*1000) ) # Convert to usec
+     msg=b"E=%f\x00"%(scaled*1000)
+     print(msg)
+     self.sockets.camera.send( msg ) # Convert to usec
 
  def slider_gain_changed(self):
      scaled = self.slider_gain.value()/100.0*CAM_GAIN_MAX
