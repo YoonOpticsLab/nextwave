@@ -301,7 +301,15 @@ PLUGIN_API(centroiding,init,char *params)
 
   //process_ui_commands(); // First read/check opens the pipe that Python UI sockets needs
 
-  spdlog::info("Ok");
+  //spdlog::info("Ok");
+
+#if 0
+// In  ALPAO now to clear mirror_voltages and zero DM
+    struct shmem_boxes_header* pShmemBoxes = (struct shmem_boxes_header*) shmem_region3.get_address();
+  	for (int i=0; i<nActuators; i++) {
+	  pShmemBoxes->mirror_voltages[i]=0;
+	}		
+#endif //0	
 
   return 0;
 }
@@ -401,19 +409,20 @@ int find_centroids_af(unsigned char *buffer, int width, int height) {
 
   CALC_TYPE *host_delta_x = gaf->delta_x.host<CALC_TYPE>();
   CALC_TYPE *host_delta_y = gaf->delta_y.host<CALC_TYPE>();
-  memcpy(pShmemBoxes->delta_x, host_delta_x, sizeof(CALC_TYPE)*num_boxes);
-  memcpy(pShmemBoxes->delta_y, host_delta_y, sizeof(CALC_TYPE)*num_boxes);
+  //memcpy(pShmemBoxes->delta_x, host_delta_x, sizeof(CALC_TYPE)*num_boxes);
+  //memcpy(pShmemBoxes->delta_y, host_delta_y, sizeof(CALC_TYPE)*num_boxes);
 
   // If want to log deltas:
-  memcpy(gpShmemLog[gpShmemHeader->total_frames].centroid_x, host_delta_x, sizeof(CALC_TYPE)*num_boxes);
-  memcpy(gpShmemLog[gpShmemHeader->total_frames].centroid_y, host_delta_y, sizeof(CALC_TYPE)*num_boxes);
+  //memcpy(gpShmemLog[gpShmemHeader->total_frames].centroid_x, host_delta_x, sizeof(CALC_TYPE)*num_boxes);
+  //memcpy(gpShmemLog[gpShmemHeader->total_frames].centroid_y, host_delta_y, sizeof(CALC_TYPE)*num_boxes);
 
   // Assumed that the dimensions of infl match
   gaf->slopes = af::join(0, gaf->delta_x, gaf->delta_y);
   gaf->slopes = af::moddims(gaf->slopes,af::dim4(1,num_boxes*2,1,1) ); // like flatten, but in 2nd dimension
-  gaf->slopes /= (24000.0/10.0) * (992.0/1000.0);  // TODO
-  //gaf->slopes /= (focal_um/pupil_radius_um); //? * (height/1000.0); 
-  
+  //gaf->slopes /= (24000.0/10.0) * (992.0/1000.0);  // TODO
+  double focal_um=4048.7; // TODO
+  gaf->slopes /= (focal_um/pixel_um); //? * (height/1000.0); 
+
   gaf->mirror_voltages = af::matmul(gaf->slopes, gaf->influence_inv );
   double *host_mirror_voltages = gaf->mirror_voltages.host<double>();
 
@@ -425,18 +434,19 @@ int find_centroids_af(unsigned char *buffer, int width, int height) {
   }
 #endif //0
 
-
 #if VERBOSE
   spdlog::info("Val0 x,y: {},{}",host_x[0],host_y[0]);
-	spdlog::info("Count: {}", (float)af::count<float>(sums_x));
+  spdlog::info("Count: {}", (float)af::count<float>(sums_x));
 #endif
 
   memcpy(pShmemBoxes->centroid_x, host_x, sizeof(CALC_TYPE)*num_boxes);
   memcpy(pShmemBoxes->centroid_y, host_y, sizeof(CALC_TYPE)*num_boxes);
 
-  memcpy(pShmemBoxes->mirror_voltages, host_mirror_voltages, sizeof(float)*nActuators);
+  //memcpy(pShmemBoxes->mirror_voltages, host_mirror_voltages, sizeof(float)*nActuators);
 
-	if ((pShmem->mode == 3 || pShmem->mode==9) && 0 ) { // Closed loop
+    auto save1 = pShmemBoxes->mirror_voltages[0];
+
+	if ((pShmem->mode == 3 || pShmem->mode==9) ) { // Closed loop
 	
 		double mirror_min=10, mirror_max=-10, mirror_mean=0;
 		for (int i=0; i<nActuators; i++) {
@@ -451,6 +461,7 @@ int find_centroids_af(unsigned char *buffer, int width, int height) {
 				pShmemBoxes->mirror_voltages[i]=CLIPVAL;
 			if (pShmemBoxes->mirror_voltages[i] < -CLIPVAL)
 				pShmemBoxes->mirror_voltages[i]=-CLIPVAL;
+			
 			if (!std::isfinite(pShmemBoxes->mirror_voltages[i]) ) {
 				pShmemBoxes->mirror_voltages[i]=0; // ? flatten to zero if nan/inf
 			}
@@ -467,10 +478,11 @@ int find_centroids_af(unsigned char *buffer, int width, int height) {
 		// Memory Log: for debugging
 		memcpy(gpShmemLog[gpShmemHeader->total_frames].mirrors, pShmemBoxes->mirror_voltages, sizeof(CALC_TYPE)*nActuators);
 		mirror_mean /= nActuators;
+		
+		//spdlog::info("Mirror {}:{}/{} 0:{} 00:{}", (double)mirror_mean, (double)mirror_min, (double) mirror_max, (double)pShmemBoxes->mirror_voltages[0], (double)save1 );
 	} // if closed loop
 
   af::freeHost(host_mirror_voltages);
-  spdlog::info("Mirror {}:{}/{} 0:{}", (double)mirror_mean, (double)mirror_min, (double) mirror_max, (double)pShmemBoxes->mirror_voltages[0] );
 
   af::freeHost(host_x);
   af::freeHost(host_y);
@@ -533,7 +545,7 @@ void process_ui_commands(void) {
       break;
     case 'T':
       fThreshold=atof(msg+1);
-      spdlog::info("T={}",fThreshold);
+      //spdlog::info("T={}",fThreshold);
       bDoThreshold=1;
       break;
     case 't':
@@ -557,12 +569,13 @@ PLUGIN_API(centroiding,process,char *params)
   struct shmem_boxes_header* pShmemBoxes = (struct shmem_boxes_header*) shmem_region3.get_address();
   //wait_for_lock(&pShmemBoxes->lock);
 
-  //spdlog::info("ok1");
-
 	memcpy((void*)buffer,
          ((const char *)(shmem_region2.get_address()))+height*width*nCurrRing, height*width);
 
-  //spdlog::info("ok1.5");
+  //double total=0;
+  //for (int n=0; n<1000; n++)
+	//  total += buffer[n]; 
+  //spdlog::info("Centroiding_process ring: {} {}",nCurrRing,total/1000.0);
 
   if (params[0]=='I') {
     rcv_boxes(width);
@@ -570,10 +583,7 @@ PLUGIN_API(centroiding,process,char *params)
     spdlog::info("Centroiding Dims: {}x{} pixel0:{}", width, height, int(buffer[0])) ;
   }
 
-  //spdlog::info("ok2");
-
   find_centroids_af(buffer, width, height);
-  //spdlog::info("ok3");
 
   //unlock(&pShmemBoxes->lock);
 	return 0;
