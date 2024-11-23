@@ -297,12 +297,12 @@ class NextwaveEngine():
 
     def update_influence(self):
         #try: # TODO: check that file exists, etc.
-        influence = np.loadtxt(self.ui.json_data["params"]["influence_file"], skiprows=1)
+        influence = np.loadtxt(self.ui.json_data["params"]["influence_file"], skiprows=0)
         #except:
             #influence = np.random.normal ( loc=0, scale=0.01, size=(97, self.num_boxes * 2)  )
         valid_idx=np.sum(influence**2,0)>0 # TODO... base on pupil size or something?
         self.influence = influence[:, valid_idx]
-        self.influence_inv = np.linalg.pinv(self.influence) # pseudoinverse
+        self.influence_inv = self.influence.T # np.linalg.pinv(self.influence) # pseudoinverse
         self.nActuators=self.influence.shape[0]
         self.nTerms=self.influence.shape[1]
 
@@ -419,14 +419,12 @@ class NextwaveEngine():
             self.offline.offline_centroids()
             return
 
-        self.mode=2
         if reinit:
             self.init_params()
             self.update_searchboxes()
 
         val=3 if (self.ui.chkLoop.isChecked() and allow_AO) else 2
-        buf = ByteStream()
-
+        self.mode=2 # Different mode??
         self.comm.set_mode(val)
 
     def mode_run(self, reinit=True, numruns=1):
