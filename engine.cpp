@@ -308,6 +308,7 @@ int main(int argc, char** argv)
   char str_message[64] = "    "; //.c_str();
   long int pipeline_count=0;
   uint8_t bRunning=0;
+  uint8_t nAOSkipFrames=0;
   boost::chrono::high_resolution_clock::time_point time_start = boost::chrono::high_resolution_clock::now();
 
   while ( pShmem1->mode!=MODE_QUIT  ) {
@@ -315,6 +316,21 @@ int main(int argc, char** argv)
     //spdlog::info("Mode: {}, Frames lefT: {}", pShmem1->mode, pShmem1->frames_left);
 
     if (pShmem1->mode > MODE_READY ) {
+
+      if (pShmem1->mode & MODE_FORCE_AO_START )  {
+        nAOSkipFrames=3;
+        pShmem1->mode ^= MODE_FORCE_AO_START;
+        pShmem1->mode |= MODE_FORCE_AO_DURING;
+        spdlog::info("Force Start");
+      }
+      if (pShmem1->mode ^ MODE_FORCE_AO_DURING )  {
+        nAOSkipFrames--;
+        spdlog::info("Force During");
+        if (nAOSkipFrames==0) {
+          pShmem1->mode ^= MODE_FORCE_AO_DURING;
+          spdlog::info("Force Out");
+        }
+      }
 
       if (pShmem1->mode == MODE_RUNONCE_CENTROIDING_AO) {
         str_message[0]='I'; // Re-init on "snap"
