@@ -47,10 +47,13 @@
 #include <Windows.h>
 
 // For NextWave Plugin
-#include "nextwave_plugin.hpp"
-#pragma pack(push,1)
-#include "memory_layout.h"
-#pragma pack(pop) // restore previous setting
+#include "nextwave_plugin.cpp"
+
+#include "nextwave_plugin.hpp" // Just DECL
+
+//#pragma pack(push,1)
+//#include "memory_layout.h"
+//#pragma pack(pop) // restore previous setting
 
 // Add this directory (right-click on project in solution explorer, etc.)
 //#include "C:\Users\drcoates\Documents\code\nextwave\boost_1_83_0"
@@ -362,9 +365,6 @@ int DisableGVCPHeartbeat(CameraPtr pCam)
     return ConfigureGVCPHeartbeat(pCam, false);
 }
 
-
-
-	
 // Global variable:
 CameraPtr pCam = nullptr;
 CameraList camList;
@@ -379,7 +379,7 @@ int AcquireImages(CameraPtr pCam) //, INodeMap& nodeMap, INodeMap& nodeMapTLDevi
 {
     int result = 0;
 
-#if 1
+#if 0
     windows_shared_memory shmem(open_or_create, SHMEM_HEADER_NAME, read_write, (size_t)SHMEM_HEADER_SIZE);
     mapped_region shmem_region{ shmem, read_write };
 
@@ -420,34 +420,37 @@ int AcquireImages(CameraPtr pCam) //, INodeMap& nodeMap, INodeMap& nodeMapTLDevi
                     const size_t width = pResultImage->GetWidth();
                     const size_t height = pResultImage->GetHeight();
 
+                    nCurrRing += 1;
+                    if (nCurrRing >= NW_MAX_FRAMES) nCurrRing = 0;
+
                     ImagePtr convertedImage = processor.Convert(pResultImage, PixelFormat_Mono8);
 
-                    struct shmem_header* pShmem = (struct shmem_header*) shmem_region.get_address();
+                    //struct shmem_header* pShmem = (struct shmem_header*) shmem_region.get_address();
 
-                    pShmem->lock = (uint8_t)1; // Everyone keep out until we are done!
+                    gpShmemHeader->lock = (uint8_t)1; // Everyone keep out until we are done!
 
                     // Don't need to write these each time:
-                    pShmem->header_version = (uint8_t)NW_HEADER_VERSION;
-                    pShmem->dimensions[0] = (uint16_t)height;
-                    pShmem->dimensions[1] = (uint16_t)width;
-                    pShmem->dimensions[2] = (uint16_t)0;
-                    pShmem->dimensions[3] = (uint16_t)0;
-                    pShmem->datatype_code = (uint8_t)7;
-                    pShmem->max_frames = (uint8_t)NW_MAX_FRAMES;
+                    gpShmemHeader->header_version = (uint8_t)NW_HEADER_VERSION;
+                    gpShmemHeader->dimensions[0] = (uint16_t)height;
+                    gpShmemHeader->dimensions[1] = (uint16_t)width;
+                    gpShmemHeader->dimensions[2] = (uint16_t)0;
+                    gpShmemHeader->dimensions[3] = (uint16_t)0;
+                    gpShmemHeader->datatype_code = (uint8_t)7;
+                    gpShmemHeader->max_frames = (uint8_t)NW_MAX_FRAMES;
 
                     // For current frame:
-                    pShmem->current_frame = (uint8_t)nCurrRing;
-                    pShmem->timestamps[nCurrRing] = (uint8_t)NW_STATUS_READ;
-                    pShmem->timestamps[nCurrRing] = convertedImage->GetTimeStamp();
+                    gpShmemHeader->current_frame = (uint8_t)nCurrRing;
+                    gpShmemHeader->timestamps[nCurrRing] = (uint8_t)NW_STATUS_READ;
+                    gpShmemHeader->timestamps[nCurrRing] = convertedImage->GetTimeStamp();
 
                     memcpy( ((uint8_t *)(shmem_region2.get_address())+height*width*nCurrRing),
                         (void*)convertedImage->GetData(),
                         height*width);
 
-                    pShmem->lock = (uint8_t)0; // Keep out until we are done!
+                    gpShmemHeader->lock = (uint8_t)0; // Keep out until we are done!
 
-                    nCurrRing += 1;
-                    if (nCurrRing >= NW_MAX_FRAMES) nCurrRing = 0;
+					//spdlog::info("Acquired: {}",nCurrRing);
+  
                 }
 
                 pResultImage->Release();
@@ -627,6 +630,8 @@ int ConfigureExposure(INodeMap& nodeMap, double exposureTimeToSet)
 // comments on preparing and cleaning up the system.
 DECL init(void)
 {
+	 plugin_access_shmem();
+	 
     // Print application build information
     cout << "Application build date: " << __DATE__ << " " << __TIME__ << endl << endl;
 
@@ -734,7 +739,7 @@ DECL init(void)
 
         //cout << "Acquisition mode set to continuous..." << endl;
 
-		ConfigureExposure(nodeMap, 50);
+		ConfigureExposure(nodeMap, 80000);
 
     ConfigureTrigger(nodeMap);
 
@@ -791,7 +796,8 @@ DECL init(void)
 	return 0;
 }
 
-DECL process(void) {
+//PLUGIN_API(flir,process,char *params)
+DECL process(char *params) {
     int result = 0;
 
     // Run example on each camera
