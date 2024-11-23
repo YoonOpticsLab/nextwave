@@ -568,6 +568,15 @@ class NextWaveMainWindow(QMainWindow):
     self.reload_config(filename)
     self.edit_xml_filename.setText(filename)
 
+ def load_mirror_file(self):
+    ffilt='Mirror file (*.mir);;'
+    thedir = QFileDialog.getOpenFileNames(self, "Choose file", ".", ffilt );
+    try:
+        filename = thedir[0][0]
+    except:
+        return # cancel   
+    self.engine.load_mirror_file(filename)
+
  def reload_config(self,filename=None):
      if filename is None:
          filename = self.json_data["params"]["xml_file"]
@@ -897,6 +906,10 @@ class NextWaveMainWindow(QMainWindow):
      self.chkFollow.stateChanged.connect(lambda:self.set_follow(self.chkFollow.isChecked()))
      layout1.addWidget(self.chkFollow, 1,3 )
 
+     btn = QPushButton("Load mirror file")
+     btn.clicked.connect(self.load_mirror_file )
+     layout1.addWidget(btn, 1,2 )
+     
      btn = QPushButton("Search box RESET")
      btn.clicked.connect(self.engine.reset_search_boxes )
      layout1.addWidget(btn, 1,1 )

@@ -397,13 +397,18 @@ class NextwaveEngine():
             return self.comm.receive_centroids()
 
     def zero_do(self):
-        self.write_mirrors( np.zeros(97) ) # TODO
+        self.comm.write_mirrors( np.zeros(97) ) # TODO: num act
+        self.comm.set_mode( # MODE_FORCE_AO_START TODO
+            self.comm.read_mode() | 0x20 ) 
 
+    def load_mirror_file(self,fname):
+        mirrors = np.loadtxt(fname, skiprows=1)
+        self.comm.write_mirrors( mirrors )
+        
     def flat_do(self):
-        self.write_mirrors( self.mirror_state_flat )
-
+        self.comm.flat_do()
     def flat_save(self):
-        self.mirror_state_flat = np.copy(self.mirror_voltages)
+        self.comm.flat_save()
 
     def send_quit(self):
         self.comm.set_mode(255) # TODO: Get from file

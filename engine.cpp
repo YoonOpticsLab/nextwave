@@ -323,7 +323,8 @@ int main(int argc, char** argv)
         pShmem1->mode |= MODE_FORCE_AO_DURING;
         spdlog::info("Force Start");
       }
-      if (pShmem1->mode ^ MODE_FORCE_AO_DURING )  {
+	  
+      if (pShmem1->mode & MODE_FORCE_AO_DURING )  {
         nAOSkipFrames--;
         spdlog::info("Force During");
         if (nAOSkipFrames==0) {
