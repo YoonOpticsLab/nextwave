@@ -317,13 +317,14 @@ int main(int argc, char** argv)
 
     if (pShmem1->mode > MODE_READY ) {
 
+		
       if (pShmem1->mode & MODE_FORCE_AO_START )  {
         nAOSkipFrames=3;
         pShmem1->mode ^= MODE_FORCE_AO_START;
         pShmem1->mode |= MODE_FORCE_AO_DURING;
         spdlog::info("Force Start");
       }
-      if (pShmem1->mode ^ MODE_FORCE_AO_DURING )  {
+      if (pShmem1->mode & MODE_FORCE_AO_DURING )  { // During this, centroiding will not write mirrors
         nAOSkipFrames--;
         spdlog::info("Force During");
         if (nAOSkipFrames==0) {
