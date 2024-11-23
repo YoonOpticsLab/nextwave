@@ -208,7 +208,7 @@ class ActuatorPlot(QLabel):
     def paintEvent_manual(self): #, p, *args):
         #mirror_vals=np.array(np.random.normal(size=(97)) )
         #mirror_vals=np.linspace(-0.99,0.99,97)
-        mirror_vals = self.ui_parent.engine.mirror_voltages 
+        mirror_vals = self.ui_parent.engine.comm.mirror_voltages 
         self.bits[ self.map_cols,self.map_rows] = mirror_vals * 128 + 128
         #for y in np.arange(11):
             #for x in np.arange(11):

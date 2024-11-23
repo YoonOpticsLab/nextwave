@@ -22,7 +22,7 @@ import iterative
 from nextwave_comm import NextwaveEngineComm
 from offline import NextwaveOffline
 
-import ffmpegcv # Read AVI... Better than OpenCV (built-in ffmpeg?)
+#import ffmpegcv # Read AVI... Better than OpenCV (built-in ffmpeg?)
 
 from PIL import Image, TiffImagePlugin
 
@@ -36,23 +36,7 @@ BOX_THRESH=2.5
 
 OFFLINE_ITERATIVE_START=3.0
 OFFLINE_ITERATIVE_STEP=0.25
-#0=horizontal, 1=vertical,3=defocus?
 
-'''
-Zernike order, first mode in that order:
-0 0
-1 1
-2 3
-3 6
-4 10
-5 15
-6 21
-7 28
-8 36
-9 45
-10 55
-11 66
-'''
 
 MEM_LEN=512
 MEM_LEN_DATA=2048*2048*4
@@ -312,8 +296,7 @@ class NextwaveEngine():
         #np.save('zpoly.npy',zpoly)
 
     def update_influence(self):
-        return # TODO: Check for AO and pull correct file
-        #try:
+        #try: # TODO: check that file exists, etc.
         influence = np.loadtxt(self.ui.json_data["params"]["influence_file"], skiprows=1)
         #except:
             #influence = np.random.normal ( loc=0, scale=0.01, size=(97, self.num_boxes * 2)  )
@@ -423,7 +406,7 @@ class NextwaveEngine():
         self.mirror_state_flat = np.copy(self.mirror_voltages)
 
     def send_quit(self):
-        self.comm.set_mode(255)
+        self.comm.set_mode(255) # TODO: Get from file
 
     def mode_init(self):
         self.mode=1
@@ -450,9 +433,6 @@ class NextwaveEngine():
         self.mode=3
         if reinit:
             self.init_params()
-
-        fields=self.layout[1]
-        buf = ByteStream()
 
         val= np.array( numruns, dtype='uint64' )
         #val= np.array( self.ui.edit_num_runs.text(), dtype='uint64' )

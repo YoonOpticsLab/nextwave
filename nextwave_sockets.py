@@ -60,7 +60,7 @@ class NextwaveSocketComm():
         if "plugin_alpao" in self.ui.json_data:
             self.alpao = SocketComponent(SOCKET_ALPAO)
         else:
-            print("loaded Dumpmy AO")
+            print("loaded Dummy AO")
             self.alpao = SocketDummy(SOCKET_ALPAO)
         self.alpao.init()
 

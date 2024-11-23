@@ -22,7 +22,7 @@ import iterative
 
 from nextwave_comm import NextwaveEngineComm
 
-import ffmpegcv # Read AVI... Better than OpenCV (built-in ffmpeg?)
+#import ffmpegcv # Read AVI... Better than OpenCV (built-in ffmpeg?)
 
 from PIL import Image, TiffImagePlugin # Needed
 

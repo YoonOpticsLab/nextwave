@@ -408,28 +408,14 @@ int find_centroids_af(unsigned char *buffer, int width, int height) {
   memcpy(gpShmemLog[gpShmemHeader->total_frames].centroid_x, host_delta_x, sizeof(CALC_TYPE)*num_boxes);
   memcpy(gpShmemLog[gpShmemHeader->total_frames].centroid_y, host_delta_y, sizeof(CALC_TYPE)*num_boxes);
 
-	//spdlog::info("CEN good1");
-
-#if 1
   // Assumed that the dimensions of infl match
   gaf->slopes = af::join(0, gaf->delta_x, gaf->delta_y);
   gaf->slopes = af::moddims(gaf->slopes,af::dim4(1,num_boxes*2,1,1) ); // like flatten, but in 2nd dimension
-  gaf->slopes /= (24000.0/10.0) * (992.0/1000.0); 
+  gaf->slopes /= (24000.0/10.0) * (992.0/1000.0);  // TODO
   //gaf->slopes /= (focal_um/pupil_radius_um); //? * (height/1000.0); 
   
-	//spdlog::info("CEN good2");
-
-#if 0
   gaf->mirror_voltages = af::matmul(gaf->slopes, gaf->influence_inv );
   double *host_mirror_voltages = gaf->mirror_voltages.host<double>();
-#endif //0
-
-	//spdlog::info("CEN good3");
-#endif //0
-  //spdlog::info( '{}',  (float)af::mean<float>(gaf->influence_inv) );
-  //spdlog::info("INF MAX: {}", (float)af::max<float>(gaf->influence_inv));
-  //spdlog::info("Mirror {} max: {} 0:{}",(float)af::count<float>(gaf->mirror_voltages) , (float)af::max<float>(gaf->mirror_voltages),
-	//host_mirror_voltages[0]);
 
 #if 0
   if (pShmemBoxes->header_version & 2) //Follow // TODO
@@ -448,8 +434,7 @@ int find_centroids_af(unsigned char *buffer, int width, int height) {
   memcpy(pShmemBoxes->centroid_x, host_x, sizeof(CALC_TYPE)*num_boxes);
   memcpy(pShmemBoxes->centroid_y, host_y, sizeof(CALC_TYPE)*num_boxes);
 
-#if 0 // memcpy back into shmem.. NEED!
-  //memcpy(pShmemBoxes->mirror_voltages, host_mirror_voltages, sizeof(float)*nActuators);
+  memcpy(pShmemBoxes->mirror_voltages, host_mirror_voltages, sizeof(float)*nActuators);
 
 	if ((pShmem->mode == 3 || pShmem->mode==9) && 0 ) { // Closed loop
 	
@@ -479,19 +464,17 @@ int find_centroids_af(unsigned char *buffer, int width, int height) {
 			mirror_mean += pShmemBoxes->mirror_voltages[i];
 		}
 		
+		// Memory Log: for debugging
 		memcpy(gpShmemLog[gpShmemHeader->total_frames].mirrors, pShmemBoxes->mirror_voltages, sizeof(CALC_TYPE)*nActuators);
 		mirror_mean /= nActuators;
 	} // if closed loop
 
   af::freeHost(host_mirror_voltages);
-  //spdlog::info("Mirror {}:{}/{} 0:{}", (double)mirror_mean, (double)mirror_min, (double) mirror_max, (double)pShmemBoxes->mirror_voltages[0] );
-#endif //1
+  spdlog::info("Mirror {}:{}/{} 0:{}", (double)mirror_mean, (double)mirror_min, (double) mirror_max, (double)pShmemBoxes->mirror_voltages[0] );
 
   af::freeHost(host_x);
   af::freeHost(host_y);
 
-	//spdlog::info("MirrorSHM {}:", (float) pShmemBoxes->mirror_voltages[0] );
-	
 	if (0) {
 		af_print( gaf->sums_x );
 		af_print( gaf->sums_y );

@@ -1,10 +1,25 @@
 import numpy as np
 
 MAX_ZERNIKES=65 # Absolute max for 10th order: np.sum( np.arange(10+1+1))-1 .first of 11th order is np.sum(np.arange(12)) )
-MAX_ORDER=10
+MAX_ORDER=10 #What is this for?
+NUM_ZCS=21 # What is this for?
+#0=horizontal, 1=vertical,3=defocus?
 
-NUM_ZCS=21 # 
-START_ZC=1
+'''
+Zernike order, first mode in that order:
+0 0
+1 1
+2 3
+3 6
+4 10
+5 15
+6 21
+7 28
+8 36
+9 45
+10 55
+11 66
+'''
 
 # Order copied from MATLAB code
 CVS_to_OSA_map = np.array([ 3, 2,
