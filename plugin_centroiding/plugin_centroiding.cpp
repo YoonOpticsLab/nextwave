@@ -425,7 +425,6 @@ int find_centroids_af(unsigned char *buffer, int width, int height) {
   }
 #endif //0
 
-
 #if VERBOSE
   spdlog::info("Val0 x,y: {},{}",host_x[0],host_y[0]);
 	spdlog::info("Count: {}", (float)af::count<float>(sums_x));
@@ -434,9 +433,9 @@ int find_centroids_af(unsigned char *buffer, int width, int height) {
   memcpy(pShmemBoxes->centroid_x, host_x, sizeof(CALC_TYPE)*num_boxes);
   memcpy(pShmemBoxes->centroid_y, host_y, sizeof(CALC_TYPE)*num_boxes);
 
-  memcpy(pShmemBoxes->mirror_voltages, host_mirror_voltages, sizeof(float)*nActuators);
+  //memcpy(pShmemBoxes->mirror_voltages, host_mirror_voltages, sizeof(float)*nActuators);
 
-	if ((pShmem->mode == 3 || pShmem->mode==9) && 0 ) { // Closed loop
+	if ((pShmem->mode == 3 || pShmem->mode==9) ) { // Closed loop
 	
 		double mirror_min=10, mirror_max=-10, mirror_mean=0;
 		for (int i=0; i<nActuators; i++) {
@@ -467,10 +466,10 @@ int find_centroids_af(unsigned char *buffer, int width, int height) {
 		// Memory Log: for debugging
 		memcpy(gpShmemLog[gpShmemHeader->total_frames].mirrors, pShmemBoxes->mirror_voltages, sizeof(CALC_TYPE)*nActuators);
 		mirror_mean /= nActuators;
+		spdlog::info("Mirror {}:{}/{} 0:{}", (double)mirror_mean, (double)mirror_min, (double) mirror_max, (double)pShmemBoxes->mirror_voltages[0] );
 	} // if closed loop
 
   af::freeHost(host_mirror_voltages);
-  spdlog::info("Mirror {}:{}/{} 0:{}", (double)mirror_mean, (double)mirror_min, (double) mirror_max, (double)pShmemBoxes->mirror_voltages[0] );
 
   af::freeHost(host_x);
   af::freeHost(host_y);
