@@ -40,7 +40,7 @@ DECL init(void)
   spdlog::info("ALPAO DM2");
 
 #if REAL_AO  
-  dm = new acs::DM( "BAX492" );
+  dm = new acs::DM( "BAX549" );
   num_act = (int)dm->Get( "NbOfActuator" );
 #else
   num_act=97;
@@ -57,7 +57,12 @@ DECL init(void)
 #if REAL_AO
 	dm->Send(data);
 #endif
-	  
+
+	// Also clear out the values in shared memory structure
+  	for (auto i=0; i<num_act; i++) {
+	  gpShmemBoxes->mirror_voltages[i]=0;
+	}
+	
   return 0;
 }
 
@@ -106,8 +111,8 @@ DECL process(char *commands)
   
   mymean /= num_act;
   
-  spdlog::info("DM Loop:{} #{}:{}x{} {}{} min:{:0.4f} max:{:0.4f}, mean:{:0.4f} 0:{:0.4f} 1:{:0.4f} {}", loop, nCurrRing, height, width,
-		commands[0], commands[1], mymin, mymax, mymean, data[0], data[1], val );
+  //spdlog::info("DM Loop:{} #{}:{}x{} {}{} min:{:0.4f} max:{:0.4f}, mean:{:0.4f} 0:{:0.4f} 1:{:0.4f} {}", loop, nCurrRing, height, width,
+	//	commands[0], commands[1], mymin, mymax, mymean, data[0], data[1], val );
   
   if (loop) {
 #if REAL_AO	 
