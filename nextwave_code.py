@@ -5,7 +5,7 @@ import time
 
 import matplotlib.cm as cmap
 #from numba import jit
-from numpy.linalg import svd,lstsq
+from numpy.linalg import svd,lstsq,pinv
 import scipy
 from scipy.optimize import minimize
 
@@ -72,6 +72,7 @@ class NextwaveEngine():
         self.offline = NextwaveOffline(self)
         self.num_boxes = 0
         self.zernikes = None
+        self.defocus = 0
 
     def init(self):
         if not self.ui.offline_only:
@@ -86,7 +87,7 @@ class NextwaveEngine():
         self.focal =     self.ui.get_param_xml("LENSLETS_LensletFocalLength")/1000.0
         self.box_um =    self.ui.get_param_xml("LENSLETS_LensletPitch")
         self.ccd_pixel = self.ui.get_param_xml("CAMERA1_CameraPixelPitch")
-        self.pupil_diam =self.ui.get_param_xml("OPTICS_PupilDiameter")
+        self.pupil_diam =self.ui.get_param_xml("OPTICS_PupilDiameter") * self.ui.get_param_xml("OPTICS_PupilMagnificationFactor")
 
         if overrides:
             self.pupil_diam=overrides.get('pupil_diam',self.pupil_diam)
@@ -279,7 +280,7 @@ class NextwaveEngine():
             leftside = lstsq(ss_full, vv, rcond=0)[0].T # Python equiv to MATLAB's vv/ss (solving system of eqns) is lstsq
             # https://stackoverflow.com/questions/1001634/array-division-translating-from-matlab-to-python
             zterms = np.matmul( leftside, uu.T)
-            zterms_inv = np.linalg.pinv(zterms)
+            zterms_inv = pinv(zterms)
 
             if nsubset==0:
                 self.zterms_full=zterms
@@ -300,11 +301,16 @@ class NextwaveEngine():
         influence = np.loadtxt(self.ui.json_data["params"]["influence_file"], skiprows=0)
         #except:
             #influence = np.random.normal ( loc=0, scale=0.01, size=(97, self.num_boxes * 2)  )
-        valid_idx=np.sum(influence**2,0)>0 # TODO... base on pupil size or something?
-        self.influence = influence[:, valid_idx]
-        self.influence_inv = self.influence.T # np.linalg.pinv(self.influence) # pseudoinverse
+        #valid_idx=np.sum(influence**2,0)>0 # TODO... base on pupil size or something?
+        self.influence = np.zeros( (97, influence.shape[1]) ) #influence[:, valid_idx]
+        self.influence[ 0:influence.shape[0] ] = influence
+        self.influence_inv = self.influence.T
+        
+        self.influence = pinv( self.influence_inv ) # New way: read the interaction
+        
         self.nActuators=self.influence.shape[0]
         self.nTerms=self.influence.shape[1]
+        np.save('influ', self.influence_inv )
 
     def compute_zernikes(self):
         # find slope
@@ -368,6 +374,30 @@ class NextwaveEngine():
         self.zs = zs
         return delta_x,delta_y
 
+    def defocus_do(self):
+        zs= np.zeros(20)
+        zs[3] = self.defocus
+        dx,dy = self.get_deltas(zs, False)
+        self.box_x = self.initial_x - dx
+        self.box_y = self.initial_y + dy
+        self.comm.send_searchboxes(self.box_x, self.box_y)
+        
+        dx -= np.mean(dx)
+        dy -= np.mean(dy)
+        mat1 = np.vstack( (dx,dy) )
+        mirs = np.matmul ( self.influence, mat1 )
+
+        print( np.mean( mirs) )
+        #write_mirrors_offsets(mirs)
+        print(self.defocus)
+    
+    def defocus_plus(self):
+        self.defocus += 0.1
+        self.defocus_do();
+        
+    def defocus_minus(self):
+        self.defocus -= 0.1
+        self.defocus_do();
 
     def shift_search_boxes(self,zs,from_dialog=True):
         #print( zs )
@@ -396,10 +426,11 @@ class NextwaveEngine():
         if self.ui.mode_offline==False: # If in offline, don't keep grabbing centroids from C++ engine
             return self.comm.receive_centroids()
 
+    def flat_do(self):
+        self.comm.flat_do()
+
     def zero_do(self):
-        self.comm.write_mirrors( np.zeros(97) ) # TODO: num act
-        self.comm.set_mode( # MODE_FORCE_AO_START TODO
-            self.comm.read_mode() | 0x20 ) 
+        self.comm.zero_do()
 
     def load_mirror_file(self,fname):
         mirrors = np.loadtxt(fname, skiprows=1)
@@ -469,12 +500,12 @@ class NextwaveEngine():
         np.save('dx',self.spot_displace_x)
         np.save('dy',self.spot_displace_y)
         np.save('slope',self.slope)
-        np.save('zterms_full',self.zterms_full)
-        np.save('zterms_inv',self.zterms_inv)
+        #np.save('zterms_full',self.zterms_full)
+        #np.save('zterms_inv',self.zterms_inv)
 
         try:
-            np.savetxt('mirror_voltages.txt',self.mirror_voltages)
+            np.savetxt('mirror_voltages.txt',self.comm.mirror_voltages)
         except:
             pass
 
-        self.engine.dump_vars()
+        self.dump_vars()
