@@ -890,7 +890,7 @@ class NextWaveMainWindow(QMainWindow):
      layout1.addWidget(btn, 1,0 )
 
      btn = QPushButton("Reference shift")
-     btn.clicked.connect(lambda: self.show_zernike_dialog("Shift references", self.engine.reset_references ) )
+     btn.clicked.connect(lambda: self.show_zernike_dialog("Shift references", self.engine.shift_references ) )
      layout1.addWidget(btn, 2,0 )
 
      self.chkFollow = QCheckBox("Boxes follow centroids")
