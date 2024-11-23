@@ -287,7 +287,7 @@ int main(int argc, char** argv)
   // Clear this before start anything since use as a sentinel
   pShmemBoxes->num_boxes=0;
 
-#define REP_LOG 20
+#define REP_LOG 10
 
 #define CLOCK_MULT 1e5
   typedef boost::chrono::duration<long long, boost::micro> microseconds_type;
@@ -427,11 +427,11 @@ int main(int argc, char** argv)
 	spdlog::info("Quit");
 	for (int pipeline_count=0; pipeline_count<REP_LOG; pipeline_count++)
     {
-      int modnum=0;
-      for (struct module it: listModules) {
-        spdlog::info("{}",ns[pipeline_count*2+modnum]);
-        modnum++;
-      }
+      //int modnum=0;
+      //for (struct module it: listModules) {
+        spdlog::info("{} {} {}",ns[pipeline_count*3+0],ns[pipeline_count*3+1],ns[pipeline_count*3+2]);
+        //modnum++;
+      //}
     }
 
   // iterate the array
