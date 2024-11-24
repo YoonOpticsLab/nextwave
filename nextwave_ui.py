@@ -420,6 +420,8 @@ class NextWaveMainWindow(QMainWindow):
     self.label_status0.setText(s)
     self.label_status0.setStyleSheet("color: rgb(0, 255, 0); background-color: rgb(0,0,0);")
 
+    self.label_defocus.setText( '%0.2f'%self.engine.defocus )
+
     if not self.engine.zernikes is None:
      if len(self.engine.zernikes)>0:
       self.show_zernike_plot()
@@ -926,6 +928,13 @@ class NextWaveMainWindow(QMainWindow):
      btn.clicked.connect(self.engine.defocus_minus )
      layout1.addWidget(btn, 2,2 )
 
+     # Not used
+     #btn = QPushButton("Defocus start")
+     #btn.clicked.connect(self.engine.defocus_start )
+     #layout1.addWidget(btn, 3,2 )
+     
+     self.label_defocus = QLabel("Status: ")
+     layout1.addWidget(self.label_defocus, 3,3)
 
      self.widget_mode_buttons = QWidget()
      layoutStatusButtons = QHBoxLayout(self.widget_mode_buttons)

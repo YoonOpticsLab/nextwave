@@ -77,6 +77,7 @@ class NextwaveEngine():
     def init(self):
         if not self.ui.offline_only:
             self.comm.init()
+            self.comm.set_mode(0)
         self.init_params()
 
     def init_params(self, overrides=None):
@@ -372,24 +373,38 @@ class NextwaveEngine():
         self.delta_y=delta_y
         self.zern_new = zern_new
         self.zs = zs
+
+        np.savetxt('zs_delta_x.txt',delta_x );
+        np.savetxt('zs_delta_y.txt',delta_y );
+        
         return delta_x,delta_y
 
     def defocus_do(self):
         zs= np.zeros(20)
-        zs[3] = self.defocus
+        zs[4] = self.defocus
         dx,dy = self.get_deltas(zs, False)
-        self.box_x = self.initial_x - dx
-        self.box_y = self.initial_y + dy
-        self.comm.send_searchboxes(self.box_x, self.box_y)
         
+        # As Reference Shift:
+        #self.ref_x = self.initial_x - dx
+        #self.ref_y = self.initial_y + dy
+        #self.comm.send_searchboxes(self.box_x, self.box_y)
+        
+        # Method2: Take current deltas, then add futher by dx
         dx -= np.mean(dx)
         dy -= np.mean(dy)
-        mat1 = np.vstack( (dx,dy) )
-        mirs = np.matmul ( self.influence, mat1 )
+        deltas1 = np.vstack( (dx,-dy) ).T.flatten()
+        deltas1 /= (self.focal*1000/self.ccd_pixel)
+        mirs = np.matmul ( deltas1, self.influence_inv )
 
-        print( np.mean( mirs) )
-        #write_mirrors_offsets(mirs)
+        print( np.mean( mirs), mirs[0:10] )
+        self.comm.write_mirrors_offsets(-mirs)
         print(self.defocus)
+
+    def defocus_start(self):
+        # One idea was to save a local copy of the "current" centroids, and use those in entire
+        # inverse calculations. Think it's not necessary though; can just add the mirror deltas.
+        self.centroids_x_save = self.centroids_x 
+        self.centroids_y_save = self.centroids_y
     
     def defocus_plus(self):
         self.defocus += 0.1
@@ -418,7 +433,8 @@ class NextwaveEngine():
         self.update_searchboxes()    
 
     def reset_references(self):
-        return
+        self.ref_x = self.initial_x
+        self.ref_y = self.initial_y
 
     def receive_image(self):
         return self.comm.receive_image()
