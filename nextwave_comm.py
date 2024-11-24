@@ -156,6 +156,7 @@ class NextwaveEngineComm():
         buf.append(self.parent.ccd_pixel,'d')
         buf.append(self.parent.box_um, 'd')
         buf.append(self.parent.pupil_radius_pixel*self.parent.ccd_pixel, 'd')
+        buf.append(self.parent.focal*1000.0, 'd')
 
         try: #TODO: Better to have a "if Ready"
             buf.append(self.parent.nTerms, 'H')

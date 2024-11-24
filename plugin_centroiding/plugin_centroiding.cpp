@@ -121,6 +121,7 @@ int nbuffer[BUF_SIZE];
 uint16_t num_boxes;
 double pixel_um;
 double box_size_float;
+double focal_length_um;
 int box_size;
 
 double pupil_radius_pixels;
@@ -182,6 +183,7 @@ void rcv_boxes(int width) {
   pixel_um = pShmemBoxes->pixel_um;
   pupil_radius_um = pShmemBoxes->pupil_radius_um;
   box_size_float = pShmemBoxes->box_um/pixel_um;
+  focal_length_um = pShmemBoxes->focal_um;
   box_size = (int)(box_size_float+0.5); // round up to nearest integer
 
   pupil_radius_pixels = pupil_radius_um/pixel_um*1000.0;
@@ -419,9 +421,7 @@ int find_centroids_af(unsigned char *buffer, int width, int height) {
   // Assumed that the dimensions of infl match
   gaf->slopes = af::join(0, gaf->delta_x, gaf->delta_y);
   gaf->slopes = af::moddims(gaf->slopes,af::dim4(1,num_boxes*2,1,1) ); // like flatten, but in 2nd dimension
-  //gaf->slopes /= (24000.0/10.0) * (992.0/1000.0);  // TODO
-  double focal_um=4048.7; // TODO
-  gaf->slopes /= (focal_um/pixel_um); //? * (height/1000.0); 
+  gaf->slopes /= (focal_length_um/pixel_um);
 
   gaf->mirror_voltages = af::matmul(gaf->slopes, gaf->influence_inv );
   double *host_mirror_voltages = gaf->mirror_voltages.host<double>();

@@ -13,6 +13,7 @@ struct shmem_boxes_header
 	double pixel_um;
 	double box_um;
 	double pupil_radius_um;
+  double focal_um;
 
 	uint16_t nTerms; // Influence Fn
 	uint16_t nActuators;
@@ -34,6 +35,7 @@ struct shmem_boxes_header
   CALC_TYPE delta_y[MAX_BOXES];
 
   CALC_TYPE mirror_voltages[MAX_MIRROR_VOLTAGES];
+  CALC_TYPE mirror_voltages_offset[MAX_MIRROR_VOLTAGES];
 };
 
 #define SHMEM_BUFFER_SIZE_BOXES 1+1+2+sizeof(CALC_TYPE)*3+4+MAX_BOXES*sizeof(CALC_TYPE)*10+1*MAX_BOXES+sizeof(CALC_TYPE)*MAX_TERMS*2+MAX_MIRROR_VOLTAGES*sizeof(CALC_TYPE)
