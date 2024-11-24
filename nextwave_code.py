@@ -5,7 +5,7 @@ import time
 
 import matplotlib.cm as cmap
 #from numba import jit
-from numpy.linalg import svd,lstsq
+from numpy.linalg import svd,lstsq,pinv
 import scipy
 from scipy.optimize import minimize
 
@@ -280,7 +280,7 @@ class NextwaveEngine():
             leftside = lstsq(ss_full, vv, rcond=0)[0].T # Python equiv to MATLAB's vv/ss (solving system of eqns) is lstsq
             # https://stackoverflow.com/questions/1001634/array-division-translating-from-matlab-to-python
             zterms = np.matmul( leftside, uu.T)
-            zterms_inv = np.linalg.pinv(zterms)
+            zterms_inv = pinv(zterms)
 
             if nsubset==0:
                 self.zterms_full=zterms
@@ -305,6 +305,9 @@ class NextwaveEngine():
         self.influence = np.zeros( (97, influence.shape[1]) ) #influence[:, valid_idx]
         self.influence[ 0:influence.shape[0] ] = influence
         self.influence_inv = self.influence.T
+        
+        self.influence = pinv( self.influence_inv ) # New way: read the interaction
+        
         self.nActuators=self.influence.shape[0]
         self.nTerms=self.influence.shape[1]
         np.save('influ', self.influence_inv )
@@ -371,26 +374,30 @@ class NextwaveEngine():
         self.zs = zs
         return delta_x,delta_y
 
+    def defocus_do(self):
+        zs= np.zeros(20)
+        zs[3] = self.defocus
+        dx,dy = self.get_deltas(zs, False)
+        self.box_x = self.initial_x - dx
+        self.box_y = self.initial_y + dy
+        self.comm.send_searchboxes(self.box_x, self.box_y)
+        
+        dx -= np.mean(dx)
+        dy -= np.mean(dy)
+        mat1 = np.vstack( (dx,dy) )
+        mirs = np.matmul ( self.influence, mat1 )
+
+        print( np.mean( mirs) )
+        #write_mirrors_offsets(mirs)
+        print(self.defocus)
+    
     def defocus_plus(self):
-        zs= np.zeros(20)
         self.defocus += 0.1
-        zs[3] = self.defocus
-        dx,dy = self.get_deltas(zs)
-        self.box_x = self.initial_x - dx
-        self.box_y = self.initial_y + dy
-        self.comm.send_searchboxes(self.box_x, self.box_y)
-        print(self.defocus)
-
+        self.defocus_do();
+        
     def defocus_minus(self):
-        zs= np.zeros(20)
         self.defocus -= 0.1
-        zs[3] = self.defocus
-        dx,dy = self.get_deltas(zs)
-        self.box_x = self.initial_x - dx
-        self.box_y = self.initial_y + dy
-        self.comm.send_searchboxes(self.box_x, self.box_y)
-        print(self.defocus)
-
+        self.defocus_do();
 
     def shift_search_boxes(self,zs,from_dialog=True):
         #print( zs )
@@ -425,11 +432,14 @@ class NextwaveEngine():
     def zero_do(self):
         self.comm.zero_do()
 
+    def load_mirror_file(self,fname):
+        mirrors = np.loadtxt(fname, skiprows=1)
+        self.comm.write_mirrors( mirrors )
+        
     def flat_do(self):
-        self.write_mirrors( self.mirror_state_flat )
-
+        self.comm.flat_do()
     def flat_save(self):
-        self.mirror_state_flat = np.copy(self.mirror_voltages)
+        self.comm.flat_save()
 
     def send_quit(self):
         self.comm.set_mode(255) # TODO: Get from file
@@ -445,14 +455,12 @@ class NextwaveEngine():
             self.offline.offline_centroids()
             return
 
-        self.mode=2
         if reinit:
             self.init_params()
             self.update_searchboxes()
 
         val=3 if (self.ui.chkLoop.isChecked() and allow_AO) else 2
-        buf = ByteStream()
-
+        self.mode=2 # Different mode??
         self.comm.set_mode(val)
 
     def mode_run(self, reinit=True, numruns=1):

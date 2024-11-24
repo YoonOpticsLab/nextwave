@@ -444,7 +444,7 @@ int find_centroids_af(unsigned char *buffer, int width, int height) {
 
   //memcpy(pShmemBoxes->mirror_voltages, host_mirror_voltages, sizeof(float)*nActuators);
 
-    auto save1 = pShmemBoxes->mirror_voltages[0];
+    auto save1 = pShmemBoxes->mirror_voltages[0]; // Debugging
 
 	if ((pShmem->mode == 3 || pShmem->mode==9) ) { // Closed loop
 	
@@ -480,6 +480,7 @@ int find_centroids_af(unsigned char *buffer, int width, int height) {
 		mirror_mean /= nActuators;
 		
 		//spdlog::info("Mirror {}:{}/{} 0:{} 00:{}", (double)mirror_mean, (double)mirror_min, (double) mirror_max, (double)pShmemBoxes->mirror_voltages[0], (double)save1 );
+
 	} // if closed loop
 
   af::freeHost(host_mirror_voltages);

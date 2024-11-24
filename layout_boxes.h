@@ -13,7 +13,7 @@ struct shmem_boxes_header
 	double pixel_um;
 	double box_um;
 	double pupil_radius_um;
-  double focal_um;
+	double focal_um;
 
 	uint16_t nTerms; // Influence Fn
 	uint16_t nActuators;

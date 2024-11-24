@@ -40,13 +40,11 @@ DECL init(void)
   spdlog::info("ALPAO DM2");
 
 #if REAL_AO  
-  dm = new acs::DM( "BAX549" );
+  dm = new acs::DM( "BAX492" );
   num_act = (int)dm->Get( "NbOfActuator" );
 #else
   num_act=97;
 #endif
-
-  spdlog::info("ALPAO DM ok: {}",num_act);
 
   data = new acs::Scalar[num_act]; // TODO: update if num_act changes (smaller pupil, etc.)
 
@@ -58,10 +56,14 @@ DECL init(void)
 	dm->Send(data);
 #endif
 
+  spdlog::info("ALPAO DM ok: {}",num_act);
+
 	// Also clear out the values in shared memory structure
   	for (auto i=0; i<num_act; i++) {
 	  gpShmemBoxes->mirror_voltages[i]=0;
+	  //gpShmemBoxes->mirror_voltages_offsets[i]=0;
 	}
+
 	
   return 0;
 }

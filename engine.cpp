@@ -324,6 +324,7 @@ int main(int argc, char** argv)
         pShmem1->mode |= MODE_FORCE_AO_DURING;
         spdlog::info("Force Start");
       }
+	  
       if (pShmem1->mode & MODE_FORCE_AO_DURING )  { // During this, centroiding will not write mirrors
         nAOSkipFrames--;
         spdlog::info("Force During");
@@ -344,7 +345,11 @@ int main(int argc, char** argv)
       } else if (pShmem1->mode == MODE_CALIBRATING) {
         str_message[0]=' ';
         str_message[1]='C'; //"closed loop" (==apply AO)
-        bRunning=0;		
+        bRunning=0;
+      } else if (pShmem1->mode == MODE_OPEN_LOOP) {
+        str_message[0]=' ';
+        str_message[1]='C'; // Apply AO
+        bRunning=0;				
       } else {
         str_message[0]=' ';
         str_message[1]=' ';
