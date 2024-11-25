@@ -1103,8 +1103,7 @@ class NextWaveMainWindow(QMainWindow):
  def slider_exposure_changed(self):
      scaled = 10**( float( self.slider_exposure.value())/100.0*np.log10(CAM_EXPO_MAX/CAM_EXPO_MIN)+np.log10(CAM_EXPO_MIN))
      self.exposure.setValue(scaled)
-     msg=b"E=%f\x00"%(scaled*1000)
-     print(msg)
+     msg=b"E=%f"%(scaled*1000)
      self.sockets.camera.send( msg ) # Convert to usec
 
  def slider_gain_changed(self):

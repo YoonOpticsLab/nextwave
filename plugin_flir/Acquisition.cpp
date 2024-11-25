@@ -819,7 +819,7 @@ INodeMap& nodeMap = pCam->GetNodeMap();
   
   char *msg=socket_check(CAMERA_SOCKET);
   if (msg!=NULL) {
-    spdlog::info("RAW: {}",msg);
+    //spdlog::info("RAW: {}",msg);
     if (msg[0]=='E'){
         double dVal = atof(msg+2);
         //spdlog::info("exposure: {}",dVal);

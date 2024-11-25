@@ -36,7 +36,7 @@ class SocketComponent():
 
     def send(self,msg):
         if not self.s is None:
-            self.s.send(msg)
+            self.s.send(msg+b'\x00')
 
 class NextwaveSocketComm():
     """ Class to manage:
