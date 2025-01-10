@@ -317,7 +317,6 @@ int main(int argc, char** argv)
 
     if (pShmem1->mode > MODE_READY ) {
 
-		
       if (pShmem1->mode & MODE_FORCE_AO_START )  {
         nAOSkipFrames=3;
         pShmem1->mode ^= MODE_FORCE_AO_START;
@@ -394,11 +393,12 @@ int main(int argc, char** argv)
           modnum++;
         }
 
-        pShmemLog[pShmem1->total_frames].frame_number=pShmem1->current_frame;
-        pShmemLog[pShmem1->total_frames].total_frame_number=pShmem1->total_frames;
-        pShmemLog[pShmem1->total_frames].time0=times_before[0];
-        pShmemLog[pShmem1->total_frames].time1=times_before[1];
-        pShmemLog[pShmem1->total_frames].time2=times_before[2];
+        int logidx_g = pShmem1->total_frames % SHMEM_LOG_MAX;
+        pShmemLog[logidx_g].frame_number=pShmem1->current_frame;
+        pShmemLog[logidx_g].total_frame_number=pShmem1->total_frames;
+        pShmemLog[logidx_g].time0=times_before[0];
+        pShmemLog[logidx_g].time1=times_before[1];
+        pShmemLog[logidx_g].time2=times_before[2];
 
         boost::chrono::high_resolution_clock::time_point time_now = boost::chrono::high_resolution_clock::now();
         //boost::chrono::duration<double> time_span = duration_cast<duration<double>>(time_now - time_total_before);
