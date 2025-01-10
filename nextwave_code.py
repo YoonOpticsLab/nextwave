@@ -396,9 +396,9 @@ class NextwaveEngine():
         deltas1 /= (self.focal*1000/self.ccd_pixel)
         mirs = np.matmul ( deltas1, self.influence_inv )
 
-        print( np.mean( mirs), mirs[0:10] )
+        #print( np.mean( mirs), mirs[0:10] )
         self.comm.write_mirrors_offsets(-mirs)
-        print(self.defocus)
+        #print(self.defocus)
 
     def defocus_start(self):
         # One idea was to save a local copy of the "current" centroids, and use those in entire
@@ -407,11 +407,15 @@ class NextwaveEngine():
         self.centroids_y_save = self.centroids_y
     
     def defocus_plus(self):
-        self.defocus += 0.1
+        self.defocus += 0.05
         self.defocus_do();
         
     def defocus_minus(self):
-        self.defocus -= 0.1
+        self.defocus -= 0.05
+        self.defocus_do();
+        
+    def defocus_set(self,val):
+        self.defocus = val
         self.defocus_do();
 
     def shift_search_boxes(self,zs,from_dialog=True):

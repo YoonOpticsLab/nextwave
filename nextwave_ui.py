@@ -420,6 +420,7 @@ class NextWaveMainWindow(QMainWindow):
     self.label_status0.setText(s)
     self.label_status0.setStyleSheet("color: rgb(0, 255, 0); background-color: rgb(0,0,0);")
 
+    # Pulled from engine
     self.label_defocus.setText( '%0.2f'%self.engine.defocus )
 
     if not self.engine.zernikes is None:
@@ -928,6 +929,13 @@ class NextWaveMainWindow(QMainWindow):
      btn.clicked.connect(self.engine.defocus_minus )
      layout1.addWidget(btn, 2,2 )
 
+     self.slider_defocus = QSlider(orientation=Qt.Horizontal)
+     self.slider_defocus.setMinimum(0)
+     self.slider_defocus.setMaximum(1000)
+     self.slider_defocus.setValue(500) 
+     layout1.addWidget(self.slider_defocus,3,2)
+     self.slider_defocus.valueChanged.connect(self.slider_defocus_changed) # TODO
+
      # Not used
      #btn = QPushButton("Defocus start")
      #btn.clicked.connect(self.engine.defocus_start )
@@ -1096,6 +1104,10 @@ class NextWaveMainWindow(QMainWindow):
     #msgBox.update()
     self.engine.do_calibration(self.calibration_status)
     
+ def slider_defocus_changed(self):
+     scaled = (self.slider_defocus.value()-500)/100.0
+     self.engine.defocus_set(scaled)
+     
  def slider_threshold_changed(self):
      scaled = self.slider_threshold.value()/100.0
      self.threshold_val.setValue(scaled)
