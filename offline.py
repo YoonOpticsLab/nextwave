@@ -3,6 +3,7 @@ import sys
 import os
 import time
 import pickle
+from pathlib import Path
 
 import matplotlib.cm as cmap
 #from numba import jit
@@ -22,7 +23,7 @@ import iterative
 
 from nextwave_comm import NextwaveEngineComm
 
-import ffmpegcv # Read AVI... Better than OpenCV (built-in ffmpeg?)
+# import ffmpegcv # Read AVI... Better than OpenCV (built-in ffmpeg?)
 
 from PIL import Image, TiffImagePlugin # Needed
 
@@ -30,6 +31,14 @@ GAUSS_SD=3
 BOX_THRESH=2.0
 
 OFFLINE_ITERATIVE_START=3.0
+
+scan_frame_to_ecc={
+    'H': np.linspace(-35,35,37),
+    'V': np.linspace(-20,20,27),
+    'D': np.linspace(-28.28,28.28,27),
+    'D2': np.linspace(-28.28,28.28,27)
+    }
+
 
 class info_saver():
     def __init__(self,parent):
@@ -80,7 +89,10 @@ class info_saver():
     def printable1(self,nframe):
         data_record=self.load1(nframe)
         if not data_record is None:
-            s=("%d,%0.3f,%d,%d,")%(nframe+1,data_record['pupil_diam'],data_record['cx'],data_record['cy'])
+            try:
+                s=("%s,%s,%d,%0.2f,%0.3f,%d,%d,")%(self.offline.sub_id,self.offline.scan_dir,nframe,scan_frame_to_ecc[self.offline.scan_dir][nframe],data_record['pupil_diam'],data_record['cx'],data_record['cy'])
+            except: # without the sub_id params
+                s=("%s,%s,%d,%0.2f,%0.3f,%d,%d,")%("","",nframe,0.0,data_record['pupil_diam'],data_record['cx'],data_record['cy'])
             for nz1,z1 in enumerate(data_record['zernikes']):
                 s += "%0.6f,"%(z1)
         else:
@@ -147,7 +159,7 @@ class NextwaveOffline():
             #print(self.iterative_size)
 
             self.parent.make_searchboxes(cx,cy,pupil_radius_pixel=self.iterative_size/2.0*1000/self.ccd_pixel)
-            self.parent.init_params( {'pupil_diam': self.iterative_size})
+            self.parent.init_params( {'pupil_diam': self.iterative_size / self.parent.pupil_mag})
 
             if self.parent.ui.mode_offline:
                 self.iterative_offline()
@@ -220,12 +232,48 @@ class NextwaveOffline():
                 subbed = np.array(self.offline_movie,dtype='int32') - self.offline_background
                 subbed[subbed<0]=0
                 subbed=np.array( subbed, dtype='uint8')
-                self.parent.ui.add_offline( subbed)
+                self.parent.ui.add_offline( subbed)                
+        elif '.bmp' in file_info[1]:
+            buf_movie=None
+            nf=0 # USE nf instead of nf_x to allow skipping (e.g. if directory is in there)
+            for nf_x,frame1 in enumerate(file_info[0]):
+                if not (".bmp" in frame1):
+                    continue
+                print("Offline: ",nf,frame1)
+                im = Image.open(frame1)
+                f1 = np.array(im) # TODO: assumes Im is already 8bit monochrome
+                if buf_movie is None:
+                        buf_movie=np.zeros( (50,f1.shape[0],f1.shape[1]), dtype='uint8') # TODO: grow new chunk if necessary
+                buf_movie[nf]=f1
+                nf += 1
+
+            print("Read %d frames of %dx%d"%(nf,f1.shape[0],f1.shape[1]) )
+            buf_movie=buf_movie[0:nf,:,:] # Trim to correct
+            self.offline_background = buf_movie
+
+            if self.offline_movie.shape[0] != self.offline_background.shape[0]:
+                print("Sub average")
+                # Different number of frames in background and movie. Subtract mean background from each frame
+                offline_mean = np.array(self.offline_background.mean(0),dtype='int32') # Mean across frames
+                self.offline_movie = self.offline_movie - offline_mean
+                self.offline_movie[ self.offline_movie<0] = 0
+                self.offline_movie = np.array( self.offline_movie, dtype='uint8')
+                self.parent.ui.add_offline(buf_movie)
+            else:
+                print("Sub each frame from each frame")
+                subbed = np.array(self.offline_movie,dtype='int32') - self.offline_background
+                subbed[subbed<0]=0
+                subbed=np.array( subbed, dtype='uint8')
+                self.offline_movie = subbed                
+                self.parent.ui.add_offline( subbed)                
 
     def load_offline(self,file_info):
         # file_info: from dialog. Tuple: (list of files, file types)
         fname = file_info[0][0]
         self.offline_fname = fname
+        
+        self.parent.ui.mode_offline=True
+        
         if '.bin' in file_info[1]:
             print("Offline: ",file_info[0][0])
             #fil=open(file_info[0][0],'rb')
@@ -241,13 +289,21 @@ class NextwaveOffline():
 
         elif '.bmp' in file_info[1]:
             buf_movie=None
-            for nf,frame1 in enumerate(file_info[0]):
+            idxSub=file_info[0][0].find("SWS")+4 # TODO
+            self.sub_id = file_info[0][0][idxSub:idxSub+4]
+            idxScanDir=file_info[0][0].find("cam")+5 # TODO
+            self.scan_dir = file_info[0][0][idxScanDir:idxScanDir+1]            
+            nf=0 # USE nf instead of nf_x to allow skipping (e.g. if directory is in there)
+            for nf_x,frame1 in enumerate(file_info[0]):
+                if not (".bmp" in frame1):
+                    continue
                 print("Offline: ",nf,frame1)
                 im = Image.open(frame1)
                 f1 = np.array(im) # TODO: assumes Im is already 8bit monochrome
                 if buf_movie is None:
                         buf_movie=np.zeros( (50,f1.shape[0],f1.shape[1]), dtype='uint8') # TODO: grow new chunk if necessary
                 buf_movie[nf]=f1
+                nf += 1
 
             print("Read %d frames of %dx%d"%(nf,f1.shape[0],f1.shape[1]) )
             buf_movie=buf_movie[0:nf,:,:] # Trim to correct
@@ -281,9 +337,14 @@ class NextwaveOffline():
         self.saver.load1(0) # Restore if possible
 
     def export_all_zernikes(self):
-        out_fname = self.offline_fname + "_zern.csv"
+        idx=0
+        out_fname = self.offline_fname + "_zern_%02d.csv"%idx
+        while Path(out_fname).exists():
+            idx += 1
+            out_fname = self.offline_fname + "_zern_%02d.csv"%idx
+        
         self.f_out = open(out_fname,'w')
-        s="frame_num,pupil_diam_mm,cx,cy,"
+        s="subject_id,scan_dir,frame_num,ecc,pupil_diam_mm,cx,cy,"
         for nz in np.arange(65):
             s += "Z%d,"%(nz+1)
         s += "\n"
@@ -461,7 +522,7 @@ class NextwaveOffline():
             self.parent.ui.cx -= int( z_new[1] / focal * ccd_pixel )
             self.parent.ui.cy += int( z_new[0] / focal * ccd_pixel )
 
-            self.parent.init_params( {'pupil_diam': self.iterative_size})
+            self.parent.init_params( {'pupil_diam': self.iterative_size/ self.parent.pupil_mag})
             self.parent.make_searchboxes(pupil_radius_pixel=self.iterative_size_pixels)
 
             z_bigger = np.zeros( self.parent.zterms_full.shape[0])
@@ -516,6 +577,9 @@ class NextwaveOffline():
         self.saver.save1(self.parent.ui.offline_curr)
         self.saver.serialize()
 
+    def manual1(self):
+        return
+
     def offline_autoall(self):
         for nframe in np.arange(self.max_frame):
             self.parent.ui.offline_curr=nframe
@@ -524,19 +588,22 @@ class NextwaveOffline():
             self.saver.save1(nframe)
         self.saver.serialize()
 
+# iterative_size is a real pupil size, not size on sensor (so always need to be multiplied by mag)
+
     def offline_reset(self):
      pupil_diam = float(self.parent.ui.it_start.text())
+     pupil_diam = pupil_diam #* self.parent.pupil_mag
      self.iterative_size = pupil_diam
      self.iterative_size_pixels = self.iterative_size/2.0 * 1000 / self.parent.ccd_pixel
      self.parent.pupil_diam = pupil_diam
-     self.parent.ui.line_pupil_diam.setText('%2.2f'%(self.iterative_size) ) 
-     self.parent.init_params( {'pupil_diam': pupil_diam})
+     self.parent.ui.line_pupil_diam.setText('%2.2f'%(self.iterative_size / self.parent.pupil_mag) ) 
+     self.parent.init_params( {'pupil_diam': pupil_diam / self.parent.pupil_mag})
      self.parent.make_searchboxes() 
 
     def offline_startbox(self):
         #pix=gaussian_filter(pix,GAUSS_SD) 
         self.pupil_radius_pixel = np.sqrt(np.sum( (self.dims/2.0)**2)) # Start big
-        self.parent.init_params( {'pupil_diam': self.pupil_radius_pixel*2.0/1000.0*self.parent.ccd_pixel} )
+        self.parent.init_params( {'pupil_diam': self.pupil_radius_pixel*2.0/1000.0*self.parent.ccd_pixel / self.parent.pupil_mag} )
         self.parent.make_searchboxes(pupil_radius_pixel=self.pupil_radius_pixel)
 
         self.offline_centroids()
@@ -579,7 +646,7 @@ class NextwaveOffline():
         #self.parent.centroids_x=self.cenx
         #self.parent.centroids_y=self.ceny
 
-        self.parent.ui.it_stop.setText('%2.2f'%(self.iterative_max) ) 
+        self.parent.ui.it_stop.setText('%2.2f'%(self.iterative_max / self.parent.pupil_mag) ) 
         self.parent.ui.mode_offline=True
 
     def iterative_offline(self):
@@ -589,10 +656,11 @@ class NextwaveOffline():
     def iterative_step_good(self):
         self.iterative_size_pixels = self.iterative_size/2.0 * 1000 / self.parent.ccd_pixel
         self.offline_stepbox()
-        self.parent.ui.line_pupil_diam.setText('%2.2f'%(self.iterative_size) ) #+step) )
+        self.parent.ui.line_pupil_diam.setText('%2.2f'%(self.iterative_size / self.parent.pupil_mag) ) #+step) )
 
     def iterative_run_good(self):
         self.iterative_size = float(self.parent.ui.it_start.text())
+        self.iterative_size *= self.parent.pupil_mag
         self.iterative_size_pixels = self.iterative_size/2.0 * 1000 / self.parent.ccd_pixel
         self.offline_startbox()
         self.offline_reset()
@@ -627,6 +695,8 @@ class NextwaveOffline():
         diams=np.array([self.saver.data[key1]['pupil_diam'] for key1 in self.saver.data.keys()])
         zerns=np.array([self.saver.data[key1]['zernikes'][0:10] for key1 in self.saver.data.keys()])
 
+        diams = diams * self.parent.pupil_diam # Convert to real "pupil space", not "sensor space"
+        
         radius2 = (diams/2) ** 2
         sqrt3=np.sqrt(3.0)
         sqrt6=np.sqrt(6.0)

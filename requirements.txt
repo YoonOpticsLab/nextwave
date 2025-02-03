@@ -4,5 +4,7 @@ lxml
 rpyc
 pyqt5
 matplotlib
-PIL
+Pillow
+ffmpeg
+ffmpeg-python
 ffmpegcv

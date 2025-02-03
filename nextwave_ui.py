@@ -145,7 +145,7 @@ class NextWaveMainWindow(QMainWindow):
     self.updater_dm.start(self.get_param("UI","update_rate_dm"))
 
  def offline_load_image(self):
-    ffilt=' Movies (*.avi);; BMP Images (*.bmp);; BMP Directory (*.bmp);; Binary files (*.bin);; files (*.*)'
+    ffilt='Cam1 Images (sweep_cam1_*.bmp);; Movies (*.avi);; BMP Directory (*.bmp);; Binary files (*.bin);; files (*.*)'
     thedir = QFileDialog.getOpenFileNames(self, "Choose file",
                 ".", ffilt );
 
@@ -543,9 +543,9 @@ class NextWaveMainWindow(QMainWindow):
         self.params["children"][name_parent]["children"][name]["value"] = newval
 
  def pupil_changed(self):
-   return # require init
-     #val=float( self.line_pupil_diam.text() )
-     #print("From UI: %s"%val)
+   #return # require init
+     val=float( self.line_pupil_diam.text() )
+     print("From UI: %s"%val)
      #self.engine.init_params() # will read from UI
      #self.engine.make_searchboxes(self.cx,self.cy)
   
@@ -600,7 +600,7 @@ class NextWaveMainWindow(QMainWindow):
      self.xml_param_tree = ParameterTree()
      self.xml_param_tree.setParameters(self.xml_p, showTop=False)
 
-     pupil_diam =self.get_param_xml("OPTICS_PupilDiameter")
+     #pupil_diam =self.get_param_xml("OPTICS_PupilDiameter")
      #self.line_pupil_diam.setText(str(pupil_diam ) )
 
      #print (self.xml_params['OPTICS_PupilDiameter'])
@@ -628,7 +628,7 @@ class NextWaveMainWindow(QMainWindow):
   #print("Offline move %d, curr=%d:"%(n,self.offline_curr) )
   self.engine.offline_frame(self.offline_curr)
 
-  self.lbl_frame_curr.setText("%d/%d"%(self.offline_curr+1,self.offline_nframes) )
+  self.lbl_frame_curr.setText("%d/%d"%(self.offline_curr,self.offline_nframes-1) )
 
   if restore_mode:
    self.engine.offline.offline_navigate()
@@ -781,14 +781,14 @@ class NextWaveMainWindow(QMainWindow):
      layout1.addWidget(btn,4,6)
      btn.clicked.connect(lambda: self.iterative_reset() )
 
-     btn = QPushButton("\u2190") # left
+     btn = QPushButton("\u2190") # left arrow
      layout1.addWidget(btn,5,1)
      btn.clicked.connect(lambda: self.offline_move(-1,True) )
 
      self.lbl_frame_curr = QLabel()
      layout1.addWidget(self.lbl_frame_curr,5,0)
 
-     btn = QPushButton("\u2192") # right
+     btn = QPushButton("\u2192") # right arrow
      layout1.addWidget(btn,5,2)
      btn.clicked.connect(lambda: self.offline_move (1,True) )
 
@@ -796,12 +796,16 @@ class NextWaveMainWindow(QMainWindow):
      layout1.addWidget(btn,5,5)
      btn.clicked.connect(lambda: self.engine.offline.offline_autoall() )
 
+     btn = QPushButton("Manual1")
+     layout1.addWidget(btn,5,4)
+     btn.clicked.connect(lambda: self.engine.offline.offline_manual1() )
+
      btn = QPushButton("Save")
      layout1.addWidget(btn,5,6)
      btn.clicked.connect(lambda: self.engine.offline.offline_serialize() )
 
      btn = QPushButton("Dialog")
-     layout1.addWidget(btn,5,4)
+     layout1.addWidget(btn,5,3)
      btn.clicked.connect(lambda: self.engine.offline.show_dialog() )
 
      #btnIt1 = QPushButton("Step It+=0.5")
@@ -1224,6 +1228,7 @@ class NextWaveMainWindow(QMainWindow):
         #elif event.key() == QtCore.Qt.Key_Enter:
 
  def mode_init(self):
+    # TODO: USe mag
     pupil_diam = float(self.line_pupil_diam.text() )
     self.engine.init_params( {'pupil_diam': pupil_diam})
     self.engine.make_searchboxes() #cx,cy,pupil_radius_pixel=self.size/2.0*1000/self.ccd_pixel)

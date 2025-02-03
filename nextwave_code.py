@@ -22,7 +22,7 @@ import iterative
 from nextwave_comm import NextwaveEngineComm
 from offline import NextwaveOffline
 
-import ffmpegcv # Read AVI... Better than OpenCV (built-in ffmpeg?)
+#import ffmpegcv # Read AVI... Better than OpenCV (built-in ffmpeg?)
 
 from PIL import Image, TiffImagePlugin
 
@@ -62,9 +62,10 @@ class ByteStream(bytearray):
         self.extend(struct.pack(fmt, v))
 
 class OpticsParams():
-    def __init__(self,ccd_pixel,pupil_diam,box_um,focal):
+    def __init__(self,ccd_pixel,pupil_diam,pupil_mag,box_um,focal):
         self.ccd_pixel = ccd_pixel
         self.pupil_diam = pupil_diam
+        self.pupil_mag = pupil_mag
         self.box_um = box_um
         self.focal = focal
 
@@ -103,12 +104,17 @@ class NextwaveEngine():
         self.box_um =    self.ui.get_param_xml("LENSLETS_LensletPitch")
         self.ccd_pixel = self.ui.get_param_xml("CAMERA1_CameraPixelPitch")
         self.pupil_diam =self.ui.get_param_xml("OPTICS_PupilDiameter")
+        self.pupil_mag =self.ui.get_param_xml("OPTICS_PupilMagnificationFactor")
 
         if overrides:
             self.pupil_diam=overrides.get('pupil_diam',self.pupil_diam)
 
         # New method, not used much yet:
-        self.params = OpticsParams(self.ccd_pixel, self.pupil_diam, self.box_um, self.focal)
+        self.params = OpticsParams(self.ccd_pixel, self.pupil_diam, self.pupil_mag, self.box_um, self.focal)
+
+        # Internally, "pupil_diam" is the size of the pupil on the *sensor*, which needs to be accounted for.
+        # Whenever showing to the user (or outputing to a file), or computing Zernikes, do pupil_diam/pupil_mag
+        self.pupil_diam = self.pupil_diam * self.pupil_mag
 
         self.pupil_radius_mm=self.pupil_diam / 2.0
         self.pupil_radius_pixel=self.pupil_radius_mm * 1000 / self.ccd_pixel
@@ -260,7 +266,7 @@ class NextwaveEngine():
 
         # Compute all integrals for all box corners 
         lenslet_dx,lenslet_dy=zernike_functions.zernike_integral_average_from_corners(
-            lefts, rights, ups, downs, self.pupil_radius_mm)
+            lefts, rights, ups, downs, self.pupil_radius_mm/self.pupil_mag)
 
         # Remove piston
         lenslet_dx = lenslet_dx[1:,:]
@@ -312,7 +318,7 @@ class NextwaveEngine():
         #np.save('zpoly.npy',zpoly)
 
     def update_influence(self):
-        return # TODO: Check for AO and pull correct file
+       # return # TODO: Check for AO and pull correct file
         #try:
         influence = np.loadtxt(self.ui.json_data["params"]["influence_file"], skiprows=1)
         #except:
@@ -469,7 +475,7 @@ class NextwaveEngine():
         fil = open(centroids_filename,'wt')
 
         fil.writelines( '[image size = %dx%d]\n'%(self.image_bytes.shape[0],self.image_bytes.shape[1]))
-        fil.writelines( '[pupil = %f,%d,%d]\n'%(self.ui.pupil_diam,self.ui.cx,self.ui.cy))
+        fil.writelines( '[pupil = %f,%d,%d]\n'%(self.ui.pupil_diam/self.pupil_diam,self.ui.cx,self.ui.cy))
         for nbox in np.arange( len(self.ref_x)):
             # TODO: Valid or invalid
             fil.writelines('%d\t%.12f\t%.12f\t%.12f\t%.12f\t\n'%(
