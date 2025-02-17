@@ -1,6 +1,6 @@
-#define MAX_BOXES 1024
+#define MAX_BOXES 2048
 #define MAX_MIRROR_VOLTAGES 256
-#define MAX_TERMS 262144
+#define MAX_TERMS 524288
 
 #define CALC_TYPE double
 

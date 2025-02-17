@@ -1,6 +1,6 @@
 #define SHMEM_LOG_NAME "NW_LOG"
 #define SHMEM_LOG_MAX 4096
-#define MAX_BOXES 1024
+#define MAX_BOXES 2048
 #define MAX_ACTUATORS 1024
 struct shmem_log_entry {
   uint8_t frame_number;
