@@ -37,6 +37,7 @@ uint8_t bDoReplaceSubtracted=0;
 uint8_t bDoThreshold=0;
 
 float fThreshold=0.0;
+float fGain=1.0;
 
 unsigned int nCurrRing=0;
 //LARGE_INTEGER t2, t1;
@@ -404,6 +405,9 @@ int find_centroids_af(unsigned char *buffer, int width, int height) {
   gaf->delta_x = gaf->sums_x - gaf->ref_x;
   gaf->delta_y = gaf->sums_y - gaf->ref_y;
 
+	gaf->delta_x(af::isNaN(gaf->delta_x)) = 0.0;
+	gaf->delta_y(af::isNaN(gaf->delta_y)) = 0.0;
+
   // Remove tip and tilt
   gaf->delta_x -= (CALC_TYPE)af::mean<CALC_TYPE>(gaf->delta_x);
   gaf->delta_y -= (CALC_TYPE)af::mean<CALC_TYPE>(gaf->delta_y);
@@ -453,9 +457,8 @@ int find_centroids_af(unsigned char *buffer, int width, int height) {
 
 			if (pShmem->mode == 3 || pShmem->mode==9 ) {
 			  // If closed loop, add new voltages to old
-			  pShmemBoxes->mirror_voltages[i] = pShmemBoxes->mirror_voltages[i] - host_mirror_voltages[i];
+			  pShmemBoxes->mirror_voltages[i] = pShmemBoxes->mirror_voltages[i] - host_mirror_voltages[i]*fGain;
 			}
-
 			// CLAMP
 			if (pShmemBoxes->mirror_voltages[i] > CLIPVAL)
 				pShmemBoxes->mirror_voltages[i]=CLIPVAL;
@@ -548,6 +551,10 @@ void process_ui_commands(void) {
       fThreshold=atof(msg+1);
       //spdlog::info("T={}",fThreshold);
       bDoThreshold=1;
+      break;
+    case 'G':
+      fGain=atof(msg+1);
+      spdlog::info("G={}",fGain);
       break;
     case 't':
       spdlog::info("t!");
