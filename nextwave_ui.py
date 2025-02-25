@@ -4,8 +4,10 @@ from PyQt5.QtWidgets import (QMainWindow, QLabel, QSizePolicy, QApplication, QPu
                              QFileDialog, QCheckBox, QDialog, QFormLayout, QDialogButtonBox, QLineEdit)
 from PyQt5.QtGui import QPixmap, QImage, QPainter, QPen, QFont
 from PyQt5.QtCore import Qt, QTimer, QEvent, QLineF, QPointF, pyqtSignal 
+from PyQt5.QtCore import QSettings
 import PyQt5.QtGui as QtGui
 import PyQt5.QtCore as QtCore
+
 
 import pyqtgraph as pg
 from pyqtgraph.parametertree import Parameter, ParameterTree
@@ -139,7 +141,16 @@ class NextWaveMainWindow(QMainWindow):
     self.p_offline = Parameter.create(name='params_offline', type='group', children=self.params_offline)
     self.params_offline = self.p_offline.saveState()
 
+    self.settings = QSettings("UHCO","NextWave")
+    #self.save_setting("ui/folder",".", False) # Set default only
 
+ # Function to save a setting with a default value
+ def save_setting(self, key, default_value, override=True):
+    if override or (not self.settings.contains(key)):
+        self.settings.setValue(key, default_value)
+ def load_setting(self, key):
+    self.settings.value(key)
+ 
  def apply_params(self):
     self.updater.start(self.get_param("UI","update_rate"))
     self.updater_dm.start(self.get_param("UI","update_rate_dm"))
@@ -147,10 +158,13 @@ class NextWaveMainWindow(QMainWindow):
  def offline_load_image(self):
     ffilt='Cam1 Images (sweep_cam1_*.bmp);; Movies (*.avi);; BMP Directory (*.bmp);; Binary files (*.bin);; files (*.*)'
     thedir = QFileDialog.getOpenFileNames(self, "Choose file",
-                ".", ffilt );
+                self.load_setting("ui/folder"), ffilt );
 
     if len(thedir)>0:
-        print( thedir , thedir[0])
+        dirname = os.path.dirname(thedir[0][0])
+        print( dirname, thedir , thedir[0])
+        self.save_setting("ui/folder",dirname)
+        
         self.btn_off.setText(thedir[0][0])
         self.engine.offline.load_offline(thedir)
         self.mode_offline = True

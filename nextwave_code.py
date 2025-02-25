@@ -28,7 +28,6 @@ from PIL import Image, TiffImagePlugin
 
 WINDOWS=(os.name == 'nt')
 
-
 NACT_PER_NZERN=4
 
 GAUSS_SD=3
@@ -275,12 +274,24 @@ class NextwaveEngine():
         # TODO: Dumb to make loop, making into function would be better
         for nsubset in [0,1]:
             nmax_from_boxes=int(self.num_boxes/NACT_PER_NZERN)
+            
+            # New heuristics from GYY 2/3/2025
+            #if self.pupil_radius_mm*2 /self.pupil_mag<=3:
+            #    nmax_from_boxes = 9
+            #elif self.pupil_radius_mm*2 /self.pupil_mag>=5:
+            #    nmax_from_boxes = 27
+            #else: #3<x<5
+            #    nmax_from_boxes = 20
+                
             nmax_from_boxes= np.min( (nmax_from_boxes,zernike_functions.MAX_ZERNIKES))
             orders_max=np.cumsum(np.arange(zernike_functions.MAX_ORDER+2)) - 1 # Last index in each order
+            print( orders_max )
             valid_max = orders_max[nmax_from_boxes<=orders_max][0]
+            print( 'MAX', nmax_from_boxes, valid_max)
+            
             if nsubset==0:
                 nvalid = valid_max
-                #print("Est. max zs:%d, Max Z (order):%d"%(nmax_from_boxes, valid_max) )
+               #print("Est. max zs:%d, Max Z (order):%d"%(nmax_from_boxes, valid_max, orders_max) )
             if nsubset==1: #
                 nvalid = np.min( (20, nmax_from_boxes) )
 
