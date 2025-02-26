@@ -33,7 +33,7 @@ unsigned char buffer[BUF_SIZE];
 
 uint8_t bDoSubtractBackground=0;
 uint8_t bDoSetBackground=0;
-uint8_t bDoReplaceSubtracted=0;
+uint8_t bDoReplaceSubtracted=1;
 uint8_t bDoThreshold=0;
 
 float fThreshold=0.0;
@@ -390,9 +390,12 @@ int find_centroids_af(unsigned char *buffer, int width, int height) {
 		af_print(gaf->y_reshape );
 
 	gaf->im2 = gaf->im(gaf->seq1);
+	
+	// Reshape the array so each box can be summed  
 	gaf->im2 = af::moddims( gaf->im2, gaf->new_dims );
-
 	gaf->sums = af::sum( gaf->im2, 0);
+	
+	// Sum all pixels divide by total to get center of mass
 	gaf->sums_x = af::sum( gaf->x_reshape, 0) / gaf->sums;
 	gaf->sums_y = af::sum( gaf->y_reshape, 0) / gaf->sums;
 
@@ -405,11 +408,12 @@ int find_centroids_af(unsigned char *buffer, int width, int height) {
   gaf->delta_x = gaf->sums_x - gaf->ref_x;
   gaf->delta_y = gaf->sums_y - gaf->ref_y;
 
-	gaf->delta_x(af::isNaN(gaf->delta_x)) = 0.0;
-	gaf->delta_y(af::isNaN(gaf->delta_y)) = 0.0;
+  auto valids = af::isNaN(gaf->sums);
+  gaf->delta_x(valids) = 0.0;
+  gaf->delta_y(valids) = 0.0;
 
   // Remove tip and tilt
-  gaf->delta_x -= (CALC_TYPE)af::mean<CALC_TYPE>(gaf->delta_x);
+  gaf->delta_x -= (CALC_TYPE)af::mean<CALC_TYPE>(gaf->delta_x); // weighted mean, 0 for NaNs
   gaf->delta_y -= (CALC_TYPE)af::mean<CALC_TYPE>(gaf->delta_y);
   gaf->delta_y = -gaf->delta_y; // Negate y (coord system)
 
