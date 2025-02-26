@@ -148,6 +148,13 @@ class NextwaveEngineComm():
         except AttributeError:
             pass # Probably missing influence function. Hasn't been calc'ed yet.
 
+        buf = ByteStream()
+        for item in self.parent.omits:
+            buf.append(item)
+        shmem_boxes.seek(fields['centroid_omit']['bytenum_current'])
+        shmem_boxes.write(buf)
+        shmem_boxes.flush()
+        
         # Write header last, so the engine knows when we are ready
         buf = ByteStream()
         buf.append(1)

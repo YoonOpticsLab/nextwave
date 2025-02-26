@@ -249,6 +249,9 @@ class NextWaveMainWindow(QMainWindow):
         painter.drawLines(boxes1)
 
         idx_bads=np.where(np.isnan(self.engine.centroids_x))[0]
+        pen = QPen(Qt.red, 1.00, Qt.SolidLine)
+        painter.setPen(pen)
+        #print( idx_bads, end='')        
         bad_boxes=[QLineF(self.engine.box_x[n]-box_size_pixel//2-BOX_BORDER,
                        self.engine.box_y[n]-box_size_pixel//2+BOX_BORDER,
                        self.engine.box_x[n]+box_size_pixel//2-BOX_BORDER,

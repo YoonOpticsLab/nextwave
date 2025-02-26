@@ -74,7 +74,8 @@ class NextwaveEngine():
         self.zernikes = None
         self.defocus = 0
         self.aogain = 1.0
-
+        self.omits = np.zeros( 0, dtype='uint8' ) # Need to do early
+        
     def init(self):
         if not self.ui.offline_only:
             self.comm.init()
@@ -215,7 +216,18 @@ class NextwaveEngine():
             self.neighbors[nidx]=np.argsort( distances)[1:5] # Take 4 nearest, excluding self (which will be 0)
 
         self.update_searchboxes()
-
+        
+        self.omits = np.zeros( num_boxes, dtype='uint8' )
+        try:
+            #fil=open("omits.txt","rt")
+            #lins=fil.readlines();
+            omits = np.loadtxt("omits.txt", dtype='int')
+            print( omits )
+            for omit1 in omits:
+                self.omits[omit1]=1
+        except:
+            pass
+        
         return self.ref_x,self.ref_y,self.norm_x,self.norm_y
 
     def dump_vars(self):
