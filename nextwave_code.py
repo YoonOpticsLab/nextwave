@@ -73,6 +73,7 @@ class NextwaveEngine():
         self.num_boxes = 0
         self.zernikes = None
         self.defocus = 0
+        self.aogain = 1.0
 
     def init(self):
         if not self.ui.offline_only:
@@ -88,13 +89,16 @@ class NextwaveEngine():
         self.focal =     self.ui.get_param_xml("LENSLETS_LensletFocalLength")/1000.0
         self.box_um =    self.ui.get_param_xml("LENSLETS_LensletPitch")
         self.ccd_pixel = self.ui.get_param_xml("CAMERA1_CameraPixelPitch")
-        self.pupil_diam =self.ui.get_param_xml("OPTICS_PupilDiameter") * self.ui.get_param_xml("OPTICS_PupilMagnificationFactor")
+        self.pupil_diam =self.ui.get_param_xml("OPTICS_PupilDiameter")
+        self.pupil_mag =self.ui.get_param_xml("OPTICS_PupilMagnificationFactor")
 
         if overrides:
             self.pupil_diam=overrides.get('pupil_diam',self.pupil_diam)
 
         # New method, not used much yet:
         self.params = OpticsParams(self.ccd_pixel, self.pupil_diam, self.box_um, self.focal)
+
+        self.pupil_diam = self.pupil_diam * self.pupil_mag
 
         self.pupil_radius_mm=self.pupil_diam / 2.0
         self.pupil_radius_pixel=self.pupil_radius_mm * 1000 / self.ccd_pixel
@@ -246,7 +250,7 @@ class NextwaveEngine():
 
         # Compute all integrals for all box corners 
         lenslet_dx,lenslet_dy=zernike_functions.zernike_integral_average_from_corners(
-            lefts, rights, ups, downs, self.pupil_radius_mm)
+            lefts, rights, ups, downs, self.pupil_radius_mm / self.pupil_mag )
 
         # Remove piston
         lenslet_dx = lenslet_dx[1:,:]
@@ -322,6 +326,7 @@ class NextwaveEngine():
         #spot_displace_x -= spot_displace_x.mean()
         #spot_displace_y -= spot_displace_y.mean()
         #print( spot_displace_y.mean(), spot_displace_x.mean() )
+        self.mean_displacements = [np.nanmean(spot_displace_x), np.nanmean(spot_displace_y) ]
 
         self.spot_displace_interpolated = np.zeros( self.num_boxes )
 
@@ -381,24 +386,34 @@ class NextwaveEngine():
 
     def defocus_do(self):
         zs= np.zeros(20)
-        zs[4] = self.defocus
-        dx,dy = self.get_deltas(zs, False)
+        zs[3] = self.defocus
         
-        # As Reference Shift:
-        #self.ref_x = self.initial_x - dx
-        #self.ref_y = self.initial_y + dy
-        #self.comm.send_searchboxes(self.box_x, self.box_y)
-        
-        # Method2: Take current deltas, then add futher by dx
-        dx -= np.mean(dx)
-        dy -= np.mean(dy)
-        deltas1 = np.vstack( (dx,-dy) ).T.flatten()
-        deltas1 /= (self.focal*1000/self.ccd_pixel)
-        mirs = np.matmul ( deltas1, self.influence_inv )
+        if False: # For open loop, doesn't work (not linear)
+            dx,dy = self.get_deltas(zs, False)
+            
+            # As Reference Shift:
+            #self.ref_x = self.initial_x - dx
+            #self.ref_y = self.initial_y + dy
+            #self.comm.send_searchboxes(self.box_x, self.box_y)
+            
+            # Method2: Take current deltas, then add futher by dx
+            dx -= np.mean(dx)
+            dy -= np.mean(dy)
+            deltas1 = np.vstack( (dx,-dy) ).T.flatten()
+            deltas1 /= (self.focal*1000/self.ccd_pixel)
+            mirs = np.matmul ( deltas1, self.influence_inv )
 
-        #print( np.mean( mirs), mirs[0:10] )
-        self.comm.write_mirrors_offsets(-mirs)
-        #print(self.defocus)
+            #print( np.mean( mirs), mirs[0:10] )
+            self.comm.write_mirrors_offsets(-mirs)
+            #print(self.defocus)
+        else:
+            self.shift_references(zs,False)
+            self.comm.send_searchboxes(self.box_x, self.box_y)
+            
+            self.comm.set_mode( 
+                self.comm.read_mode() | 0x20 )  # MODE_FORCE_AO_START TODO
+            
+
 
     def defocus_start(self):
         # One idea was to save a local copy of the "current" centroids, and use those in entire
@@ -406,17 +421,38 @@ class NextwaveEngine():
         self.centroids_x_save = self.centroids_x 
         self.centroids_y_save = self.centroids_y
     
+    def defocus_plus01(self):
+        self.defocus += 0.01
+        self.defocus_do();
+    def defocus_plus10(self):
+        self.defocus += 0.1
+        self.defocus_do();
+    def defocus_minus01(self):
+        self.defocus -= 0.01
+        self.defocus_do();
+    def defocus_minus10(self):
+        self.defocus -= 0.1
+        self.defocus_do();
+
+
     def defocus_plus(self):
-        self.defocus += 0.05
+        self.defocus += 0.01
         self.defocus_do();
         
     def defocus_minus(self):
-        self.defocus -= 0.05
+        self.defocus -= 0.01
         self.defocus_do();
         
     def defocus_set(self,val):
         self.defocus = val
         self.defocus_do();
+
+    def aogain_set(self,val):
+        self.aogain = val
+        self.aogain_do();
+        
+    def aogain_do(self):
+        self.ui.sockets.centroiding.send(b"G%f\x00"%(self.aogain) )
 
     def shift_search_boxes(self,zs,from_dialog=True):
         #print( zs )
@@ -458,6 +494,17 @@ class NextwaveEngine():
         
     def flat_do(self):
         self.comm.flat_do()
+        #self.comm.set_mode( 
+        #    self.comm.read_mode() | 0x20 )  # MODE_FORCE_AO_START TODO
+        
+    def loop_changed(self,is_checked):
+        if is_checked:
+            if self.comm.read_mode() == 8:
+                self.comm.set_mode(9)
+        else:
+            if self.comm.read_mode() == 9:
+                self.comm.set_mode(8)
+            
     def flat_save(self):
         self.comm.flat_save()
 
@@ -503,7 +550,7 @@ class NextwaveEngine():
         fil = open(centroids_filename,'wt')
 
         fil.writelines( '[image size = %dx%d]\n'%(self.image_bytes.shape[0],self.image_bytes.shape[1]))
-        fil.writelines( '[pupil = %f,%d,%d]\n'%(self.ui.pupil_diam,self.ui.cx,self.ui.cy))
+        fil.writelines( '[pupil = %f,%d,%d]\n'%(self.pupil_diam/self.pupil_mag,self.ui.cx,self.ui.cy))
         for nbox in np.arange( len(self.ref_x)):
             # TODO: Valid or invalid
             fil.writelines('%d\t%.12f\t%.12f\t%.12f\t%.12f\t\n'%(

@@ -333,19 +333,19 @@ int main(int argc, char** argv)
         }
       }
 
-      if (pShmem1->mode == MODE_RUNONCE_CENTROIDING_AO) {
+      if ( (pShmem1->mode == MODE_RUNONCE_CENTROIDING_AO) || (pShmem1->mode & MODE_FORCE_AO_DURING) ) {
         str_message[0]='I'; // Re-init on "snap"
-        str_message[1]='C'; // Re-init on "snap"
+        str_message[1]='C'; // Closed loop
         bRunning=0;
       } else if (pShmem1->mode == MODE_RUNONCE_CENTROIDING) {
         str_message[0]='I'; // Re-init on "snap"
-        str_message[1]=' '; // Re-init on "snap"
+        str_message[1]=' '; // 
         bRunning=0;
       } else if (pShmem1->mode == MODE_CALIBRATING) {
         str_message[0]=' ';
         str_message[1]='C'; //"closed loop" (==apply AO)
         bRunning=0;
-      } else if (pShmem1->mode == MODE_OPEN_LOOP) {
+      } else if (pShmem1->mode & MODE_OPEN_LOOP) {
         str_message[0]=' ';
         str_message[1]='C'; // Apply AO
         bRunning=0;				
@@ -371,7 +371,7 @@ int main(int argc, char** argv)
       uint16_t ms_times_100;
       double times_before[4]; //TODO
       for (struct module it: listModules) {
-        //spdlog::info("Before {} {} {}", pShmem1->total_frames, modnum, it.name );
+          //spdlog::info("Before {} {} {}", pShmem1->total_frames, modnum, it.name );
           boost::chrono::high_resolution_clock::time_point time_before = boost::chrono::high_resolution_clock::now();
 
           int result=(*it.fp_do_process)((const char*)str_message);

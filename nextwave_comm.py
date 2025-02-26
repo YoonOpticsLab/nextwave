@@ -234,10 +234,13 @@ class NextwaveEngineComm():
     def zero_do(self):
         self.write_mirrors( np.zeros(97) ) # TODO: # of mirrors
         self.set_mode( 
-            self.read_mode() | 0x20 )  # MODE_FORCE_AO_START TODO
+            self.read_mode() | 0x20 )  # MODE_FORCE_AO_START TODO. Possible race condition.
 
     def flat_do(self):
         self.write_mirrors( self.mirror_state_flat )
+        self.set_mode( 
+            self.read_mode() | 0x20 )  # MODE_FORCE_AO_START TODO. Possible race condition.
+        
     def flat_save(self):
         self.mirror_state_flat = np.copy(self.mirror_voltages)
 
