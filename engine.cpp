@@ -333,22 +333,18 @@ int main(int argc, char** argv)
         }
       }
 
-      if ( (pShmem1->mode == MODE_RUNONCE_CENTROIDING_AO) || (pShmem1->mode & MODE_FORCE_AO_DURING) ) {
+      if ( ( (pShmem1->mode&MODE_AO) && (pShmem1->mode&MODE_SNAP)) || (pShmem1->mode & MODE_FORCE_AO_DURING) ) {
         str_message[0]='I'; // Re-init on "snap"
         str_message[1]='C'; // Closed loop
         bRunning=0;
-      } else if (pShmem1->mode == MODE_RUNONCE_CENTROIDING) {
+      } else if ( pShmem1->mode&MODE_SNAP ) {
         str_message[0]='I'; // Re-init on "snap"
         str_message[1]=' '; // 
         bRunning=0;
-      } else if (pShmem1->mode == MODE_CALIBRATING) {
+      } else if (pShmem1->mode & MODE_AO) {
         str_message[0]=' ';
         str_message[1]='C'; //"closed loop" (==apply AO)
-        bRunning=0;
-      } else if (pShmem1->mode & MODE_OPEN_LOOP) {
-        str_message[0]=' ';
-        str_message[1]='C'; // Apply AO
-        bRunning=0;				
+        bRunning=0;			
       } else {
         str_message[0]=' ';
         str_message[1]=' ';
@@ -423,7 +419,7 @@ int main(int argc, char** argv)
         //spdlog::info("Frames lefT: {}", pShmem1->frames_left);
 
       // Ran once, unarm
-        if ( (pShmem1->mode & MODE_RUNONCE_CENTROIDING) ||
+        if ( (pShmem1->mode & MODE_SNAP) ||
 			(pShmem1->mode == MODE_CALIBRATING) || // Run calibration one-by-one (1 iteration per mirror)
 			(pShmem1->frames_left<1)
 			) {

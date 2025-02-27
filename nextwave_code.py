@@ -425,8 +425,6 @@ class NextwaveEngine():
             self.comm.set_mode( 
                 self.comm.read_mode() | 0x20 )  # MODE_FORCE_AO_START TODO
             
-
-
     def defocus_start(self):
         # One idea was to save a local copy of the "current" centroids, and use those in entire
         # inverse calculations. Think it's not necessary though; can just add the mirror deltas.
@@ -506,16 +504,14 @@ class NextwaveEngine():
         
     def flat_do(self):
         self.comm.flat_do()
-        #self.comm.set_mode( 
-        #    self.comm.read_mode() | 0x20 )  # MODE_FORCE_AO_START TODO
         
     def loop_changed(self,is_checked):
         if is_checked:
-            if self.comm.read_mode() == 8:
-                self.comm.set_mode(9)
+            if self.comm.read_mode() == 4:
+                self.comm.set_mode(4+8)
         else:
-            if self.comm.read_mode() == 9:
-                self.comm.set_mode(8)
+            if self.comm.read_mode() == 4+8:
+                self.comm.set_mode(4)
             
     def flat_save(self):
         self.comm.flat_save()
@@ -538,12 +534,11 @@ class NextwaveEngine():
             self.init_params()
             self.update_searchboxes()
 
-        val=3 if (self.ui.chkLoop.isChecked() and allow_AO) else 2
-        self.mode=2 # Different mode??
+        val=(2+8) if (self.ui.chkLoop.isChecked() and allow_AO) else 2
+        self.mode=2 # Different mode?? TODO
         self.comm.set_mode(val)
 
     def mode_run(self, reinit=True, numruns=1):
-        self.mode=3
         if reinit:
             self.init_params()
 
@@ -552,7 +547,8 @@ class NextwaveEngine():
         #buf.append(val.tobytes())
         self.comm.set_nframes(val)
 
-        val=9 if self.ui.chkLoop.isChecked() else 8
+        val=(4+8) if self.ui.chkLoop.isChecked() else 4
+        self.mode=4 # ?? TODO
         self.comm.set_mode(val)
 
     def mode_stop(self):

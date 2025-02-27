@@ -444,7 +444,8 @@ int find_centroids_af(unsigned char *buffer, int width, int height) {
 
   auto valids2 = af::join(0, valids, valids);
 
-  gaf->mirror_voltages = af::matmul(gaf->slopes(valids2), gaf->influence_inv(valids2, af::span) );
+  //gaf->mirror_voltages = af::matmul(gaf->slopes(valids2), gaf->influence_inv(valids2, af::span) );
+  gaf->mirror_voltages = af::matmul(gaf->slopes, gaf->influence_inv );
   double *host_mirror_voltages = gaf->mirror_voltages.host<double>();
 
 #if 0
@@ -463,16 +464,16 @@ int find_centroids_af(unsigned char *buffer, int width, int height) {
   memcpy(pShmemBoxes->centroid_x, host_x, sizeof(CALC_TYPE)*num_boxes);
   memcpy(pShmemBoxes->centroid_y, host_y, sizeof(CALC_TYPE)*num_boxes);
 
-  memcpy(pShmemBoxes->mirror_voltages, host_mirror_voltages, sizeof(double)*nActuators); // Added for debugging 2025/26/02 -- see realtime voltage calcs
+  //memcpy(pShmemBoxes->mirror_voltages, host_mirror_voltages, sizeof(double)*nActuators); // Added for debugging 2025/26/02 -- see realtime voltage calcs
 
     auto save1 = pShmemBoxes->mirror_voltages[0]; // Debugging
 
-	if ((pShmem->mode == 3 || pShmem->mode==9) ) { // Closed loop
+	if ((pShmem->mode & MODE_AO) ) { // Closed loop
 	
 		double mirror_min=10, mirror_max=-10, mirror_mean=0;
 		for (int i=0; i<nActuators; i++) {
 
-			if (pShmem->mode == 3 || pShmem->mode==9 ) {
+			if (pShmem->mode & MODE_AO ) {
 			  // If closed loop, add new voltages to old
 			  pShmemBoxes->mirror_voltages[i] = pShmemBoxes->mirror_voltages[i] - host_mirror_voltages[i]*fGain;
 			}
@@ -499,7 +500,7 @@ int find_centroids_af(unsigned char *buffer, int width, int height) {
 		memcpy(gpShmemLog[gpShmemHeader->total_frames].mirrors, pShmemBoxes->mirror_voltages, sizeof(CALC_TYPE)*nActuators);
 		mirror_mean /= nActuators;
 		
-		//spdlog::info("Mirror {}:{}/{} 0:{} 00:{}", (double)mirror_mean, (double)mirror_min, (double) mirror_max, (double)pShmemBoxes->mirror_voltages[0], (double)save1 );
+		spdlog::info("Mirror {}:{}/{} 0:{} 00:{}", (double)mirror_mean, (double)mirror_min, (double) mirror_max, (double)pShmemBoxes->mirror_voltages[0], (double)save1 );
 
 	} // if closed loop
 
