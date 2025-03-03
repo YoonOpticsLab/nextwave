@@ -142,20 +142,22 @@ class NextWaveMainWindow(QMainWindow):
     self.params_offline = self.p_offline.saveState()
 
     self.settings = QSettings("UHCO","NextWave")
-    #self.save_setting("ui/folder",".", False) # Set default only
+    self.save_setting("ui/folder",".", False) # Default only, don't overwrite
+    self.save_setting("ui/folder_save",".", False) # Default only, don't overwrite
 
  # Function to save a setting with a default value
- def save_setting(self, key, default_value, override=True):
+ def save_setting(self, key, value, override=True):
     if override or (not self.settings.contains(key)):
-        self.settings.setValue(key, default_value)
- def load_setting(self, key):
-    self.settings.value(key)
+        self.settings.setValue(key, value)
+ def load_setting(self, key, default=""):
+    return self.settings.value(key)
  
  def apply_params(self):
     self.updater.start(self.get_param("UI","update_rate"))
     self.updater_dm.start(self.get_param("UI","update_rate_dm"))
 
  def offline_load_image(self):
+    print(  self.load_setting("ui/folder") )
     ffilt='Cam1 Images (sweep_cam1_*.bmp);; Movies (*.avi);; BMP Directory (*.bmp);; Binary files (*.bin);; files (*.*)'
     thedir = QFileDialog.getOpenFileNames(self, "Choose file",
                 self.load_setting("ui/folder"), ffilt );
@@ -1272,7 +1274,13 @@ class NextWaveMainWindow(QMainWindow):
       self.engine.export_centroids(filename)
 
  def export_all(self):
-    self.engine.offline.export_all_zernikes()
+    dir1 = QFileDialog.getExistingDirectory(self, str("Open Directory"),
+       self.load_setting("ui/folder_save","."),
+       QFileDialog.ShowDirsOnly
+       | QFileDialog.DontResolveSymlinks)
+
+    self.save_setting("ui/folder_save",dir1)
+    self.engine.offline.export_all_zernikes(dir1)
 
  def close(self):
     self.engine.send_quit() # Send stop command to engine

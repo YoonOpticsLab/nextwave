@@ -289,10 +289,25 @@ class NextwaveOffline():
 
         elif '.bmp' in file_info[1]:
             buf_movie=None
-            idxSub=file_info[0][0].find("SWS")+4 # TODO
-            self.sub_id = file_info[0][0][idxSub:idxSub+4]
-            idxScanDir=file_info[0][0].find("cam")+5 # TODO
-            self.scan_dir = file_info[0][0][idxScanDir:idxScanDir+1]            
+            pathname = file_info[0][0]
+            idxSub=pathname.find("SWS")+4 # TODO
+            self.sub_id = pathname[idxSub:idxSub+4]
+            
+            # Condition might exist as a middle directory, between subId and last directory
+            i0=pathname[idxSub:].find('/') + idxSub + 1
+            i1=pathname[i0:].find('/') + i0 + 1
+            i2=pathname[i1:].find('/') + i1 + 1
+            if i1==i2:
+                self.condition="COND" # There was no directory between subId and last
+            else:
+                self.condition=pathname[i0:i1-1]
+
+            idxScanDir=pathname.find("cam")+5 # TODO
+            if pathname[idxScanDir:idxScanDir+2] == 'D2':
+                self.scan_dir = 'D2'
+            else:
+                self.scan_dir = pathname[idxScanDir:idxScanDir+1]  
+            
             nf=0 # USE nf instead of nf_x to allow skipping (e.g. if directory is in there)
             for nf_x,frame1 in enumerate(file_info[0]):
                 if not (".bmp" in frame1):
@@ -336,12 +351,15 @@ class NextwaveOffline():
         self.saver.unserialize() # Load previous if they exist
         self.saver.load1(0) # Restore if possible
 
-    def export_all_zernikes(self):
+    def export_all_zernikes(self,dir1="."):
         idx=0
-        out_fname = self.offline_fname + "_zern_%02d.csv"%idx
+        #out_fname = self.offline_fname + "_zern_%02d.csv"%idx        
+        out_fname = "%s/%s_%s_%s_%02d.csv"%(dir1,self.sub_id,self.condition,self.scan_dir,idx)
+        
         while Path(out_fname).exists():
             idx += 1
-            out_fname = self.offline_fname + "_zern_%02d.csv"%idx
+            #out_fname = self.offline_fname + "_zern_%02d.csv"%idx
+            out_fname = "%s/%s_%s_%s_%02d.csv"%(dir1,self.sub_id,self.condition,self.scan_dir,idx)
         
         self.f_out = open(out_fname,'w')
         s="subject_id,scan_dir,frame_num,ecc,pupil_diam_mm,cx,cy,"
@@ -577,8 +595,10 @@ class NextwaveOffline():
         self.saver.save1(self.parent.ui.offline_curr)
         self.saver.serialize()
 
-    def manual1(self):
-        return
+    def offline_manual1(self):
+        self.parent.offline_frame(self.parent.ui.offline_curr)
+        self.iterative_run_good()
+        #self.saver.save1(nframe)        
 
     def offline_autoall(self):
         for nframe in np.arange(self.max_frame):
