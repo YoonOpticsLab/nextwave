@@ -144,6 +144,7 @@ class NextWaveMainWindow(QMainWindow):
     self.settings = QSettings("UHCO","NextWave")
     self.save_setting("ui/folder",".", False) # Default only, don't overwrite
     self.save_setting("ui/folder_save",".", False) # Default only, don't overwrite
+    self.save_setting("ui/folder_background",".", False) # Default only, don't overwrite
 
  # Function to save a setting with a default value
  def save_setting(self, key, value, override=True):
@@ -157,14 +158,12 @@ class NextWaveMainWindow(QMainWindow):
     self.updater_dm.start(self.get_param("UI","update_rate_dm"))
 
  def offline_load_image(self):
-    print(  self.load_setting("ui/folder") )
     ffilt='Cam1 Images (sweep_cam1_*.bmp);; Movies (*.avi);; BMP Directory (*.bmp);; Binary files (*.bin);; files (*.*)'
     thedir = QFileDialog.getOpenFileNames(self, "Choose file",
                 self.load_setting("ui/folder"), ffilt );
 
     if len(thedir)>0:
         dirname = os.path.dirname(thedir[0][0])
-        print( dirname, thedir , thedir[0])
         self.save_setting("ui/folder",dirname)
         
         self.btn_off.setText(thedir[0][0])
@@ -175,9 +174,12 @@ class NextWaveMainWindow(QMainWindow):
  def offline_load_background(self):
     #ffilt='Movies (*.avi);; Binary files (*.bin);; BMP Images (*.bmp);; files (*.*)'
     ffilt='Cam1 Images (sweep_cam1_*.bmp)'
-    thedir = QFileDialog.getOpenFileNames(self, "Choose background file", ".", ffilt );
+    thedir = QFileDialog.getOpenFileNames(self, "Choose background file",
+        self.load_setting("ui/folder_background"), ffilt );
     if len(thedir)>0:
-        print( thedir , thedir[0])
+        dirname = os.path.dirname(thedir[0][0])
+        self.save_setting("ui/folder_background",dirname)
+
         self.btn_off_back.setText(thedir[0][0])
         self.engine.offline.load_offline_background(thedir)
 
