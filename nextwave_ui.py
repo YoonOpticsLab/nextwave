@@ -173,7 +173,8 @@ class NextWaveMainWindow(QMainWindow):
         self.chkOfflineAlgorithm.setChecked(True)
 
  def offline_load_background(self):
-    ffilt='Movies (*.avi);; Binary files (*.bin);; BMP Images (*.bmp);; files (*.*)'
+    #ffilt='Movies (*.avi);; Binary files (*.bin);; BMP Images (*.bmp);; files (*.*)'
+    ffilt='Cam1 Images (sweep_cam1_*.bmp)'
     thedir = QFileDialog.getOpenFileNames(self, "Choose background file", ".", ffilt );
     if len(thedir)>0:
         print( thedir , thedir[0])
@@ -205,6 +206,7 @@ class NextWaveMainWindow(QMainWindow):
 
     painter = QPainter()
     painter.begin(pixmap)
+    
 
     if self.draw_arrows:
         #conicalGradient gradient;
@@ -387,7 +389,7 @@ class NextWaveMainWindow(QMainWindow):
     self.widget_centrals.setMinimumWidth(SPOTS_WIDTH_WIN_MINIMUM)
     self.pixmap_label.setPixmap(pixmap)
     #print ('%0.2f'%bytez.mean(),end=' ', flush=True);
-
+    
     #s=""
     #for n in np.arange(13):
         #s += 'Z%2d=%+0.4f\n'%(n+1,self.engine.zernikes[n])
@@ -678,7 +680,7 @@ class NextWaveMainWindow(QMainWindow):
      pixmap = QPixmap(qimage)
      #pixmap = pixmap.scaled(SPOTS_WIDTH_WIN,SPOTS_HEIGHT_WIN, Qt.KeepAspectRatio)
      pixmap_label.setPixmap(pixmap)
-     pixmap_label.mousePressEvent = self.button_clicked
+     pixmap_label.mousePressEvent = self.spot_window_clicked
 
      #Scroll Area Properties
      self.scroll_central.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
@@ -823,6 +825,10 @@ class NextWaveMainWindow(QMainWindow):
      btn = QPushButton("Dialog")
      layout1.addWidget(btn,5,3)
      btn.clicked.connect(lambda: self.engine.offline.show_dialog() )
+
+     btn = QPushButton("Dialog2")
+     layout1.addWidget(btn,6,3)
+     btn.clicked.connect(lambda: self.engine.offline.show_dialog_debug() )
 
      #btnIt1 = QPushButton("Step It+=0.5")
      #layout1.addWidget(btnIt1,3,1)
@@ -1067,6 +1073,7 @@ class NextWaveMainWindow(QMainWindow):
      pixmap_label.setFocus()
 
      self.setGeometry(2,2,MAIN_WIDTH_WIN,MAIN_HEIGHT_WIN)
+     self.setWindowFlags(Qt.Window | Qt.WindowTitleHint | Qt.WindowMinimizeButtonHint | Qt.WindowMaximizeButtonHint | Qt.WindowCloseButtonHint)
      self.show()
 
  def calibration_status(self,s):
@@ -1160,11 +1167,20 @@ class NextWaveMainWindow(QMainWindow):
     self.cx = x
     self.cy = y
 
- def button_clicked(self, event):
-    print("clicked:", event.pos() )
-    x_scaled =event.pos().x() #/ SPOTS_WIDTH_WIN*992 # TODO: use image size
-    y_scaled =event.pos().y() #/ SPOTS_WIDTH_WIN*992 # TODO: use image size
-    print("scaled: x,y ", x_scaled, y_scaled)
+ def spot_window_clicked(self, event):
+    # Get the geometry of the spot window
+    geometry = self.pixmap_label.geometry()
+
+    # Access position and size attributes
+    x = geometry.x()
+    y = geometry.y()
+    width = geometry.width()
+    height = geometry.height()
+ 
+    # print("clicked:", event.pos() )
+    x_scaled = event.pos().x() / width * self.image_pixels.shape[1]
+    y_scaled = event.pos().y() / height * self.image_pixels.shape[0]
+    # print("scaled: x,y ", x_scaled, y_scaled)
 
     which_box = np.where(np.all(
         ( (self.engine.box_x-self.engine.box_size_pixel/2)<x_scaled,
