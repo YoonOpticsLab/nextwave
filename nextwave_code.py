@@ -145,7 +145,9 @@ class NextwaveEngine():
     def make_searchboxes(self,cx=None,cy=None,aperture=1.0,pupil_radius_pixel=None, box_spacing_pixel=None):
         """
         Like the MATLAB code to make equally spaced boxes, but doesn't use loops.
-        Instead builds and filters arrays
+        Instead builds and filters arrays.
+        
+        radius_pixels should be radius ON THE SENSOR
 
         #"Loopy" code looks like the following:
         for y in np.arange(limit, -limit-1, -1):

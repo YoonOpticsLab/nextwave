@@ -60,7 +60,7 @@ class info_saver():
             'est_y':self.offline.est_y,
             'cx':self.ui.cx,
             'cy':self.ui.cy,
-            'pupil_diam':self.engine.pupil_diam,
+            'pupil_diam':self.engine.pupil_diam / self.engine.pupil_mag,
             'zernikes':self.engine.zernikes}
         self.data[nframe]=data_record
         #print( 'saved: ', data_record, flush=True)
@@ -80,7 +80,7 @@ class info_saver():
         self.offline.est_y = data_record['est_y']
         self.ui.cx = data_record['cx']
         self.ui.cy = data_record['cy']
-        self.engine.pupil_diam = data_record['pupil_diam']
+        self.engine.pupil_diam = data_record['pupil_diam'] * self.engine.pupil_mag  # TODO: Should we rebuild boxes ?
         self.engine.zernikes = data_record['zernikes']
 
         self.engine.num_boxes = len( self.engine.centroids_x)
@@ -145,54 +145,14 @@ class NextwaveOffline():
         ssq=np.sum( (self.circle(*p)-self.desired) **2 )
         return ssq
 
-    def iterative_step(self, cx, cy, step, start, stop):
-        if self.iterative_size>=stop:
-            self.iterative_size = start
-        elif self.iterative_size+step > stop:
-            self.iterative_size = stop
-        else:
-            self.iterative_size += step
-
-        #while self.iterative_size<9:
-        if True:
-            #self.iterative_size += step
-            #print(self.iterative_size)
-
-            self.parent.make_searchboxes(cx,cy,pupil_radius_pixel=self.iterative_size/2.0*1000/self.ccd_pixel)
-            self.parent.init_params( {'pupil_diam': self.iterative_size / self.parent.pupil_mag})
-
-            if self.parent.ui.mode_offline:
-                self.iterative_offline()
-                return # Don't get boxes from engine
-
-            self.mode_snap(False,False)
-            mode=self.read_mode()
-            # TODO: don't wait forever; lokcup
-            while( mode>1 ):
-                mode=self.read_mode()
-                time.sleep(0.005)
-
-            #self.receive_centroids() # TODO
-            self.compute_zernikes()
-            zs = self.zernikes
-
-            factor = self.iterative_size / (self.iterative_size+step)
-            z_new =  iterative.extrapolate_zernikes(zs, factor)
-            #print( zs[5], zs[0:5] )
-            #print( z_new[0:5] )
-            self.shift_search_boxes(z_new,from_dialog=False)
-
-    def set_iterative_size(self,value):
-        self.iterative_size = value
-
     def offline_frame(self,nframe):
-        dims=np.zeros(2,dtype='uint16')
-        dims[0]=self.offline_movie[nframe].shape[0]
-        dims[1]=self.offline_movie[nframe].shape[1]
-        self.dims=dims
+        #dims=np.zeros(2,dtype='uint16')
+        #dims[0]=self.offline_movie[nframe].shape[0]
+        #dims[1]=self.offline_movie[nframe].shape[1]
+        self.dims=np.array( self.offline_movie[nframe].shape, dtype='uint16')  # TODO: np.array( [[shape]], dtype='uint16') seems better
         bytez=self.offline_movie[nframe]
         self.im = bytez
-        self.parent.comm.write_image(dims,bytez)
+        self.parent.comm.write_image(self.dims,bytez)
         self.ui.image_pixels = bytez
 
     def load_offline_background(self,file_info):
@@ -239,7 +199,7 @@ class NextwaveOffline():
             for nf_x,frame1 in enumerate(file_info[0]):
                 if not (".bmp" in frame1):
                     continue
-                print("Offline: ",nf,frame1)
+                #print("Offline: ",nf,frame1)
                 im = Image.open(frame1)
                 f1 = np.array(im) # TODO: assumes Im is already 8bit monochrome
                 if buf_movie is None:
@@ -312,7 +272,7 @@ class NextwaveOffline():
             for nf_x,frame1 in enumerate(file_info[0]):
                 if not (".bmp" in frame1):
                     continue
-                print("Offline: ",nf,frame1)
+                #print("Offline: ",nf,frame1)
                 im = Image.open(frame1)
                 f1 = np.array(im) # TODO: assumes Im is already 8bit monochrome
                 if buf_movie is None:
@@ -375,7 +335,6 @@ class NextwaveOffline():
         self.f_out.close()
 
     def metric_patch(self,patch_orig):
-        #filtd=gaussian_filter(buf_movie[nframe],3.0)
         po=patch_orig.copy()
         patch=gaussian_filter(po.copy(),3.0)
         permed=gaussian_filter( random.permutation(po.flatten()).reshape(patch.size), 3)
@@ -473,11 +432,11 @@ class NextwaveOffline():
 
         for nbox in np.arange(num_boxes):
             pix,xUL,yUL=self.get_box_pix(nbox)
-            try:
-                val=self.metric_patch(pix)
-            except ValueError:
-                val = -999.0
-            self.box_metrics[nbox]=val
+            #try:
+            #    val=self.metric_patch(pix)
+            #except ValueError:
+            #    val = -999.0
+            #self.box_metrics[nbox]=val
             #self.box_metrics[nbox]=BOX_THRESH*2.0
 
             pix=gaussian_filter(pix,GAUSS_SD)
@@ -526,13 +485,12 @@ class NextwaveOffline():
         focal = self.parent.focal
 
         self.iterative_size_pixels = self.iterative_size/2.0 * 1000 / ccd_pixel
-        #it_size_pix=self.iterative_size / 2.0 * 1000.0/ccd_pixel
         if self.iterative_size_pixels < self.iterative_max_pixels: #max_size /2.0 * 1000 / ccd_pixel:
             factor = self.iterative_size / (self.iterative_size+step_size)
             z_new =  iterative.extrapolate_zernikes(zs, factor)
 
-            self.iterative_size += step_size
-            self.iterative_size_pixels = self.iterative_size/2.0 * 1000 / ccd_pixel
+            self.iterative_size += step_size # Diameter
+            self.iterative_size_pixels = self.iterative_size/2.0 * 1000 / ccd_pixel # radius
             if self.iterative_size_pixels > self.iterative_max_pixels:
                 self.iterative_size = self.iterative_max
                 self.iterative_size_pixels = self.iterative_max_pixels
@@ -541,8 +499,9 @@ class NextwaveOffline():
             self.parent.ui.cy += int( z_new[0] / focal * ccd_pixel )
 
             self.parent.init_params( {'pupil_diam': self.iterative_size/ self.parent.pupil_mag})
-            self.parent.make_searchboxes(pupil_radius_pixel=self.iterative_size_pixels)
-
+            self.parent.make_searchboxes() #pupil_radius_pixel=self.iterative_size_pixels)
+            print( self.iterative_size_pixels, self.parent.pupil_radius_pixel) # They should match already (debugging)
+            
             z_bigger = np.zeros( self.parent.zterms_full.shape[0])
             z_bigger[0:len(z_new)] = z_new
 
@@ -555,41 +514,7 @@ class NextwaveOffline():
 
             self.saver.save1(self.parent.ui.offline_curr)
             return -1
-
-            self.compute_zernikes()
-            zs = self.zernikes
-
-            frame_name = self.offline_fname + "_%02d.png"%self.parent.ui.offline_curr
-            self.parent.ui.update_ui()
-            self.parent.ui.image.save(frame_name)
-
-            s="%d,%d,%f,%d,%d,"%(self.parent.ui.offline_curr,self.parent.num_boxes,self.iterative_size,self.parent.ui.cx,self.parent.ui.cy)
-
-            for zern1 in self.zernikes:
-                s += "%0.6f,"%zern1
-
-            s += '\n'
-            print(s)
-
-            self.f_out.write(s)
-            self.f_out.flush()
-
-            #self.box_size_pixel = int( self.box_size_pixel * 0.8 )
-            #self.init_params(overrides={'box_size_pixel': int(self.box_size_pixel*0.9)})
-            #self.make_searchboxes()
-            #self.offline_centroids()
-
-            #double_test = [self.parent.ui.image, self.parent.ui.image]
-
-            #with TiffImagePlugin.AppendingTiffWriter("./test.tiff",True) as tf:
-                #for im1 in double_test:
-                    #im1.save(tf)
-                    #tf.newFrame()
-
-            return -1
-
-        #print( self.opt1, self.iterative_size )
-        return 1
+     
 
     def offline_serialize(self):
         self.saver.save1(self.parent.ui.offline_curr)
@@ -615,15 +540,17 @@ class NextwaveOffline():
      pupil_diam = pupil_diam #* self.parent.pupil_mag
      self.iterative_size = pupil_diam
      self.iterative_size_pixels = self.iterative_size/2.0 * 1000 / self.parent.ccd_pixel
-     self.parent.pupil_diam = pupil_diam
      self.parent.ui.line_pupil_diam.setText('%2.2f'%(self.iterative_size / self.parent.pupil_mag) ) 
+     # pupil_diam is the size on sensor, so divide by mag (because init code multiplies by mag)
      self.parent.init_params( {'pupil_diam': pupil_diam / self.parent.pupil_mag})
      self.parent.make_searchboxes() 
 
     def offline_startbox(self):
         #pix=gaussian_filter(pix,GAUSS_SD) 
-        self.pupil_radius_pixel = np.sqrt(np.sum( (self.dims/2.0)**2)) # Start big
-        self.parent.init_params( {'pupil_diam': self.pupil_radius_pixel*2.0/1000.0*self.parent.ccd_pixel / self.parent.pupil_mag} )
+        self.pupil_radius_pixel = np.sqrt(np.sum( (self.dims/2.0)**2)) # Start big: hypotenuse
+        self.parent.init_params(
+            {'pupil_diam': self.pupil_radius_pixel*2.0/1000.0*self.parent.ccd_pixel / self.parent.pupil_mag} )
+       # self.parent.ui.move_center_abs( self.dims[1]/2, self.dims[0]/2)
         self.parent.make_searchboxes(pupil_radius_pixel=self.pupil_radius_pixel)
 
         self.offline_centroids()
@@ -650,7 +577,7 @@ class NextwaveOffline():
         self.cx_best = self.parent.box_x[box_min]
         self.cy_best = self.parent.box_y[box_min]
 
-        r_pix = self.opt1[2]
+        r_pix = self.opt1[2] * 1.0
         p_diam = r_pix*2.0/1000.0*self.parent.ccd_pixel
         #print( p_diam )
         self.iterative_max = p_diam
@@ -679,8 +606,7 @@ class NextwaveOffline():
         self.parent.ui.line_pupil_diam.setText('%2.2f'%(self.iterative_size / self.parent.pupil_mag) ) #+step) )
 
     def iterative_run_good(self):
-        self.iterative_size = float(self.parent.ui.it_start.text())
-        self.iterative_size *= self.parent.pupil_mag
+        self.iterative_size = float(self.parent.ui.it_start.text()) * self.parent.pupil_mag
         self.iterative_size_pixels = self.iterative_size/2.0 * 1000 / self.parent.ccd_pixel
         self.offline_startbox()
         self.offline_reset()
@@ -707,15 +633,23 @@ class NextwaveOffline():
         self.good_idx=int(len(self.good_template)*0.6) # TODO
         #print("Goodbox", nbox,nframe,self.good_idx, patch.shape, self.box_size_pixel)
 
+    def show_dialog_debug(self):
+        self.parent.ui.offline_dialog.sc.axes.plot( self.box_metrics, 'x-', label='rands')
+        self.parent.ui.offline_dialog.sc.axes.axhline( BOX_THRESH, color='r' )
+        self.parent.ui.offline_dialog.sc.axes.legend(loc='best', fontsize=16)
+        #self.parent.ui.offline_dialog.sc.axes.set_xlabel('Frame #', fontsize=16)
+        self.parent.ui.offline_dialog.sc.axes.set_ylim([-10, BOX_THRESH*2] )
+        self.parent.ui.offline_dialog.sc.axes.grid()
+        self.parent.ui.offline_dialog.sc.draw()
+        self.parent.ui.offline_dialog.show()
+        
     def show_dialog(self):
-        nums = np.random.rand(5)*10
-        print( nums )
         self.parent.ui.offline_dialog.sc.axes.clear();
 
         diams=np.array([self.saver.data[key1]['pupil_diam'] for key1 in self.saver.data.keys()])
         zerns=np.array([self.saver.data[key1]['zernikes'][0:10] for key1 in self.saver.data.keys()])
 
-        diams = diams * self.parent.pupil_diam # Convert to real "pupil space", not "sensor space"
+        diams = diams / self.parent.pupil_mag # Convert to real "pupil space", not "sensor space"
         
         radius2 = (diams/2) ** 2
         sqrt3=np.sqrt(3.0)
@@ -766,3 +700,85 @@ For each frame:
 - Centroids
 
 """
+
+        
+'''
+    def iterative_step(self, cx, cy, step, start, stop):
+        if self.iterative_size>=stop:
+            self.iterative_size = start
+        elif self.iterative_size+step > stop:
+            self.iterative_size = stop
+        else:
+            self.iterative_size += step
+
+        #while self.iterative_size<9:
+        if True:
+            #self.iterative_size += step
+            #print(self.iterative_size)
+
+            self.parent.make_searchboxes(cx,cy,pupil_radius_pixel=self.iterative_size/2.0*1000/self.ccd_pixel)
+            self.parent.init_params( {'pupil_diam': self.iterative_size / self.parent.pupil_mag})
+
+            if self.parent.ui.mode_offline:
+                self.iterative_offline()
+                return # Don't get boxes from engine
+
+            self.mode_snap(False,False)
+            mode=self.read_mode()
+            # TODO: don't wait forever; lokcup
+            while( mode>1 ):
+                mode=self.read_mode()
+                time.sleep(0.005)
+
+            #self.receive_centroids() # TODO
+            self.compute_zernikes()
+            zs = self.zernikes
+            
+        
+
+            factor = self.iterative_size / (self.iterative_size+step)
+            z_new =  iterative.extrapolate_zernikes(zs, factor)
+            #print( zs[5], zs[0:5] )
+            #print( z_new[0:5] )
+            self.shift_search_boxes(z_new,from_dialog=False)
+    
+    def set_iterative_size(self,value):
+        self.iterative_size = value
+'''
+
+            
+        
+# This was in online_stepbox, after completion (shrink!)        
+'''
+            self.compute_zernikes()
+            zs = self.zernikes
+
+            frame_name = self.offline_fname + "_%02d.png"%self.parent.ui.offline_curr
+            self.parent.ui.update_ui()
+            self.parent.ui.image.save(frame_name)
+
+            s="%d,%d,%f,%d,%d,"%(self.parent.ui.offline_curr,self.parent.num_boxes,self.iterative_size,self.parent.ui.cx,self.parent.ui.cy)
+            for zern1 in self.zernikes:
+                s += "%0.6f,"%zern1
+            s += '\n'
+            print(s)
+            self.f_out.write(s)
+            self.f_out.flush()
+
+            #self.box_size_pixel = int( self.box_size_pixel * 0.8 )
+            #self.init_params(overrides={'box_size_pixel': int(self.box_size_pixel*0.9)})
+            #self.make_searchboxes()
+            #self.offline_centroids()
+
+            #double_test = [self.parent.ui.image, self.parent.ui.image]
+
+            #with TiffImagePlugin.AppendingTiffWriter("./test.tiff",True) as tf:
+                #for im1 in double_test:
+                    #im1.save(tf)
+                    #tf.newFrame()
+
+            return -1
+
+        #print( self.opt1, self.iterative_size )
+        return 1
+'''   
