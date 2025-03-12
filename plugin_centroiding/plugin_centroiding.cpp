@@ -31,12 +31,15 @@ using json=nlohmann::json;
 
 unsigned char buffer[BUF_SIZE];
 
+uint8_t omit_boxes[MAX_BOXES];
+
 uint8_t bDoSubtractBackground=0;
 uint8_t bDoSetBackground=0;
-uint8_t bDoReplaceSubtracted=0;
+uint8_t bDoReplaceSubtracted=1;
 uint8_t bDoThreshold=0;
 
 float fThreshold=0.0;
+float fGain=1.0;
 
 unsigned int nCurrRing=0;
 //LARGE_INTEGER t2, t1;
@@ -323,7 +326,11 @@ int find_centroids_af(unsigned char *buffer, int width, int height) {
 	gaf->im = af::array(width, height, buffer).as(f64);
 	gaf->im = af::transpose( gaf->im );
 	gaf->im /= 255.0;
-
+	
+    struct shmem_boxes_header* pShmemBoxes = (struct shmem_boxes_header*) shmem_region3.get_address();
+	memcpy(omit_boxes, pShmemBoxes->centroid_omit, 1*num_boxes);
+	auto afOmits = af::array( num_boxes, omit_boxes).as(b8);
+	
   // Threshold pixels: (could also binarize )
   if (bDoThreshold) {
     //float thresholdValue = 60.0/255.0;
@@ -347,7 +354,7 @@ int find_centroids_af(unsigned char *buffer, int width, int height) {
 
     uint8_t *host = gaf->im_temp.host<uint8_t>();
 
-    struct shmem_boxes_header* pShmemBoxes = (struct shmem_boxes_header*) shmem_region3.get_address();
+    //struct shmem_boxes_header* pShmemBoxes = (struct shmem_boxes_header*) shmem_region3.get_address();
     memcpy((void*)((char *)(shmem_region2.get_address())+height*width*nCurrRing), host,
            height*width);
   }
@@ -389,25 +396,37 @@ int find_centroids_af(unsigned char *buffer, int width, int height) {
 		af_print(gaf->y_reshape );
 
 	gaf->im2 = gaf->im(gaf->seq1);
+	
+	// Reshape the array so each box can be summed  
 	gaf->im2 = af::moddims( gaf->im2, gaf->new_dims );
-
 	gaf->sums = af::sum( gaf->im2, 0);
+	
+	// Sum all pixels divide by total to get center of mass
 	gaf->sums_x = af::sum( gaf->x_reshape, 0) / gaf->sums;
 	gaf->sums_y = af::sum( gaf->y_reshape, 0) / gaf->sums;
+
+  gaf->sums_x(afOmits) = af::NaN;
+  gaf->sums_y(afOmits) = af::NaN; 
 
   CALC_TYPE *host_x = gaf->sums_x.host<CALC_TYPE>();
   CALC_TYPE *host_y = gaf->sums_y.host<CALC_TYPE>();
 
-  struct shmem_boxes_header* pShmemBoxes = (struct shmem_boxes_header*) shmem_region3.get_address();
+  //struct shmem_boxes_header* pShmemBoxes = (struct shmem_boxes_header*) shmem_region3.get_address();
 
   // Compute deltas and write to shmem
   gaf->delta_x = gaf->sums_x - gaf->ref_x;
   gaf->delta_y = gaf->sums_y - gaf->ref_y;
 
+  auto valids = !af::isNaN(gaf->delta_x);
+  //auto nans = af::isNaN(gaf->delta_x);
+
   // Remove tip and tilt
-  gaf->delta_x -= (CALC_TYPE)af::mean<CALC_TYPE>(gaf->delta_x);
-  gaf->delta_y -= (CALC_TYPE)af::mean<CALC_TYPE>(gaf->delta_y);
+  gaf->delta_x -= (CALC_TYPE)af::mean<CALC_TYPE>(gaf->delta_x(valids) ); // weighted mean, 0 for NaNs
+  gaf->delta_y -= (CALC_TYPE)af::mean<CALC_TYPE>(gaf->delta_y(valids) );
   gaf->delta_y = -gaf->delta_y; // Negate y (coord system)
+
+  //gaf->delta_x(nans) = 0.0;
+  //gaf->delta_y(nans) = 0.0;
 
   CALC_TYPE *host_delta_x = gaf->delta_x.host<CALC_TYPE>();
   CALC_TYPE *host_delta_y = gaf->delta_y.host<CALC_TYPE>();
@@ -423,6 +442,9 @@ int find_centroids_af(unsigned char *buffer, int width, int height) {
   gaf->slopes = af::moddims(gaf->slopes,af::dim4(1,num_boxes*2,1,1) ); // like flatten, but in 2nd dimension
   gaf->slopes /= (focal_length_um/pixel_um);
 
+  auto valids2 = af::join(0, valids, valids);
+
+  //gaf->mirror_voltages = af::matmul(gaf->slopes(valids2), gaf->influence_inv(valids2, af::span) );
   gaf->mirror_voltages = af::matmul(gaf->slopes, gaf->influence_inv );
   double *host_mirror_voltages = gaf->mirror_voltages.host<double>();
 
@@ -442,20 +464,19 @@ int find_centroids_af(unsigned char *buffer, int width, int height) {
   memcpy(pShmemBoxes->centroid_x, host_x, sizeof(CALC_TYPE)*num_boxes);
   memcpy(pShmemBoxes->centroid_y, host_y, sizeof(CALC_TYPE)*num_boxes);
 
-  //memcpy(pShmemBoxes->mirror_voltages, host_mirror_voltages, sizeof(float)*nActuators);
+  //memcpy(pShmemBoxes->mirror_voltages, host_mirror_voltages, sizeof(double)*nActuators); // Added for debugging 2025/26/02 -- see realtime voltage calcs
 
     auto save1 = pShmemBoxes->mirror_voltages[0]; // Debugging
 
-	if ((pShmem->mode == 3 || pShmem->mode==9) ) { // Closed loop
+	if ((pShmem->mode & MODE_AO) ) { // Closed loop
 	
 		double mirror_min=10, mirror_max=-10, mirror_mean=0;
 		for (int i=0; i<nActuators; i++) {
 
-			if (pShmem->mode == 3 || pShmem->mode==9 ) {
+			if (pShmem->mode & MODE_AO ) {
 			  // If closed loop, add new voltages to old
-			  pShmemBoxes->mirror_voltages[i] = pShmemBoxes->mirror_voltages[i] - host_mirror_voltages[i];
+			  pShmemBoxes->mirror_voltages[i] = pShmemBoxes->mirror_voltages[i] - host_mirror_voltages[i]*fGain;
 			}
-
 			// CLAMP
 			if (pShmemBoxes->mirror_voltages[i] > CLIPVAL)
 				pShmemBoxes->mirror_voltages[i]=CLIPVAL;
@@ -479,7 +500,7 @@ int find_centroids_af(unsigned char *buffer, int width, int height) {
 		memcpy(gpShmemLog[gpShmemHeader->total_frames].mirrors, pShmemBoxes->mirror_voltages, sizeof(CALC_TYPE)*nActuators);
 		mirror_mean /= nActuators;
 		
-		//spdlog::info("Mirror {}:{}/{} 0:{} 00:{}", (double)mirror_mean, (double)mirror_min, (double) mirror_max, (double)pShmemBoxes->mirror_voltages[0], (double)save1 );
+		spdlog::info("Mirror {}:{}/{} 0:{} 00:{}", (double)mirror_mean, (double)mirror_min, (double) mirror_max, (double)pShmemBoxes->mirror_voltages[0], (double)save1 );
 
 	} // if closed loop
 
@@ -548,6 +569,10 @@ void process_ui_commands(void) {
       fThreshold=atof(msg+1);
       //spdlog::info("T={}",fThreshold);
       bDoThreshold=1;
+      break;
+    case 'G':
+      fGain=atof(msg+1);
+      spdlog::info("G={}",fGain);
       break;
     case 't':
       spdlog::info("t!");

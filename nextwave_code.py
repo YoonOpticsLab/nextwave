@@ -73,10 +73,13 @@ class NextwaveEngine():
         self.num_boxes = 0
         self.zernikes = None
         self.defocus = 0
-
+        self.aogain = 1.0
+        self.omits = np.zeros( 0, dtype='uint8' ) # Need to do early
+        
     def init(self):
         if not self.ui.offline_only:
             self.comm.init()
+            self.comm.set_mode(0)
         self.init_params()
 
     def init_params(self, overrides=None):
@@ -87,13 +90,16 @@ class NextwaveEngine():
         self.focal =     self.ui.get_param_xml("LENSLETS_LensletFocalLength")/1000.0
         self.box_um =    self.ui.get_param_xml("LENSLETS_LensletPitch")
         self.ccd_pixel = self.ui.get_param_xml("CAMERA1_CameraPixelPitch")
-        self.pupil_diam =self.ui.get_param_xml("OPTICS_PupilDiameter") * self.ui.get_param_xml("OPTICS_PupilMagnificationFactor")
+        self.pupil_diam =self.ui.get_param_xml("OPTICS_PupilDiameter")
+        self.pupil_mag =self.ui.get_param_xml("OPTICS_PupilMagnificationFactor")
 
         if overrides:
             self.pupil_diam=overrides.get('pupil_diam',self.pupil_diam)
 
         # New method, not used much yet:
         self.params = OpticsParams(self.ccd_pixel, self.pupil_diam, self.box_um, self.focal)
+
+        self.pupil_diam = self.pupil_diam * self.pupil_mag
 
         self.pupil_radius_mm=self.pupil_diam / 2.0
         self.pupil_radius_pixel=self.pupil_radius_mm * 1000 / self.ccd_pixel
@@ -210,7 +216,18 @@ class NextwaveEngine():
             self.neighbors[nidx]=np.argsort( distances)[1:5] # Take 4 nearest, excluding self (which will be 0)
 
         self.update_searchboxes()
-
+        
+        self.omits = np.zeros( num_boxes, dtype='uint8' )
+        try:
+            #fil=open("omits.txt","rt")
+            #lins=fil.readlines();
+            omits = np.loadtxt("omits.txt", dtype='int')
+            print( omits )
+            for omit1 in omits:
+                self.omits[omit1]=1
+        except:
+            pass
+        
         return self.ref_x,self.ref_y,self.norm_x,self.norm_y
 
     def dump_vars(self):
@@ -245,7 +262,7 @@ class NextwaveEngine():
 
         # Compute all integrals for all box corners 
         lenslet_dx,lenslet_dy=zernike_functions.zernike_integral_average_from_corners(
-            lefts, rights, ups, downs, self.pupil_radius_mm)
+            lefts, rights, ups, downs, self.pupil_radius_mm / self.pupil_mag )
 
         # Remove piston
         lenslet_dx = lenslet_dx[1:,:]
@@ -321,6 +338,7 @@ class NextwaveEngine():
         #spot_displace_x -= spot_displace_x.mean()
         #spot_displace_y -= spot_displace_y.mean()
         #print( spot_displace_y.mean(), spot_displace_x.mean() )
+        self.mean_displacements = [np.nanmean(spot_displace_x), np.nanmean(spot_displace_y) ]
 
         self.spot_displace_interpolated = np.zeros( self.num_boxes )
 
@@ -372,32 +390,79 @@ class NextwaveEngine():
         self.delta_y=delta_y
         self.zern_new = zern_new
         self.zs = zs
+
+        np.savetxt('zs_delta_x.txt',delta_x );
+        np.savetxt('zs_delta_y.txt',delta_y );
+        
         return delta_x,delta_y
 
     def defocus_do(self):
         zs= np.zeros(20)
         zs[3] = self.defocus
-        dx,dy = self.get_deltas(zs, False)
-        self.box_x = self.initial_x - dx
-        self.box_y = self.initial_y + dy
-        self.comm.send_searchboxes(self.box_x, self.box_y)
         
-        dx -= np.mean(dx)
-        dy -= np.mean(dy)
-        mat1 = np.vstack( (dx,dy) )
-        mirs = np.matmul ( self.influence, mat1 )
+        if False: # For open loop, doesn't work (not linear)
+            dx,dy = self.get_deltas(zs, False)
+            
+            # As Reference Shift:
+            #self.ref_x = self.initial_x - dx
+            #self.ref_y = self.initial_y + dy
+            #self.comm.send_searchboxes(self.box_x, self.box_y)
+            
+            # Method2: Take current deltas, then add futher by dx
+            dx -= np.mean(dx)
+            dy -= np.mean(dy)
+            deltas1 = np.vstack( (dx,-dy) ).T.flatten()
+            deltas1 /= (self.focal*1000/self.ccd_pixel)
+            mirs = np.matmul ( deltas1, self.influence_inv )
 
-        print( np.mean( mirs) )
-        #write_mirrors_offsets(mirs)
-        print(self.defocus)
+            #print( np.mean( mirs), mirs[0:10] )
+            self.comm.write_mirrors_offsets(-mirs)
+            #print(self.defocus)
+        else:
+            self.shift_references(zs,False)
+            self.comm.send_searchboxes(self.box_x, self.box_y)
+            
+            self.comm.set_mode( 
+                self.comm.read_mode() | 0x20 )  # MODE_FORCE_AO_START TODO
+            
+    def defocus_start(self):
+        # One idea was to save a local copy of the "current" centroids, and use those in entire
+        # inverse calculations. Think it's not necessary though; can just add the mirror deltas.
+        self.centroids_x_save = self.centroids_x 
+        self.centroids_y_save = self.centroids_y
     
-    def defocus_plus(self):
+    def defocus_plus01(self):
+        self.defocus += 0.01
+        self.defocus_do();
+    def defocus_plus10(self):
         self.defocus += 0.1
+        self.defocus_do();
+    def defocus_minus01(self):
+        self.defocus -= 0.01
+        self.defocus_do();
+    def defocus_minus10(self):
+        self.defocus -= 0.1
+        self.defocus_do();
+
+
+    def defocus_plus(self):
+        self.defocus += 0.01
         self.defocus_do();
         
     def defocus_minus(self):
-        self.defocus -= 0.1
+        self.defocus -= 0.01
         self.defocus_do();
+        
+    def defocus_set(self,val):
+        self.defocus = val
+        self.defocus_do();
+
+    def aogain_set(self,val):
+        self.aogain = val
+        self.aogain_do();
+        
+    def aogain_do(self):
+        self.ui.sockets.centroiding.send(b"G%f\x00"%(self.aogain) )
 
     def shift_search_boxes(self,zs,from_dialog=True):
         #print( zs )
@@ -418,7 +483,8 @@ class NextwaveEngine():
         self.update_searchboxes()    
 
     def reset_references(self):
-        return
+        self.ref_x = self.initial_x
+        self.ref_y = self.initial_y
 
     def receive_image(self):
         return self.comm.receive_image()
@@ -438,6 +504,15 @@ class NextwaveEngine():
         
     def flat_do(self):
         self.comm.flat_do()
+        
+    def loop_changed(self,is_checked):
+        if is_checked:
+            if self.comm.read_mode() == 4:
+                self.comm.set_mode(4+8)
+        else:
+            if self.comm.read_mode() == 4+8:
+                self.comm.set_mode(4)
+            
     def flat_save(self):
         self.comm.flat_save()
 
@@ -459,12 +534,11 @@ class NextwaveEngine():
             self.init_params()
             self.update_searchboxes()
 
-        val=3 if (self.ui.chkLoop.isChecked() and allow_AO) else 2
-        self.mode=2 # Different mode??
+        val=(2+8) if (self.ui.chkLoop.isChecked() and allow_AO) else 2
+        self.mode=2 # Different mode?? TODO
         self.comm.set_mode(val)
 
     def mode_run(self, reinit=True, numruns=1):
-        self.mode=3
         if reinit:
             self.init_params()
 
@@ -473,7 +547,8 @@ class NextwaveEngine():
         #buf.append(val.tobytes())
         self.comm.set_nframes(val)
 
-        val=9 if self.ui.chkLoop.isChecked() else 8
+        val=(4+8) if self.ui.chkLoop.isChecked() else 4
+        self.mode=4 # ?? TODO
         self.comm.set_mode(val)
 
     def mode_stop(self):
@@ -483,7 +558,7 @@ class NextwaveEngine():
         fil = open(centroids_filename,'wt')
 
         fil.writelines( '[image size = %dx%d]\n'%(self.image_bytes.shape[0],self.image_bytes.shape[1]))
-        fil.writelines( '[pupil = %f,%d,%d]\n'%(self.ui.pupil_diam,self.ui.cx,self.ui.cy))
+        fil.writelines( '[pupil = %f,%d,%d]\n'%(self.pupil_diam/self.pupil_mag,self.ui.cx,self.ui.cy))
         for nbox in np.arange( len(self.ref_x)):
             # TODO: Valid or invalid
             fil.writelines('%d\t%.12f\t%.12f\t%.12f\t%.12f\t\n'%(

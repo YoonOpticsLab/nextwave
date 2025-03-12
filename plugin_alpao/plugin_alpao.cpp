@@ -61,7 +61,7 @@ DECL init(void)
 	// Also clear out the values in shared memory structure
   	for (auto i=0; i<num_act; i++) {
 	  gpShmemBoxes->mirror_voltages[i]=0;
-	  //gpShmemBoxes->mirror_voltages_offsets[i]=0;
+	  gpShmemBoxes->mirror_voltages_offsets[i]=0;
 	}
 
 	
@@ -93,7 +93,7 @@ DECL process(char *commands)
 
   double val;
   for( int i=0; i<num_act; i++) {
-	  val= pShmemBoxes->mirror_voltages[i];
+	  val= pShmemBoxes->mirror_voltages[i] + pShmemBoxes->mirror_voltages_offsets[i];
 	  
 	  if (val<mymin) mymin=val;
 	  if (val>mymax) mymax=val;
@@ -116,7 +116,7 @@ DECL process(char *commands)
   //spdlog::info("DM Loop:{} #{}:{}x{} {}{} min:{:0.4f} max:{:0.4f}, mean:{:0.4f} 0:{:0.4f} 1:{:0.4f} {}", loop, nCurrRing, height, width,
 	//	commands[0], commands[1], mymin, mymax, mymean, data[0], data[1], val );
   
-  if (loop) {
+  if (loop||1) { // Always do this for now
 #if REAL_AO	 
 	// Copied from documentation in ALPAO SDK3 Programmer's Guide  (pg 13/18)
 	// Not sure why/if Stop() is needed.. (drc 06/2024)

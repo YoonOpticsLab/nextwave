@@ -148,6 +148,13 @@ class NextwaveEngineComm():
         except AttributeError:
             pass # Probably missing influence function. Hasn't been calc'ed yet.
 
+        buf = ByteStream()
+        for item in self.parent.omits:
+            buf.append(item)
+        shmem_boxes.seek(fields['centroid_omit']['bytenum_current'])
+        shmem_boxes.write(buf)
+        shmem_boxes.flush()
+        
         # Write header last, so the engine knows when we are ready
         buf = ByteStream()
         buf.append(1)
@@ -234,10 +241,13 @@ class NextwaveEngineComm():
     def zero_do(self):
         self.write_mirrors( np.zeros(97) ) # TODO: # of mirrors
         self.set_mode( 
-            self.read_mode() | 0x20 )  # MODE_FORCE_AO_START TODO
+            self.read_mode() | 0x20 )  # MODE_FORCE_AO_START TODO. Possible race condition.
 
     def flat_do(self):
         self.write_mirrors( self.mirror_state_flat )
+        self.set_mode( 
+            self.read_mode() | 0x20 )  # MODE_FORCE_AO_START TODO. Possible race condition.
+        
     def flat_save(self):
         self.mirror_state_flat = np.copy(self.mirror_voltages)
 

@@ -317,7 +317,6 @@ int main(int argc, char** argv)
 
     if (pShmem1->mode > MODE_READY ) {
 
-		
       if (pShmem1->mode & MODE_FORCE_AO_START )  {
         nAOSkipFrames=3;
         pShmem1->mode ^= MODE_FORCE_AO_START;
@@ -334,22 +333,18 @@ int main(int argc, char** argv)
         }
       }
 
-      if (pShmem1->mode == MODE_RUNONCE_CENTROIDING_AO) {
+      if ( ( (pShmem1->mode&MODE_AO) && (pShmem1->mode&MODE_SNAP)) || (pShmem1->mode & MODE_FORCE_AO_DURING) ) {
         str_message[0]='I'; // Re-init on "snap"
-        str_message[1]='C'; // Re-init on "snap"
+        str_message[1]='C'; // Closed loop
         bRunning=0;
-      } else if (pShmem1->mode == MODE_RUNONCE_CENTROIDING) {
+      } else if ( pShmem1->mode&MODE_SNAP ) {
         str_message[0]='I'; // Re-init on "snap"
-        str_message[1]=' '; // Re-init on "snap"
+        str_message[1]=' '; // 
         bRunning=0;
-      } else if (pShmem1->mode == MODE_CALIBRATING) {
+      } else if (pShmem1->mode & MODE_AO) {
         str_message[0]=' ';
         str_message[1]='C'; //"closed loop" (==apply AO)
-        bRunning=0;
-      } else if (pShmem1->mode == MODE_OPEN_LOOP) {
-        str_message[0]=' ';
-        str_message[1]='C'; // Apply AO
-        bRunning=0;				
+        bRunning=0;			
       } else {
         str_message[0]=' ';
         str_message[1]=' ';
@@ -372,7 +367,7 @@ int main(int argc, char** argv)
       uint16_t ms_times_100;
       double times_before[4]; //TODO
       for (struct module it: listModules) {
-        //spdlog::info("Before {} {} {}", pShmem1->total_frames, modnum, it.name );
+          //spdlog::info("Before {} {} {}", pShmem1->total_frames, modnum, it.name );
           boost::chrono::high_resolution_clock::time_point time_before = boost::chrono::high_resolution_clock::now();
 
           int result=(*it.fp_do_process)((const char*)str_message);
@@ -394,11 +389,12 @@ int main(int argc, char** argv)
           modnum++;
         }
 
-        pShmemLog[pShmem1->total_frames].frame_number=pShmem1->current_frame;
-        pShmemLog[pShmem1->total_frames].total_frame_number=pShmem1->total_frames;
-        pShmemLog[pShmem1->total_frames].time0=times_before[0];
-        pShmemLog[pShmem1->total_frames].time1=times_before[1];
-        pShmemLog[pShmem1->total_frames].time2=times_before[2];
+        int logidx_g = pShmem1->total_frames % SHMEM_LOG_MAX;
+        pShmemLog[logidx_g].frame_number=pShmem1->current_frame;
+        pShmemLog[logidx_g].total_frame_number=pShmem1->total_frames;
+        pShmemLog[logidx_g].time0=times_before[0];
+        pShmemLog[logidx_g].time1=times_before[1];
+        pShmemLog[logidx_g].time2=times_before[2];
 
         boost::chrono::high_resolution_clock::time_point time_now = boost::chrono::high_resolution_clock::now();
         //boost::chrono::duration<double> time_span = duration_cast<duration<double>>(time_now - time_total_before);
@@ -423,7 +419,7 @@ int main(int argc, char** argv)
         //spdlog::info("Frames lefT: {}", pShmem1->frames_left);
 
       // Ran once, unarm
-        if ( (pShmem1->mode & MODE_RUNONCE_CENTROIDING) ||
+        if ( (pShmem1->mode & MODE_SNAP) ||
 			(pShmem1->mode == MODE_CALIBRATING) || // Run calibration one-by-one (1 iteration per mirror)
 			(pShmem1->frames_left<1)
 			) {

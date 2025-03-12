@@ -2,6 +2,12 @@ from PyQt5.QtWidgets import (QMainWindow, QLabel, QSizePolicy, QApplication, QPu
                              QHBoxLayout, QVBoxLayout, QGridLayout, QScrollArea, QMessageBox,
                              QWidget, QGroupBox, QTabWidget, QTextEdit, QSpinBox, QDoubleSpinBox, QSlider,
                              QFileDialog, QCheckBox, QDialog, QFormLayout, QDialogButtonBox, QLineEdit)
+
+from PyQt5.QtGui import QKeySequence
+from PyQt5.QtWidgets import QShortcut
+
+
+
 from PyQt5.QtGui import QPixmap, QImage, QPainter, QPen, QFont
 from PyQt5.QtCore import Qt, QTimer, QEvent, QLineF, QPointF, pyqtSignal 
 import PyQt5.QtGui as QtGui
@@ -9,6 +15,7 @@ import PyQt5.QtCore as QtCore
 
 import pyqtgraph as pg
 from pyqtgraph.parametertree import Parameter, ParameterTree
+#from pyqtkeybind import keybinder
 
 import numpy as np
 import sys
@@ -107,7 +114,7 @@ class NextWaveMainWindow(QMainWindow):
 
     self.params = [
         {'name': 'UI', 'type': 'group', 'title':'User interface', 'children': [
-            {'name': 'update_rate', 'type': 'int', 'value': 500, 'title':'Display update rate (ms)', 'limits':[50,2000]},
+            {'name': 'update_rate', 'type': 'int', 'value': 200, 'title':'Display update rate (ms)', 'limits':[50,2000]},
             {'name': 'update_rate_dm', 'type': 'int', 'value': 100, 'title':'DM Display update rate (ms)', 'limits':[50,2000]},
             {'name': 'show_boxes', 'type': 'bool', 'value': True, 'title':'Show search boxes'}
         ]},
@@ -242,6 +249,9 @@ class NextWaveMainWindow(QMainWindow):
         painter.drawLines(boxes1)
 
         idx_bads=np.where(np.isnan(self.engine.centroids_x))[0]
+        pen = QPen(Qt.red, 1.00, Qt.SolidLine)
+        painter.setPen(pen)
+        #print( idx_bads, end='')        
         bad_boxes=[QLineF(self.engine.box_x[n]-box_size_pixel//2-BOX_BORDER,
                        self.engine.box_y[n]-box_size_pixel//2+BOX_BORDER,
                        self.engine.box_x[n]+box_size_pixel//2-BOX_BORDER,
@@ -386,6 +396,10 @@ class NextWaveMainWindow(QMainWindow):
         #str_stats+=f"{'Sphere(-cyl)':<15}= {sphere:3.2f}\n"
         str_stats+=f"{'Cylinder':<15}= {cylinder:3.2f}\n"
         str_stats+=f"{'Axis(-cyl)':<15}= {axis:3.2f}\n"
+        
+        str_stats += f"Mean (x,y): {self.engine.mean_displacements[0]:4.2f},{self.engine.mean_displacements[1]:4.2f}" 
+        str_stats += f" Zs: {self.engine.zernikes[0]:4.2f},{self.engine.zernikes[1]:4.2f}" 
+        
         self.text_stats.setText(str_stats)
         #self.text_stats.setHtml(str_stats) # TODO: To get other colors, can embed <font color="red">TEXT</font><br>, etc.
 
@@ -419,6 +433,10 @@ class NextWaveMainWindow(QMainWindow):
 
     self.label_status0.setText(s)
     self.label_status0.setStyleSheet("color: rgb(0, 255, 0); background-color: rgb(0,0,0);")
+
+    # Pulled from engine
+    self.label_defocus.setText( 'Defocus: %0.3f'%self.engine.defocus )
+    self.label_aogain.setText(  'AO Gain: %0.3f'%self.engine.aogain )
 
     if not self.engine.zernikes is None:
      if len(self.engine.zernikes)>0:
@@ -879,8 +897,8 @@ class NextWaveMainWindow(QMainWindow):
 
      ### DM Ops
      layout1 = QGridLayout(self.ops_dm)
-     #self.chkLoop = QCheckBox("Close AO Loop")
-     layout1.addWidget(self.chkLoop,0,0)
+     layout1.addWidget(self.chkLoop,0,0) # It's created above.. Need for order
+     self.chkLoop.stateChanged.connect(self.loop_changed)
 
      btn = QPushButton("Save flat")
      btn.clicked.connect(self.flat_save)
@@ -926,6 +944,29 @@ class NextWaveMainWindow(QMainWindow):
      btn.clicked.connect(self.engine.defocus_minus )
      layout1.addWidget(btn, 2,2 )
 
+     self.slider_defocus = QSlider(orientation=Qt.Horizontal)
+     self.slider_defocus.setMinimum(0)
+     self.slider_defocus.setMaximum(1000)
+     self.slider_defocus.setValue(500) 
+     layout1.addWidget(self.slider_defocus,3,2)
+     self.slider_defocus.valueChanged.connect(self.slider_defocus_changed) # TODO
+
+     self.slider_aogain = QSlider(orientation=Qt.Horizontal)
+     self.slider_aogain.setMinimum(0)
+     self.slider_aogain.setMaximum(100)
+     layout1.addWidget(self.slider_aogain,4,2)
+     self.slider_aogain.valueChanged.connect(self.slider_aogain_changed) # TODO
+     
+     self.label_aogain = QLabel("Defocus: ")
+     layout1.addWidget(self.label_aogain, 4,3)
+
+     # Not used
+     #btn = QPushButton("Defocus start")
+     #btn.clicked.connect(self.engine.defocus_start )
+     #layout1.addWidget(btn, 3,2 )
+     
+     self.label_defocus = QLabel("Defocus: ")
+     layout1.addWidget(self.label_defocus, 3,3)
 
      self.widget_mode_buttons = QWidget()
      layoutStatusButtons = QHBoxLayout(self.widget_mode_buttons)
@@ -946,7 +987,7 @@ class NextWaveMainWindow(QMainWindow):
      layoutStatusButtons.addWidget(self.mode_btn4)
      self.mode_btn4.clicked.connect(self.mode_stop)
 
-     self.edit_num_runs = QLineEdit("-1")
+     self.edit_num_runs = QLineEdit("9999")
      self.edit_num_runs.setMaxLength(6)
      layoutStatusButtons.addWidget(self.edit_num_runs)
 
@@ -1067,6 +1108,22 @@ class NextWaveMainWindow(QMainWindow):
      menu.addAction('e&Xit', self.close)
 
      pixmap_label.setFocus()
+     self.shortcut = QShortcut(QKeySequence("Ctrl+A"), self)
+     self.shortcut.activated.connect(self.mode_snap)
+     self.shortcut = QShortcut(QKeySequence("Ctrl+S"), self)
+     self.shortcut.activated.connect(self.mode_stop)
+     self.shortcut = QShortcut(QKeySequence("Ctrl+D"), self)
+     self.shortcut.activated.connect(self.mode_run)
+
+     self.shortcut = QShortcut(QKeySequence("Ctrl+1"), self)
+     self.shortcut.activated.connect(self.engine.defocus_minus10)
+     self.shortcut = QShortcut(QKeySequence("Ctrl+2"), self)
+     self.shortcut.activated.connect(self.engine.defocus_minus01)
+
+     self.shortcut = QShortcut(QKeySequence("Ctrl+3"), self)
+     self.shortcut.activated.connect(self.engine.defocus_plus01)
+     self.shortcut = QShortcut(QKeySequence("Ctrl+4"), self)
+     self.shortcut.activated.connect(self.engine.defocus_plus10)
 
      self.setGeometry(2,2,MAIN_WIDTH_WIN,MAIN_HEIGHT_WIN)
      self.show()
@@ -1086,7 +1143,14 @@ class NextWaveMainWindow(QMainWindow):
     #msgBox.repaint()
     #msgBox.update()
     self.engine.do_calibration(self.calibration_status)
+ 
+ def slider_aogain_changed(self):
+    self.engine.aogain_set( self.slider_aogain.value()/100.0 )
     
+ def slider_defocus_changed(self):
+     scaled = (self.slider_defocus.value()-500)/100.0
+     self.engine.defocus_set(scaled)
+     
  def slider_threshold_changed(self):
      scaled = self.slider_threshold.value()/100.0
      self.threshold_val.setValue(scaled)
@@ -1094,14 +1158,15 @@ class NextWaveMainWindow(QMainWindow):
  def slider_exposure_changed(self):
      scaled = 10**( float( self.slider_exposure.value())/100.0*np.log10(CAM_EXPO_MAX/CAM_EXPO_MIN)+np.log10(CAM_EXPO_MIN))
      self.exposure.setValue(scaled)
-     msg=b"E=%f\x00"%(scaled*1000)
-     print(msg)
+     msg=b"E=%f"%(scaled*1000)
      self.sockets.camera.send( msg ) # Convert to usec
 
  def slider_gain_changed(self):
      scaled = self.slider_gain.value()/100.0*CAM_GAIN_MAX
      self.gain.setValue(scaled)
 
+ def loop_changed(self,state):
+    self.engine.loop_changed(self.chkLoop.isChecked() )
  def flat_save(self):
      self.engine.flat_save()
      return
@@ -1365,8 +1430,17 @@ def main():
   win.initEngine()
   win.initUI()
 
+  #keybinder.init()
+  #keybinder.register_hotkey(win, "Ctrl+A", win.mode_snap)  
+
   if not win.offline_only:
       win.sockets.init()
+        
+  # Set defaults
+  win.slider_defocus.setValue(500)
+  win.slider_aogain.setValue(50)
+  
+  
   start_backdoor(win)
 
   sys.exit(app.exec_())

@@ -1,6 +1,6 @@
-#define MAX_BOXES 1024
+#define MAX_BOXES 2048
 #define MAX_MIRROR_VOLTAGES 256
-#define MAX_TERMS 262144
+#define MAX_TERMS 524288
 
 #define CALC_TYPE double
 
@@ -24,6 +24,7 @@ struct shmem_boxes_header
 	CALC_TYPE box_y[MAX_BOXES];
 	CALC_TYPE centroid_x[MAX_BOXES];
 	CALC_TYPE centroid_y[MAX_BOXES];
+	uint8_t centroid_omit[MAX_BOXES];
 	uint8_t centroid_valid[MAX_BOXES];
 	CALC_TYPE box_x_normalized[MAX_BOXES];
 	CALC_TYPE box_y_normalized[MAX_BOXES];
@@ -35,7 +36,7 @@ struct shmem_boxes_header
   CALC_TYPE delta_y[MAX_BOXES];
 
   CALC_TYPE mirror_voltages[MAX_MIRROR_VOLTAGES];
-  CALC_TYPE mirror_voltages_offset[MAX_MIRROR_VOLTAGES];
+  CALC_TYPE mirror_voltages_offsets[MAX_MIRROR_VOLTAGES];
 };
 
 #define SHMEM_BUFFER_SIZE_BOXES 1+1+2+sizeof(CALC_TYPE)*3+4+MAX_BOXES*sizeof(CALC_TYPE)*10+1*MAX_BOXES+sizeof(CALC_TYPE)*MAX_TERMS*2+MAX_MIRROR_VOLTAGES*sizeof(CALC_TYPE)
