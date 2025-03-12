@@ -2,6 +2,7 @@
 #define SHMEM_LOG_MAX 4096
 #define MAX_BOXES 2048
 #define MAX_ACTUATORS 1024
+#define MAX_IMAGE_SIZE 2048*2048
 struct shmem_log_entry {
   uint8_t frame_number;
   uint8_t total_frame_number;
@@ -9,6 +10,7 @@ struct shmem_log_entry {
   double time1;
   double time2;
 
+  uint8_t im[MAX_IMAGE_SIZE];
   double centroid_x[MAX_BOXES];
   double centroid_y[MAX_BOXES];
   double mirrors[MAX_ACTUATORS];

@@ -75,7 +75,7 @@ public:
 
   af::array im;
   af::array im_background;
-  af::array im_temp;
+  af::array im_subtracted_u8;
 
   af::array im_xcoor;
   af::array im_ycoor;
@@ -347,15 +347,15 @@ int find_centroids_af(unsigned char *buffer, int width, int height) {
   if (bDoSubtractBackground)
     gaf->im -= gaf->im_background;
 
+  gaf->im_subtracted_u8 = gaf->im.copy();
+  gaf->im_subtracted_u8 *= 255.0;
+  gaf->im_subtracted_u8 = af::transpose(gaf->im_subtracted_u8).as(u8);
+
+  uint8_t *host_im_subtracted_u8 = gaf->im_subtracted_u8.host<uint8_t>();
+
   if (bDoReplaceSubtracted) {
-    gaf->im_temp = gaf->im.copy();
-    gaf->im_temp *= 255.0;
-    gaf->im_temp = af::transpose(gaf->im_temp).as(u8);
-
-    uint8_t *host = gaf->im_temp.host<uint8_t>();
-
     //struct shmem_boxes_header* pShmemBoxes = (struct shmem_boxes_header*) shmem_region3.get_address();
-    memcpy((void*)((char *)(shmem_region2.get_address())+height*width*nCurrRing), host,
+    memcpy((void*)((char *)(shmem_region2.get_address())+height*width*nCurrRing), host_im_subtracted_u8,
            height*width);
   }
 
@@ -482,7 +482,7 @@ int find_centroids_af(unsigned char *buffer, int width, int height) {
 				pShmemBoxes->mirror_voltages[i]=CLIPVAL;
 			if (pShmemBoxes->mirror_voltages[i] < -CLIPVAL)
 				pShmemBoxes->mirror_voltages[i]=-CLIPVAL;
-			
+
 			if (!std::isfinite(pShmemBoxes->mirror_voltages[i]) ) {
 				pShmemBoxes->mirror_voltages[i]=0; // ? flatten to zero if nan/inf
 			}
@@ -495,11 +495,13 @@ int find_centroids_af(unsigned char *buffer, int width, int height) {
 
 			mirror_mean += pShmemBoxes->mirror_voltages[i];
 		}
-		
-		// Memory Log: for debugging
-		memcpy(gpShmemLog[gpShmemHeader->total_frames].mirrors, pShmemBoxes->mirror_voltages, sizeof(CALC_TYPE)*nActuators);
 		mirror_mean /= nActuators;
-		
+
+		// Memory Log: for debugging/log
+		memcpy(gpShmemLog[gpShmemHeader->total_frames].mirrors, pShmemBoxes->mirror_voltages, sizeof(CALC_TYPE)*nActuators);
+		memcpy(gpShmemLog[gpShmemHeader->total_frames].mirrors, host_im_subtracted_u8, sizeof(uint8_t)*MAX_IMAGE_SIZE);
+
+		// Debug:
 		spdlog::info("Mirror {}:{}/{} 0:{} 00:{}", (double)mirror_mean, (double)mirror_min, (double) mirror_max, (double)pShmemBoxes->mirror_voltages[0], (double)save1 );
 
 	} // if closed loop
