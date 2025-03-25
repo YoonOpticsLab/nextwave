@@ -353,18 +353,26 @@ class NextwaveEngine():
         #print( spot_displace_y.mean(), spot_displace_x.mean() )
 
         self.spot_displace_interpolated = np.zeros( self.num_boxes )
+        
+        # Determine neighbors (for nan interpolation)
+        self.neighbors = np.zeros( (self.num_boxes, 4), dtype='int32')
+        for nidx in np.arange(self.num_boxes):
+            distances = (self.box_x - self.box_x[nidx])**2 + (self.box_y - self.box_y[nidx])**2
+            self.neighbors[nidx]=np.argsort( distances)[1:5] # Take 4 nearest, excluding self (which will be 0)
 
         for nidx in np.arange(self.num_boxes):
             if np.isnan(spot_displace_x[nidx]) or np.isnan(spot_displace_y[nidx]):
                 spot_displace_x[nidx] = np.nanmean( spot_displace_x[self.neighbors[nidx]] )
                 spot_displace_y[nidx] = np.nanmean( spot_displace_y[self.neighbors[nidx]] )
                 self.spot_displace_interpolated[nidx] = 1
+                print("Good interp: %d %f %f"%(nidx,spot_displace_x[nidx], spot_displace_y[nidx]  ) )
 
             if np.isnan(spot_displace_x[nidx]) or np.isnan(spot_displace_y[nidx]):
                 #print( "Still nan", nidx, self.neighbors[nidx])
                 spot_displace_x[nidx]=0
                 spot_displace_y[nidx]=0
                 self.spot_displace_interpolated[nidx] = 2
+                print("BAD interp: %d %f %f"%(nidx,spot_displace_x[nidx], spot_displace_y[nidx]  ) )
 
         slope = np.concatenate( (spot_displace_y, spot_displace_x)) * (self.ccd_pixel/self.focal);
 
@@ -373,6 +381,7 @@ class NextwaveEngine():
         self.slope = slope
 
         coeff=np.matmul(self.zterms_full,slope)
+        print( coeff.shape )
         self.zernikes=coeff[zernike_functions.CVS_to_OSA_map[0:len(coeff)]] # Return value will is OSA
 
         #print ("CompZ spot means:",np.mean(self.spot_displace_x), np.mean(self.spot_displace_y))

@@ -142,7 +142,7 @@ class NextwaveOffline():
         #downs =  -(self.norm_y - 0.5/self.ri_ratio)
 
     def circle_err(self,p):
-        ssq=np.sum( (self.circle(*p)-self.desired) **2 )
+        ssq=np.nansum( (self.circle(*p)-self.desired) **2 )
         return ssq
 
     def offline_frame(self,nframe):
@@ -249,7 +249,7 @@ class NextwaveOffline():
 
         elif '.bmp' in file_info[1]:
             buf_movie=None
-            pathname = file_info[0][0]
+            pathname = file_info[0][0].upper()
             idxSub=pathname.find("SWS")+4 # TODO
             self.sub_id = pathname[idxSub:idxSub+4]
             
