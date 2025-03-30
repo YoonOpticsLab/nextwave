@@ -36,8 +36,9 @@ class ZernikeDialog(QDialog):
         formGroupBox = QGroupBox(titl)
         #layout = QFormLayout()
         layout = QGridLayout()
-        self.lines = [QLineEdit() for n in np.arange(NUM_ZERN_DIALOG)]
-        self.chks = [QCheckBox() for n in np.arange(NUM_ZERN_DIALOG)]
+        num_zs = np.min( (NUM_ZERN_DIALOG,len(self.ui_parent.engine.zernikes) ) )
+        self.lines = [QLineEdit() for n in np.arange(num_zs)]
+        self.chks = [QCheckBox() for n in np.arange(num_zs)]
         self.chk0 = QCheckBox()
         self.chk0.stateChanged.connect(self.chk0_changed)
         self.chk0.setChecked(True)
@@ -103,9 +104,10 @@ class ZernikeDialog(QDialog):
         self.setLayout(mainLayout)
 
         # ZOOM box
+        
 class BoxInfoDialog(QDialog):
     def __init__(self,titl,ui_parent):
-        super().__init__()
+        super().__init__(ui_parent)
         #self.setWindowFlag(Qt.FramelessWindowHint) 
         #self.setWindowTitle(titl)
         self.ui_parent = ui_parent

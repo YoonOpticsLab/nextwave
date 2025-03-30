@@ -299,6 +299,35 @@ class NextWaveMainWindow(QMainWindow):
                        self.engine.box_x[n]+box_size_pixel//2-BOX_BORDER,
                        self.engine.box_y[n]+box_size_pixel//2-BOX_BORDER) for n in [self.box_info] ]
         painter.drawLines(boxes1)
+        
+    # if self.box_info>=0 and self.engine.num_boxes>0:
+        # try:
+        # desired=self.offline.desired
+            # pen = QPen(Qt.yellow, 1.00, Qt.SolidLine)
+            # painter.setPen(pen)
+            # BOX_BORDER=2
+            # box_size_pixel = self.engine.box_size_pixel
+            # # Do as a list comprehension just for consistency with above
+            # boxes1=[QLineF(self.engine.box_x[n]-box_size_pixel//2+BOX_BORDER, # top
+                           # self.engine.box_y[n]-box_size_pixel//2+BOX_BORDER,
+                           # self.engine.box_x[n]+box_size_pixel//2-BOX_BORDER,
+                           # self.engine.box_y[n]-box_size_pixel//2+BOX_BORDER) for n in [self.box_info] ]
+            # painter.drawLines(boxes1)
+            # boxes1=[QLineF(self.engine.box_x[n]-box_size_pixel//2+BOX_BORDER,
+                           # self.engine.box_y[n]+box_size_pixel//2-BOX_BORDER,
+                           # self.engine.box_x[n]+box_size_pixel//2-BOX_BORDER,
+                           # self.engine.box_y[n]+box_size_pixel//2-BOX_BORDER) for n in [self.box_info] ]
+            # painter.drawLines(boxes1)
+            # boxes1=[QLineF(self.engine.box_x[n]-box_size_pixel//2+BOX_BORDER,
+                           # self.engine.box_y[n]-box_size_pixel//2+BOX_BORDER,
+                           # self.engine.box_x[n]-box_size_pixel//2+BOX_BORDER,
+                           # self.engine.box_y[n]+box_size_pixel//2-BOX_BORDER) for n in [self.box_info] ]
+            # painter.drawLines(boxes1)
+            # boxes1=[QLineF(self.engine.box_x[n]+box_size_pixel//2-BOX_BORDER,
+                           # self.engine.box_y[n]-box_size_pixel//2+BOX_BORDER,
+                           # self.engine.box_x[n]+box_size_pixel//2-BOX_BORDER,
+                           # self.engine.box_y[n]+box_size_pixel//2-BOX_BORDER) for n in [self.box_info] ]
+            # painter.drawLines(boxes1)        
 
     # Centroids:
     if self.draw_centroids and self.engine.num_boxes>0: #and self.engine.mode>1:
@@ -414,7 +443,7 @@ class NextWaveMainWindow(QMainWindow):
     if not self.line_centery.isModified():
       self.line_centery.setText(str(self.cy) )
     if not self.line_pupil_diam.isModified():
-      self.line_pupil_diam.setText(str(self.engine.pupil_diam) )
+      self.line_pupil_diam.setText(str(self.engine.pupil_diam / self.engine.pupil_mag) )
 
     if not self.offline_only:
       if self.engine.fps0!=0:
@@ -448,12 +477,25 @@ class NextWaveMainWindow(QMainWindow):
     # TODO: Perhaps move all this code into the bar_plot object itself??
     self.bar_plot.clear()
 
+    num_zern_orders_from_boxes=2
+    first_term=np.sum( np.arange(2, num_zern_orders_from_boxes)+1 )
+    while len(self.engine.zernikes) >= first_term:
+        first_term=np.sum( np.arange(2, num_zern_orders_from_boxes)+1 )
+        num_zern_orders_from_boxes += 1
+    num_zern_orders_from_boxes -= 2
+    #print("Found Box order= %d"%num_zern_orders_from_boxes)
+            
     if self.bar_plot.terms_expanded:
-        orders_list=np.arange(2,11)
+        order_limit=11
     else:
-        orders_list=np.arange(2,5)
+        order_limit=5
+        
+    if num_zern_orders_from_boxes < order_limit:
+        order_limit = num_zern_orders_from_boxes
 
-    first_term=np.sum(orders_list[0]+1) # First time is sum of orders - 1
+    orders_list=np.arange(2,order_limit)
+    first_term=np.sum(orders_list[0]+1) # First term is sum of orders - 1
+
     nterms=orders_list[0]+1 # Nterms in first order
     last_term= first_term+nterms+1
 

@@ -28,31 +28,11 @@ from PIL import Image, TiffImagePlugin
 
 WINDOWS=(os.name == 'nt')
 
-NACT_PER_NZERN=4
+# Analysis. Minimum # of boxes needed per zernike term
+# TODO: Make this a maleable parameter
+MIN_BOXES_PER_NZERN=2
 
-GAUSS_SD=3
-BOX_THRESH=2.5
-
-OFFLINE_ITERATIVE_START=3.0
-OFFLINE_ITERATIVE_STEP=0.25
-#0=horizontal, 1=vertical,3=defocus?
-
-'''
-Zernike order, first mode in that order:
-0 0
-1 1
-2 3
-3 6
-4 10
-5 15
-6 21
-7 28
-8 36
-9 45
-10 55
-11 66
-'''
-
+# TODO: Get this from the .h file
 MEM_LEN=512
 MEM_LEN_DATA=2048*2048*4
 
@@ -274,8 +254,9 @@ class NextwaveEngine():
         lenslet_dy = lenslet_dy[1:,:]
 
         # TODO: Dumb to make loop, making into function would be better
+        # first iteration gets the full matrix, second one gets the 20term matrix 
         for nsubset in [0,1]:
-            nmax_from_boxes=int(self.num_boxes/NACT_PER_NZERN)
+            nmax_from_boxes=int(self.num_boxes/MIN_BOXES_PER_NZERN)
             
             # New heuristics from GYY 2/3/2025
             #if self.pupil_radius_mm*2 /self.pupil_mag<=3:
@@ -288,14 +269,14 @@ class NextwaveEngine():
             nmax_from_boxes= np.min( (nmax_from_boxes,zernike_functions.MAX_ZERNIKES))
             orders_max=np.cumsum(np.arange(zernike_functions.MAX_ORDER+2)) - 1 # Last index in each order
             print( orders_max )
-            valid_max = orders_max[nmax_from_boxes<=orders_max][0]
+            valid_max = orders_max[nmax_from_boxes>=orders_max][-1]
             print( 'MAX', nmax_from_boxes, valid_max)
             
             if nsubset==0:
                 nvalid = valid_max
                #print("Est. max zs:%d, Max Z (order):%d"%(nmax_from_boxes, valid_max, orders_max) )
             if nsubset==1: #
-                nvalid = np.min( (20, nmax_from_boxes) )
+                nvalid = np.min( (20, valid_max) )
 
             dx_subset=lenslet_dx[0:nvalid,:]
             dy_subset=lenslet_dy[0:nvalid,:]
@@ -393,13 +374,20 @@ class NextwaveEngine():
 
     def get_deltas(self,zs,from_dialog,full=True):
         zs=np.array(zs)
+        if len(zs)<20:
+            zs_temp=np.zeros(20)
+            zs_temp[0:len(zs)]=zs
+            zs=zs_temp
+            
         if len(zs)==20:
             mat1=self.zterms_20_inv
+            valid_idxs=np.arange(0,mat1.shape[1] )
         else:
             mat1=self.zterms_full_inv
+            valid_idxs=np.arange(0,mat1.shape[1] )
 
-        valid_idxs=np.arange(0,mat1.shape[1] )
         idxs_remap  = zernike_functions.OSA_to_CVS_map[valid_idxs]
+        print(len(zs), len(idxs_remap), len(valid_idxs), idxs_remap)
         zern_new=zs[valid_idxs] [idxs_remap ]
         #zern_new[0:2]=0 # Remove tip/tilt TODO: Need to move the pupil center?
 
