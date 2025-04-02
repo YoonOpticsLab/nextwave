@@ -74,7 +74,12 @@ class NextwaveEngine():
         self.zernikes = None
         self.defocus = 0
         self.aogain = 1.0
+        self.dmfill = 1.0
         self.omits = np.zeros( 0, dtype='uint8' ) # Need to do early
+        
+        self.acts_inside = np.arange(97,dtype='int') # TODO
+        self.acts_outside = np.array([],dtype='int')
+        self.modes = 97
         
     def init(self):
         if not self.ui.offline_only:
@@ -204,7 +209,9 @@ class NextwaveEngine():
         self.num_boxes= num_boxes
         self.centroids_x = np.full(num_boxes, np.nan)
         self.centroids_y = np.full(num_boxes, np.nan)
-
+        
+        self.box_spacing_pixel = box_spacing_pixel
+        
         self.update_zernike_svd() # Precompute
 
         print( "Make SB ",pupil_radius_pixel, box_size_pixel, box_spacing_pixel, ri_ratio, num_boxes, self.zterms_full.shape )
@@ -215,7 +222,7 @@ class NextwaveEngine():
             distances = (self.box_x - self.box_x[nidx])**2 + (self.box_y - self.box_y[nidx])**2
             self.neighbors[nidx]=np.argsort( distances)[1:5] # Take 4 nearest, excluding self (which will be 0)
 
-        self.update_searchboxes()
+        self.update_searchboxes(send_to_engine=False) # Probably okay to send now... ?
         
         self.omits = np.zeros( num_boxes, dtype='uint8' )
         try:
@@ -247,11 +254,12 @@ class NextwaveEngine():
     def offline_frame(self,nframe):
         self.offline.offline_frame(nframe)
 
-    def update_searchboxes(self):
+    def update_searchboxes(self,send_to_engine=True):
         self.update_zernike_svd()
         if not self.ui.offline_only:
             self.update_influence();
-            self.comm.send_searchboxes(self.box_x, self.box_y)
+            if send_to_engine:
+                self.comm.send_searchboxes(self.box_x, self.box_y)
         #self.dump_vars() # DEBUGGING
 
     def update_zernike_svd(self):
@@ -314,20 +322,57 @@ class NextwaveEngine():
         #np.save('zpoly.npy',zpoly)
 
     def update_influence(self):
-        #try: # TODO: check that file exists, etc.
-        influence = np.loadtxt(self.ui.json_data["params"]["influence_file"], skiprows=0)
-        #except:
-            #influence = np.random.normal ( loc=0, scale=0.01, size=(97, self.num_boxes * 2)  )
-        #valid_idx=np.sum(influence**2,0)>0 # TODO... base on pupil size or something?
-        self.influence = np.zeros( (97, influence.shape[1]) ) #influence[:, valid_idx]
-        self.influence[ 0:influence.shape[0] ] = influence
-        self.influence_inv = self.influence.T
+        # if False: # Load Miniwave's inverse directly
+            # influence = np.loadtxt(self.ui.json_data["params"]["influence_file"], skiprows=0)
+            # self.influence[ 0:influence.shape[0] ] = influence
+            # self.influence_inv = self.influence.T
+            # self.influence = pinv( self.influence_inv ) # New way: read the interaction
+        # except:
+            # influence = np.random.normal ( loc=0, scale=0.01, size=(97, self.num_boxes * 2)  )
+
+        filename_influence =self.ui.get_param_xml("MIRROR1_MirrorInfluenceMatrix") # TODO: Don't reload every time
+        self.influence_full = np.loadtxt(filename_influence, skiprows=1)
+        #nonzero_idxs = np.sum(influence_full**2,0)>0 
+        #self.influence = influence_full[:,nonzero_idxs]
+
+        max_boxes = np.sqrt( self.influence_full.shape[1] / 2.0 )
+        boxes_x = np.arange(-(max_boxes-1)/2,(max_boxes-1)/2+1) # +1 to include +max_boxes number
+        boxes_y = np.arange(-(max_boxes-1)/2,(max_boxes-1)/2+1)
+        # Determine outer edge of each box using corners away from the center:
+        # 0.5*sign: positive adds 0.5, negative substracts 0.5
+        XX,YY = np.meshgrid(boxes_x, boxes_y )
+        aperture = self.pupil_radius_pixel / self.box_spacing_pixel * 1.0
+        RR = np.sqrt( (XX+0.5*np.sign(XX))**2 + (YY+0.5*np.sign(YY))**2 )
+        valid_boxes = np.where(RR.flatten()<=aperture)[0]
+        # For each valid index, need to make both the X and Y component
+        valid_indices = np.concatenate( (valid_boxes*2, valid_boxes*2+1) )
+        self.influence = self.influence_full[:,valid_indices]
+        np.save('infl', self.influence )
         
-        self.influence = pinv( self.influence_inv ) # New way: read the interaction
+        if len(self.acts_outside)>0:
+            self.influence[self.acts_outside,:] = 0 # Zero them out, if any
+        U, s, V = np.linalg.svd(self.influence, full_matrices=True)
+        s_recip = 1/s
+        s_recip[ s<1e-10 ] = 0 # Set any tinies (or 0) to zero
         
+        print( max_boxes, len(valid_boxes), self.influence.shape, s.max(), valid_boxes[0:10], RR.shape )
+
+        if self.modes < len(s):
+            s[self.modes:] = 0 # Clear all the modes from x up
+        
+        self.influence_inv = ( (U*s_recip) @ V[0:97,:] ).T
+        self.influence_inv[:,self.acts_outside] = 0
+
         self.nActuators=self.influence.shape[0]
         self.nTerms=self.influence.shape[1]
         np.save('influ', self.influence_inv )
+
+        self.ui.offline_dialog.sc.axes.clear();
+        self.ui.offline_dialog.sc.axes.plot(np.arange(len(s))+1, s[0]/s, 'o-')
+        self.ui.offline_dialog.sc.axes.axvline( self.modes, color='r' )
+        self.ui.offline_dialog.sc.axes.set_ylim(0, s[0]/s[s>1e-10][-1]*1.25 )
+        self.ui.offline_dialog.sc.draw()
+        self.ui.offline_dialog.show()
 
     def compute_zernikes(self):
         # find slope
@@ -396,6 +441,10 @@ class NextwaveEngine():
         
         return delta_x,delta_y
 
+    def do_ao1(self):
+        self.comm.set_mode( 
+            self.comm.read_mode() | 0x20 )  # MODE_FORCE_AO_START TODO
+            
     def defocus_do(self):
         zs= np.zeros(20)
         zs[3] = self.defocus
@@ -421,9 +470,7 @@ class NextwaveEngine():
         else:
             self.shift_references(zs,False)
             self.comm.send_searchboxes(self.box_x, self.box_y)
-            
-            self.comm.set_mode( 
-                self.comm.read_mode() | 0x20 )  # MODE_FORCE_AO_START TODO
+            self.do_ao1()
             
     def defocus_start(self):
         # One idea was to save a local copy of the "current" centroids, and use those in entire
@@ -444,7 +491,6 @@ class NextwaveEngine():
         self.defocus -= 0.1
         self.defocus_do();
 
-
     def defocus_plus(self):
         self.defocus += 0.01
         self.defocus_do();
@@ -460,7 +506,21 @@ class NextwaveEngine():
     def aogain_set(self,val):
         self.aogain = val
         self.aogain_do();
+
+    def modes_set(self,val):
+        self.modes = val
+
+    def dmfill_set(self,val):
+        self.dmfill = val
+        filename_pattern =self.ui.get_param_xml("MIRROR1_MirrorPatternArrayFile") # TODO: Don't reload every time
+        self.act_positions = np.loadtxt(filename_pattern) 
         
+        act_norm_x = (self.act_positions[:,1]-0.5)*2
+        act_norm_y =(1-self.act_positions[:,0]-0.5)*2 # Notsure need to negate
+        r=np.sqrt( act_norm_x**2 + act_norm_y**2)
+        self.acts_inside = np.where( r<= val )[0]
+        self.acts_outside = np.where( r>val )[0]
+    
     def aogain_do(self):
         self.ui.sockets.centroiding.send(b"G%f\x00"%(self.aogain) )
 
@@ -531,7 +591,7 @@ class NextwaveEngine():
             return
 
         if reinit:
-            self.init_params()
+            #self.init_params()
             self.update_searchboxes()
 
         val=(2+8) if (self.ui.chkLoop.isChecked() and allow_AO) else 2

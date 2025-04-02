@@ -431,12 +431,16 @@ class NextWaveMainWindow(QMainWindow):
         else:
           s="Ready."
 
+    s+=" command:" + str(self.engine.influence_inv.shape)
     self.label_status0.setText(s)
     self.label_status0.setStyleSheet("color: rgb(0, 255, 0); background-color: rgb(0,0,0);")
 
-    # Pulled from engine
+    # TODO: Is this the right place for these? They could be in our setters/slider callback
     self.label_defocus.setText( 'Defocus: %0.3f'%self.engine.defocus )
     self.label_aogain.setText(  'AO Gain: %0.3f'%self.engine.aogain )
+    self.label_dmfill.setText(  'DM Fill: %0.3f'%self.engine.dmfill )
+
+    self.label_valid_acts.setText(  'Valid: %d+%d'%(len(self.engine.acts_inside), len(self.engine.acts_outside) ) )
 
     if not self.engine.zernikes is None:
      if len(self.engine.zernikes)>0:
@@ -537,7 +541,13 @@ class NextWaveMainWindow(QMainWindow):
  def get_param_xml(self,name):
      #print( self.params_xml)
      #print( self.params_params)
-     return float( self.params_xml_state["children"][name]["value"] )
+     val = self.params_xml_state["children"][name]["value"]
+     try:
+        val = float(val)
+     except ValueError:
+        pass # String. Keep as-is.
+        
+     return val
 
  def get_param(self,name_parent,name,offline=False):
      if name=="pupil_diam":
@@ -944,6 +954,8 @@ class NextWaveMainWindow(QMainWindow):
      btn.clicked.connect(self.engine.defocus_minus )
      layout1.addWidget(btn, 2,2 )
 
+     self.label_defocus = QLabel("Defocus: ")
+     layout1.addWidget(self.label_defocus, 3,3)
      self.slider_defocus = QSlider(orientation=Qt.Horizontal)
      self.slider_defocus.setMinimum(0)
      self.slider_defocus.setMaximum(1000)
@@ -951,22 +963,42 @@ class NextWaveMainWindow(QMainWindow):
      layout1.addWidget(self.slider_defocus,3,2)
      self.slider_defocus.valueChanged.connect(self.slider_defocus_changed) # TODO
 
+     self.label_aogain = QLabel("AO Gain: ")
+     layout1.addWidget(self.label_aogain, 4,3)
      self.slider_aogain = QSlider(orientation=Qt.Horizontal)
      self.slider_aogain.setMinimum(0)
      self.slider_aogain.setMaximum(100)
      layout1.addWidget(self.slider_aogain,4,2)
      self.slider_aogain.valueChanged.connect(self.slider_aogain_changed) # TODO
-     
-     self.label_aogain = QLabel("Defocus: ")
-     layout1.addWidget(self.label_aogain, 4,3)
 
+     self.label_dmfill = QLabel("DM Fill: ")
+     layout1.addWidget(self.label_dmfill, 5,3)
+     self.slider_dmfill = QSlider(orientation=Qt.Horizontal)
+     self.slider_dmfill.setMinimum(0)
+     self.slider_dmfill.setMaximum(1000)
+     layout1.addWidget(self.slider_dmfill,5,2)
+     self.slider_dmfill.valueChanged.connect(self.slider_dmfill_changed) # TODO
+
+     self.modes = QDoubleSpinBox()
+     layout1.addWidget(self.modes,5,0)
+     self.modes.setMinimum(1)
+     self.modes.setMaximum(97)
+     self.modes.setValue(97)
+     self.modes.valueChanged.connect(self.engine.modes_set) # TODO
+     self.label_valid_acts = QLabel("Valid Acts:")
+     layout1.addWidget(self.label_valid_acts, 5,1)
+     self.label_condition = QLabel("Cond #:")
+     layout1.addWidget(self.label_condition, 6,0)
+     
+     btn1 = QPushButton("Rebuild")
+     layout1.addWidget(btn1,6,1)
+     btn1.clicked.connect(self.engine.update_influence)
+     
      # Not used
      #btn = QPushButton("Defocus start")
      #btn.clicked.connect(self.engine.defocus_start )
      #layout1.addWidget(btn, 3,2 )
      
-     self.label_defocus = QLabel("Defocus: ")
-     layout1.addWidget(self.label_defocus, 3,3)
 
      self.widget_mode_buttons = QWidget()
      layoutStatusButtons = QHBoxLayout(self.widget_mode_buttons)
@@ -983,6 +1015,10 @@ class NextWaveMainWindow(QMainWindow):
      layoutStatusButtons.addWidget(self.mode_btn3)
      self.mode_btn3.clicked.connect(self.mode_run)
 
+     self.mode_btn_ao1 = QPushButton("Run1")
+     layoutStatusButtons.addWidget(self.mode_btn_ao1)
+     self.mode_btn_ao1.clicked.connect(self.engine.do_ao1)
+
      self.mode_btn4 = QPushButton("Stop")
      layoutStatusButtons.addWidget(self.mode_btn4)
      self.mode_btn4.clicked.connect(self.mode_stop)
@@ -994,7 +1030,7 @@ class NextWaveMainWindow(QMainWindow):
      self.mode_btn2.setEnabled( True )
      self.mode_btn3.setEnabled( True )
      #self.mode_btn4.setEnabled( False )
-
+     
      # Config
      layout1 = QGridLayout(pages[2])
      lbl = QLabel("XML Config: ")
@@ -1126,6 +1162,7 @@ class NextWaveMainWindow(QMainWindow):
      self.shortcut.activated.connect(self.engine.defocus_plus10)
 
      self.setGeometry(2,2,MAIN_WIDTH_WIN,MAIN_HEIGHT_WIN)
+     self.setWindowFlags(Qt.Window | Qt.WindowTitleHint | Qt.WindowMinimizeButtonHint | Qt.WindowMaximizeButtonHint | Qt.WindowCloseButtonHint)
      self.show()
 
  def calibration_status(self,s):
@@ -1150,6 +1187,10 @@ class NextWaveMainWindow(QMainWindow):
  def slider_defocus_changed(self):
      scaled = (self.slider_defocus.value()-500)/100.0
      self.engine.defocus_set(scaled)
+
+ def slider_dmfill_changed(self):
+     scaled = self.slider_dmfill.value()/1000.0
+     self.engine.dmfill_set(scaled)
      
  def slider_threshold_changed(self):
      scaled = self.slider_threshold.value()/100.0
@@ -1357,7 +1398,7 @@ class NextWaveMainWindow(QMainWindow):
     if not self.offline_only:
        self.engine.make_searchboxes(self.cx,self.cy)
        self.sockets = NextwaveSocketComm(self)
-       self.engine.mode_init()
+       self.engine.mode_init() # Needed to let the C engine run
 
 #     self.reload_config() # Load last selected XML
 #     #self.tabs.setCurrentIndex(2) # Doesn't allocate enough space: first tab is better
@@ -1436,10 +1477,10 @@ def main():
   if not win.offline_only:
       win.sockets.init()
         
-  # Set defaults
+  # Set defaults: TODO: pull from XML
   win.slider_defocus.setValue(500)
   win.slider_aogain.setValue(50)
-  
+  win.slider_dmfill.setValue(1000)
   
   start_backdoor(win)
 

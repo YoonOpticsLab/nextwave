@@ -105,7 +105,7 @@ class ZernikeDialog(QDialog):
         # ZOOM box
 class BoxInfoDialog(QDialog):
     def __init__(self,titl,ui_parent):
-        super().__init__()
+        super().__init__(ui_parent)
         #self.setWindowFlag(Qt.FramelessWindowHint) 
         #self.setWindowTitle(titl)
         self.ui_parent = ui_parent
@@ -205,6 +205,23 @@ class ActuatorPlot(QLabel):
         #https://stackoverflow.com/questions/35382088/qimage-custom-indexed-colors-using-setcolortable
         [widg.setColor(n, self.act_colors[n]) for n in np.arange(256)]
 
+    ''' Didn't work: not sure why
+        def button_clicked(self, event):
+            print("clicked:", event.pos() )
+            # Get the geometry of the spot window
+            geometry = self.pixmap1.geometry()
+
+            # Access position and size attributes
+            x = geometry.x()
+            y = geometry.y()
+            width = geometry.width()
+            height = geometry.height()
+         
+            x_scaled = event.pos().x() / width #* self.image_pixels.shape[1]
+            y_scaled = event.pos().y() / height #* self.image_pixels.shape[0]
+            print("scaled: x,y ", x_scaled, y_scaled)
+'''        
+        
     def paintEvent_manual(self): #, p, *args):
         #mirror_vals=np.array(np.random.normal(size=(97)) )
         #mirror_vals=np.linspace(-0.99,0.99,97)
@@ -230,7 +247,9 @@ class ActuatorPlot(QLabel):
 
         self.qi = QImage(self.bits,width,height,bytesPerLine,QImage.Format_Indexed8)
         self.qi.setColorTable(self.act_colors)
-        self.setPixmap(QPixmap.fromImage(self.qi).scaled(self.height(),self.width(),Qt.KeepAspectRatio) )
+        self.pixmap1 = QPixmap.fromImage(self.qi).scaled(self.height(),self.width(),Qt.KeepAspectRatio)
+        self.setPixmap( self.pixmap1 )
+        #self.pixmap1.mousePressEvent = self.button_clicked # Didn't work
 
         #qp = QPainter(self.qi)
         #qp.setBrush(br)
@@ -308,3 +327,5 @@ class OfflineDialog(QDialog):
 
         # Set the layout for the dialog
         self.setLayout(layout)
+
+

@@ -318,7 +318,7 @@ int main(int argc, char** argv)
     if (pShmem1->mode > MODE_READY ) {
 
       if (pShmem1->mode & MODE_FORCE_AO_START )  {
-        nAOSkipFrames=3;
+        nAOSkipFrames=2; // Fall immediately into next block, dec, then done. So 1 iter. of AO
         pShmem1->mode ^= MODE_FORCE_AO_START;
         pShmem1->mode |= MODE_FORCE_AO_DURING;
         spdlog::info("Force Start");

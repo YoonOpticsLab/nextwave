@@ -171,7 +171,7 @@ void init_buffers(int width, int height, int box_size, int nboxes) {
 		}
 	}
 	gaf->im_ycoor=af::array(width, height, fbuffer);
-  gaf->new_dims=af::dim4(box_size*box_size,nboxes); // AF stacks the boxes, so do this to reshape for easier sum reduction
+    gaf->new_dims=af::dim4(box_size*box_size,nboxes); // AF stacks the boxes, so do this to reshape for easier sum reduction
 
 }
 
