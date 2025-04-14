@@ -870,9 +870,10 @@ class NextWaveMainWindow(QMainWindow):
      layout1.addWidget(btn,5,3)
      btn.clicked.connect(lambda: self.engine.offline.show_dialog() )
 
-     btn = QPushButton("Dialog2")
-     layout1.addWidget(btn,6,3)
-     btn.clicked.connect(lambda: self.engine.offline.show_dialog_debug() )
+     
+#     btn = QPushButton("Dialog2")
+     #layout1.addWidget(btn,6,3)
+     #btn.clicked.connect(lambda: self.engine.offline.show_dialog_debug() )
 
      #btnIt1 = QPushButton("Step It+=0.5")
      #layout1.addWidget(btnIt1,3,1)
