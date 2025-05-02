@@ -346,7 +346,7 @@ class NextwaveEngine():
                 spot_displace_x[nidx] = np.nanmean( spot_displace_x[self.neighbors[nidx]] )
                 spot_displace_y[nidx] = np.nanmean( spot_displace_y[self.neighbors[nidx]] )
                 self.spot_displace_interpolated[nidx] = 1
-                print("Good interp: %d %f %f"%(nidx,spot_displace_x[nidx], spot_displace_y[nidx]  ) )
+               # print("Good interp: %d %f %f"%(nidx,spot_displace_x[nidx], spot_displace_y[nidx]  ) )
 
             if np.isnan(spot_displace_x[nidx]) or np.isnan(spot_displace_y[nidx]):
                 #print( "Still nan", nidx, self.neighbors[nidx])

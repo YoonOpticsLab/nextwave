@@ -206,7 +206,22 @@ class ActuatorPlot(QLabel):
         #https://het.as.utexas.edu/HET/Software/html/qimage.html#image-transformations
         #https://stackoverflow.com/questions/35382088/qimage-custom-indexed-colors-using-setcolortable
         [widg.setColor(n, self.act_colors[n]) for n in np.arange(256)]
+        
+    def actuator_window_clicked(self, event):
+        # Get the geometry of the spot window
+        geometry = self.pixmap1.geometry()
 
+        # Access position and size attributes
+        x = geometry.x()
+        y = geometry.y()
+        width = geometry.width()
+        height = geometry.height()
+     
+        # print("clicked:", event.pos() )
+        x_scaled = event.pos().x() / width #* self.image_pixels.shape[1]
+        y_scaled = event.pos().y() / height #* self.image_pixels.shape[0]
+        print("scaled: x,y ", x_scaled, y_scaled)
+        
     def paintEvent_manual(self): #, p, *args):
         #mirror_vals=np.array(np.random.normal(size=(97)) )
         #mirror_vals=np.linspace(-0.99,0.99,97)
@@ -232,7 +247,8 @@ class ActuatorPlot(QLabel):
 
         self.qi = QImage(self.bits,width,height,bytesPerLine,QImage.Format_Indexed8)
         self.qi.setColorTable(self.act_colors)
-        self.setPixmap(QPixmap.fromImage(self.qi).scaled(self.height(),self.width(),Qt.KeepAspectRatio) )
+        self.pixmap1 = QPixmap.fromImage(self.qi).scaled(self.height(),self.width(),Qt.KeepAspectRatio)
+        self.setPixmap( self.pixmap1 )
 
         #qp = QPainter(self.qi)
         #qp.setBrush(br)
