@@ -250,8 +250,11 @@ class NextwaveOffline():
         elif '.bmp' in file_info[1]:
             buf_movie=None
             pathname = file_info[0][0].upper()
-            idxSub=pathname.find("SWS")+4 # TODO
-            self.sub_id = pathname[idxSub:idxSub+4]
+            idxSub=pathname.find("SWS") # TODO
+            if idxSub==-1:
+                self.sub_id="NONE"
+            else:
+                self.sub_id = pathname[idxSub+4:idxSub+8]
             
             # Condition might exist as a middle directory, between subId and last directory
             i0=pathname[idxSub:].find('/') + idxSub + 1
@@ -484,6 +487,7 @@ class NextwaveOffline():
 
     def offline_stepbox(self):
         self.offline_centroids()
+        self.nans_in_prev = np.sum( np.isnan( self.cenx) )
         zs = self.zernikes
 
         #max_size = self.max_p_diam
@@ -553,15 +557,46 @@ class NextwaveOffline():
         self.parent.init_params( { 'pupil_diam': pupil_diam / self.parent.pupil_mag } )
         self.parent.make_searchboxes() 
 
-    def offline_startbox(self):
-        #pix=gaussian_filter(pix,GAUSS_SD) 
-        self.pupil_radius_pixel = np.sqrt(np.sum( (self.dims/2.0)**2)) # Start big: hypotenuse
+    def fit1(self,r):
+        self.pupil_radius_pixel = r * 1000 / self.parent.ccd_pixel 
         self.parent.init_params(
             {'pupil_diam': self.pupil_radius_pixel*2.0/1000.0*self.parent.ccd_pixel / self.parent.pupil_mag} )
-            
-        #self.parent.ui.move_center_abs( self.dims[1]/2, self.dims[0]/2)
         self.parent.make_searchboxes(pupil_radius_pixel=self.pupil_radius_pixel)
+        self.offline_centroids(dark_as_nan=False)
 
+    def offline_startbox(self):
+        # First start small
+        pupil_radius_small = float(self.parent.ui.it_start.text()) * self.parent.pupil_mag / 2.0
+        self.fit1(pupil_radius_small)
+        
+        # Now go big (maximal based on image), but correct from extrapolated small
+        pupil_radius_max_image_pixel = np.sqrt(np.sum( (self.dims/2.0)**2))
+        pupil_radius_max_image = pupil_radius_max_image_pixel /1000 * self.parent.ccd_pixel
+            
+        factor = pupil_radius_small / pupil_radius_max_image
+        z_full = np.zeros( 24 ) # Extrapolate wants at least 20
+        #z_full[0:len(self.zernikes)] = self.zernikes
+        z_full[0:6] = self.zernikes[0:6]
+        z_new =  iterative.extrapolate_zernikes(z_full, factor)
+        
+        num_z_possible = np.min( (self.parent.zterms_full.shape[0],len(self.zernikes) ) )
+        z_full = np.zeros( self.parent.zterms_full.shape[0] )
+        z_full[0:num_z_possible] = z_new[0:num_z_possible]
+
+        self.parent.init_params(
+            {'pupil_diam': pupil_radius_max_image * 2.0 / self.parent.pupil_mag} )
+        self.parent.make_searchboxes(pupil_radius_pixel=pupil_radius_max_image_pixel)
+        self.parent.shift_search_boxes(z_full,from_dialog=False) 
+        
+        if False: # OLD WAU
+            #pix=gaussian_filter(pix,GAUSS_SD) 
+            self.pupil_radius_pixel = np.sqrt(np.sum( (self.dims/2.0)**2)) # Start big: hypotenuse
+            self.parent.init_params(
+                {'pupil_diam': self.pupil_radius_pixel*2.0/1000.0*self.parent.ccd_pixel / self.parent.pupil_mag} )
+                
+            #self.parent.ui.move_center_abs( self.dims[1]/2, self.dims[0]/2)
+            self.parent.make_searchboxes(pupil_radius_pixel=self.pupil_radius_pixel)
+        
         self.offline_centroids(dark_as_nan=False)
 
         desired = np.all((self.box_metrics > BOX_THRESH, np.isnan(self.cenx)==False ), 0) *1.0 # binarize 
@@ -579,14 +614,15 @@ class NextwaveOffline():
             #[0,6.75*1000/self.parent.ccd_pixel/self.parent.pupil_mag] ] )
         self.opt1=opt1['x']
 
-        if True: # TODO: DEBUG
+        if False: # TODO: DEBUG
             np.savez("desired_%d"%self.parent.ui.offline_curr, desired,
                 self.parent.box_x, self.parent.box_y, self.box_metrics, self.cenx, self.ceny, self.opt1, guess )
         
         #print ( desired.shape, desired )
 
         # Find closest box center
-        distances =(self.parent.box_x - self.opt1[0])**2 + (self.parent.box_y - self.opt1[1])**2
+        distances =(self.parent.box_x - self.opt1[0])**2 + (self.parent.box_y - self.opt1[1])**2 + 100 * (
+            np.isnan(self.cenx)) # Hack to exclude NaN boxes 
         box_min = np.argmin( distances )
         
         self.parent.ui.cx = self.parent.box_x[box_min]
@@ -594,8 +630,11 @@ class NextwaveOffline():
         self.cx_best = self.parent.box_x[box_min]
         self.cy_best = self.parent.box_y[box_min]
 
-        r_pix = self.opt1[2] - self.parent.box_size_pixel/2.0 # Subtract half a box width
+        r_pix = self.opt1[2] - self.parent.box_size_pixel/2 # remove half a box
+        #r_pix *= 1.5 # TODO:
+        
         p_diam = r_pix*2.0/1000.0*self.parent.ccd_pixel
+
         #print( p_diam )
         self.iterative_max = p_diam
         self.iterative_max_pixels = r_pix
@@ -628,7 +667,7 @@ class NextwaveOffline():
         self.offline_startbox()
         self.offline_reset()
         #self.engine.offline.iterative_max_pixels = float(self.it_stop.text())/2.0 * 1000 / self.engine.ccd_pixel
-        while self.iterative_size_pixels < self.iterative_max_pixels:
+        while self.iterative_size_pixels < self.iterative_max_pixels: # TODO
             self.iterative_step_good()
             self.parent.ui.update_ui()
             self.parent.ui.repaint()
