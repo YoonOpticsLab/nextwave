@@ -128,7 +128,7 @@ class BoxInfoDialog(QDialog):
     def set_box(self,n,box_pix, cent_x, cent_y, centroid_x_abs,centroid_y_abs, box_x,box_y):
         line1="n=%d"%n
         try:
-            line1 += "(%f)"%self.ui_parent.engine.box_metrics[n]
+            line1 += "(%f)"%self.ui_parent.engine.offline.box_metrics[n]
         except:
             pass
         self.text_num.setText(line1)

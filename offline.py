@@ -29,6 +29,7 @@ from PIL import Image, TiffImagePlugin # Needed
 
 GAUSS_SD=3
 BOX_THRESH=2.0
+SUBSET_FIT_SIZE=5  # Size of pixel subset to fit a Gaussian to for centroiding
 
 OFFLINE_ITERATIVE_START=3.0
 
@@ -247,12 +248,12 @@ class NextwaveOffline():
             self.dims = dims
             self.parent.comm.write_image(dims,bytez)
 
-        elif '.bmp' in file_info[1]:
+        elif '.png' in file_info[1]:
             buf_movie=None
             pathname = file_info[0][0].upper()
             idxSub=pathname.find("SWS") # TODO
             if idxSub==-1:
-                self.sub_id="NONE"
+                self.sub_id="NONAME"
             else:
                 self.sub_id = pathname[idxSub+4:idxSub+8]
             
@@ -260,16 +261,69 @@ class NextwaveOffline():
             i0=pathname[idxSub:].find('/') + idxSub + 1
             i1=pathname[i0:].find('/') + i0 + 1
             i2=pathname[i1:].find('/') + i1 + 1
-            if i1==i2:
+            if True or (i1==i2) or -1 in (i0,i1,i2):
                 self.condition="COND" # There was no directory between subId and last
             else:
                 self.condition=pathname[i0:i1-1]
 
-            idxScanDir=pathname.find("cam")+5 # TODO
-            if pathname[idxScanDir:idxScanDir+2] == 'D2':
-                self.scan_dir = 'D2'
+            idxScanDir=pathname.find("CAM") # TODO
+            if idxScanDir==-1:
+                self.scan_dir='X'
             else:
-                self.scan_dir = pathname[idxScanDir:idxScanDir+1]  
+                idxScanDir += 5
+                if pathname[idxScanDir:idxScanDir+2] == 'D2':
+                    self.scan_dir = 'D2'
+                else:
+                    self.scan_dir = pathname[idxScanDir:idxScanDir+1]  
+            
+            nf=0 # USE nf instead of nf_x to allow skipping (e.g. if directory is in there)
+            for nf_x,frame1 in enumerate(file_info[0]):
+                if not (".png" in frame1):
+                    continue
+                #print("Offline: ",nf,frame1)
+                im = Image.open(frame1)
+                f1 = np.array(im) # TODO: assumes Im is already 8bit monochrome
+                if buf_movie is None:
+                        buf_movie=np.zeros( (2048,f1.shape[0],f1.shape[1]), dtype='uint8') # TODO: grow new chunk if necessary
+                buf_movie[nf]=f1
+                nf += 1
+
+            buf_movie = buf_movie[0:nf]
+
+            print(pathname, self.condition, self.scan_dir, self.sub_id)
+            print("Read %d frames of %dx%d"%(nf,f1.shape[0],f1.shape[1]) )
+            buf_movie=buf_movie[0:nf,:,:] # Trim to correct
+            self.offline_movie = buf_movie
+            self.parent.ui.add_offline(buf_movie)
+            self.dims=np.array([buf_movie.shape[1],buf_movie.shape[2]])
+
+        elif '.bmp' in file_info[1]:
+            buf_movie=None
+            pathname = file_info[0][0].upper()
+            idxSub=pathname.find("SWS") # TODO
+            if idxSub==-1:
+                self.sub_id="NONAME"
+            else:
+                self.sub_id = pathname[idxSub+4:idxSub+8]
+            
+            # Condition might exist as a middle directory, between subId and last directory
+            i0=pathname[idxSub:].find('/') + idxSub + 1
+            i1=pathname[i0:].find('/') + i0 + 1
+            i2=pathname[i1:].find('/') + i1 + 1
+            if (i1==i2) or -1 in (i0,i1,i2):
+                self.condition="COND" # There was no directory between subId and last
+            else:
+                self.condition=pathname[i0:i1-1]
+
+            idxScanDir=pathname.find("CAM") # TODO
+            if idxScanDir==-1:
+                self.scan_dir='X'
+            else:
+                idxScanDir += 5
+                if pathname[idxScanDir:idxScanDir+2] == 'D2':
+                    self.scan_dir = 'D2'
+                else:
+                    self.scan_dir = pathname[idxScanDir:idxScanDir+1]  
             
             nf=0 # USE nf instead of nf_x to allow skipping (e.g. if directory is in there)
             for nf_x,frame1 in enumerate(file_info[0]):
@@ -283,6 +337,7 @@ class NextwaveOffline():
                 buf_movie[nf]=f1
                 nf += 1
 
+            print(pathname, self.condition, self.scan_dir, self.sub_id)
             print("Read %d frames of %dx%d"%(nf,f1.shape[0],f1.shape[1]) )
             buf_movie=buf_movie[0:nf,:,:] # Trim to correct
             self.offline_movie = buf_movie
@@ -299,9 +354,11 @@ class NextwaveOffline():
                 for nf,frame in enumerate(vidin):
                     f1=frame.mean(2) #[0:1024,0:1024] # Avg RGB. TODO: crop hard-code
                     if buf_movie is None:
-                        buf_movie=np.zeros( (50,f1.shape[0],f1.shape[1]), dtype='uint8') # TODO: grow new chunk if necessary
+                        buf_movie=np.zeros( (512,f1.shape[0],f1.shape[1]), dtype='uint8') # TODO: grow new chunk if necessary
                     buf_movie[nf]=f1
                     print(nf,end=' ')
+
+            f1 = f1[nf,:,:]
 
             print("Read %d frames of %dx%d"%(nf,f1.shape[0],f1.shape[1]) )
             buf_movie=buf_movie[0:nf,:,:] # Trim to correct
@@ -354,7 +411,8 @@ class NextwaveOffline():
         #self.good_dbg4 = np.sort(permed.flatten())[-500:]
         return metric1 #_norm
 
-    def box_fit_gauss(self,box_pix,siz):
+    def box_fit_gauss(self,box_pix,siz,n_which_box=-1):
+        # n_which_box is for debugging
         sizo=((siz-1)//2) 
         if np.prod(box_pix.shape) < 1:
             #print("Too small")
@@ -380,9 +438,11 @@ class NextwaveOffline():
             try:
                 soln=np.matmul( lf, self.mati)
             except ValueError:
+                #print( "-998 #1 %d: "%n_which_box + str(lf.min()) + " " + str( lf.max()  ) )
                 return ind_max[1], ind_max[0],-998 # give up if too close to edge
         except ValueError:
             # On the edge maybe?
+            #print( "-998 #2 %d:"%n_which_box + str(lf.min()) + " " + str( lf.max()  ) )
             return ind_max[1], ind_max[0],-998 # give up if too close to edge
 
             # Equivalent loopy code:
@@ -449,7 +509,8 @@ class NextwaveOffline():
                 self.box_metrics[nbox]=-990               
             else:
                 pix=gaussian_filter(pix,GAUSS_SD)
-                centroids=self.box_fit_gauss(pix,17)
+                #print( '%03d %s %s'%(nbox, str(pix.shape), str(box_size_pixel) ) )
+                centroids=self.box_fit_gauss(pix, SUBSET_FIT_SIZE, nbox)
                 cenx[nbox] = centroids[0] + xUL
                 ceny[nbox] = centroids[1] + yUL
                 self.box_metrics[nbox] = centroids[2] # gof
@@ -544,9 +605,20 @@ class NextwaveOffline():
             self.iterative_run_good()
             self.saver.save1(nframe)
         self.saver.serialize()
+    
+    def offline_auto_dumb(self):
+        self.parent.ui.mode_init()
+        for nframe in np.arange(self.max_frame):
+            self.parent.ui.offline_curr=nframe
+            self.parent.offline_frame(self.parent.ui.offline_curr)
+            self.offline_centroids()
+            self.saver.save1(nframe)
+            
+            self.parent.ui.update_ui()
+            self.parent.ui.repaint()            
+        self.saver.serialize()
 
 # iterative_size is a real pupil size, not size on sensor (so always need to be multiplied by mag)
-
     def offline_reset(self):
         pupil_diam = float(self.parent.ui.it_start.text())
         pupil_diam = pupil_diam #* self.parent.pupil_mag

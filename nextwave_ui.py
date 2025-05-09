@@ -158,7 +158,7 @@ class NextWaveMainWindow(QMainWindow):
     self.updater_dm.start(self.get_param("UI","update_rate_dm"))
 
  def offline_load_image(self):
-    ffilt='Cam1 Images (sweep_cam1_*.bmp);; Movies (*.avi);; BMP Directory (*.bmp);; Binary files (*.bin);; files (*.*)'
+    ffilt='Cam1 Images (sweep_cam1_*.bmp);; Movies (*.avi);; PNGs (*.png);; BMP Directory (*.bmp);; Binary files (*.bin);; files (*.*)'
     thedir = QFileDialog.getOpenFileNames(self, "Choose file",
                 self.load_setting("ui/folder"), ffilt );
 
@@ -870,6 +870,10 @@ class NextWaveMainWindow(QMainWindow):
      layout1.addWidget(btn,5,3)
      btn.clicked.connect(lambda: self.engine.offline.show_dialog() )
 
+     btn = QPushButton("Auto dumb")
+     layout1.addWidget(btn,6,5)
+     btn.clicked.connect(lambda: self.engine.offline.offline_auto_dumb() )
+
      
 #     btn = QPushButton("Dialog2")
      #layout1.addWidget(btn,6,3)
@@ -1305,7 +1309,7 @@ class NextWaveMainWindow(QMainWindow):
         #elif event.key() == QtCore.Qt.Key_Enter:
 
  def mode_init(self):
-    # TODO: USe mag
+    # TODO: USe mag.. TODO: Should this be in the UI?!?!
     pupil_diam = float(self.line_pupil_diam.text() )
     self.engine.init_params( {'pupil_diam': pupil_diam})
     self.engine.make_searchboxes() #cx,cy,pupil_radius_pixel=self.size/2.0*1000/self.ccd_pixel)
