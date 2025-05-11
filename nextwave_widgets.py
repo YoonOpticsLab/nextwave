@@ -312,8 +312,8 @@ class MplCanvas(FigureCanvasQTAgg):
         super(MplCanvas, self).__init__(fig)
 
 class OfflineDialog(QDialog):
-    def __init__(self):
-        super().__init__()
+    def __init__(self,parent):
+        super().__init__(parent)
 
         self.setWindowTitle("Low order aberrations across frames")
 

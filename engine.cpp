@@ -390,6 +390,7 @@ int main(int argc, char** argv)
         }
 
         int logidx_g = pShmem1->total_frames % SHMEM_LOG_MAX;
+        pShmem1->log_index = logidx_g;
         pShmemLog[logidx_g].frame_number=pShmem1->current_frame;
         pShmemLog[logidx_g].total_frame_number=pShmem1->total_frames;
         pShmemLog[logidx_g].time0=times_before[0];

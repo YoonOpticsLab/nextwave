@@ -6,12 +6,14 @@ from PyQt5.QtWidgets import (QMainWindow, QLabel, QSizePolicy, QApplication, QPu
 from PyQt5.QtGui import QKeySequence
 from PyQt5.QtWidgets import QShortcut
 
-
-
 from PyQt5.QtGui import QPixmap, QImage, QPainter, QPen, QFont
-from PyQt5.QtCore import Qt, QTimer, QEvent, QLineF, QPointF, pyqtSignal 
+from PyQt5.QtCore import Qt, QTimer, QEvent, QLineF, QPointF, QPoint, pyqtSignal 
 import PyQt5.QtGui as QtGui
 import PyQt5.QtCore as QtCore
+
+from PyQt5.QtWidgets import QApplication
+from PyQt5.QtCore import Qt
+
 
 import pyqtgraph as pg
 from pyqtgraph.parametertree import Parameter, ParameterTree
@@ -51,9 +53,11 @@ SPOTS_WIDTH_WIN=768
 # This is used, but should be based on image, not hard-coded:
 SPOTS_WIDTH_WIN_MINIMUM=1024
 
+ARROW_MAGNITUDE=10
+
 # TODO
-CAM_EXPO_MIN = 32./1000.0 # TODO
-CAM_EXPO_MAX = 100000 # TODO
+CAM_EXPO_MIN = 40. / 1000.0 # TODO: Get from camera
+CAM_EXPO_MAX = (100 * 1000) / 1000.00 # TODO
 CAM_GAIN_MIN = 0
 CAM_GAIN_MAX = 9.83
 
@@ -95,7 +99,7 @@ class NextWaveMainWindow(QMainWindow):
     self.offline_curr=0
     self.chkLoop = QCheckBox("Close AO Loop") # This is needed for engine.mode_init, called in our init. Will be replaced by chkbox widget in our InitUI
 
-    self.offline_dialog = OfflineDialog()
+    self.offline_dialog = OfflineDialog(self)
 
     self.scale_num=2
     self.scales=[512,768,1024,1536,2048]
@@ -184,7 +188,8 @@ class NextWaveMainWindow(QMainWindow):
  def update_ui(self):
 
     image_pixels = self.engine.receive_image()
-
+    self.image_pixels = image_pixels
+    
     if not self.mode_offline and not self.offline_only: # TODO: Put offline intelligence into engine itself
       self.engine.receive_centroids()
       self.engine.compute_zernikes()
@@ -207,8 +212,8 @@ class NextWaveMainWindow(QMainWindow):
         painter.setPen(pen)
         arrows=[QLineF(self.engine.ref_x[n],
                        self.engine.ref_y[n],
-                       self.engine.centroids_x[n],
-                       self.engine.centroids_y[n]) for n in np.arange(0,self.engine.num_boxes)]
+                       self.engine.ref_x[n] + (self.engine.centroids_x[n]-self.engine.ref_x[n])*ARROW_MAGNITUDE,
+                       self.engine.centroids_y[n] + (self.engine.centroids_y[n]-self.engine.ref_y[n])*ARROW_MAGNITUDE) for n in np.arange(0,self.engine.num_boxes)]
         painter.drawLines(arrows)
 
     if self.draw_refs and self.engine.num_boxes>0: # and self.engine.mode>1:
@@ -349,7 +354,11 @@ class NextWaveMainWindow(QMainWindow):
                        cx+rx/2**0.5,
                        cy-rx/2**0.5)
                 ]
-        painter.drawLines(xlines)
+                
+    painter.drawLines(xlines)
+
+    painter.setFont( QFont("Arial",40) );
+    painter.drawText( QPoint(10, 60), "%03d"%np.max( self.engine.image_bytes) );
 
         #im_buf=self.shmem_data.read(width*height)
     #bytez =np.frombuffer(im_buf, dtype='uint8', count=width*height )
@@ -439,6 +448,7 @@ class NextWaveMainWindow(QMainWindow):
     self.label_defocus.setText( 'Defocus: %0.3f'%self.engine.defocus )
     self.label_aogain.setText(  'AO Gain: %0.3f'%self.engine.aogain )
     self.label_dmfill.setText(  'DM Fill: %0.3f'%self.engine.dmfill )
+    self.label_condition.setText(  'Cond #: %0.3f'%self.engine.condition )
 
     self.label_valid_acts.setText(  'Valid: %d+%d'%(len(self.engine.acts_inside), len(self.engine.acts_outside) ) )
 
@@ -860,7 +870,7 @@ class NextWaveMainWindow(QMainWindow):
 
      self.chkReplaceSubtract = QCheckBox("Replace subtracted")
      self.chkReplaceSubtract.stateChanged.connect(self.replace_background)
-     #layout1.addWidget(self.chkReplaceSubtract,0,2)
+     layout1.addWidget(self.chkReplaceSubtract,0,2)
 
      self.slider_threshold = QSlider(orientation=Qt.Horizontal)
      self.slider_threshold.setMinimum(0) # TODO: Get from camera
@@ -977,14 +987,14 @@ class NextWaveMainWindow(QMainWindow):
      self.slider_dmfill.setMinimum(0)
      self.slider_dmfill.setMaximum(1000)
      layout1.addWidget(self.slider_dmfill,5,2)
-     self.slider_dmfill.valueChanged.connect(self.slider_dmfill_changed) # TODO
+     self.slider_dmfill.valueChanged.connect(self.slider_dmfill_changed)
 
      self.modes = QDoubleSpinBox()
      layout1.addWidget(self.modes,5,0)
      self.modes.setMinimum(1)
      self.modes.setMaximum(97)
      self.modes.setValue(97)
-     self.modes.valueChanged.connect(self.engine.modes_set) # TODO
+     self.modes.valueChanged.connect(self.engine.modes_set)
      self.label_valid_acts = QLabel("Valid Acts:")
      layout1.addWidget(self.label_valid_acts, 5,1)
      self.label_condition = QLabel("Cond #:")
@@ -1205,6 +1215,8 @@ class NextWaveMainWindow(QMainWindow):
  def slider_gain_changed(self):
      scaled = self.slider_gain.value()/100.0*CAM_GAIN_MAX
      self.gain.setValue(scaled)
+     msg=b"G=%f"%(scaled)
+     self.sockets.camera.send( msg ) # Convert to usec
 
  def loop_changed(self,state):
     self.engine.loop_changed(self.chkLoop.isChecked() )
@@ -1248,7 +1260,7 @@ class NextWaveMainWindow(QMainWindow):
  def set_background(self):
     self.sockets.centroiding.send(b"S\x00")
  def replace_background(self):
-    if (self.chkBackSubtract.isChecked()):
+    if (self.chkReplaceSubtract.isChecked()):
         self.sockets.centroiding.send(b"R\x00")
     else:
         self.sockets.centroiding.send(b"r\x00")
@@ -1271,10 +1283,25 @@ class NextWaveMainWindow(QMainWindow):
     self.cy = y
 
  def button_clicked(self, event):
-    print("clicked:", event.pos() )
-    x_scaled =event.pos().x() #/ SPOTS_WIDTH_WIN*992 # TODO: use image size
-    y_scaled =event.pos().y() #/ SPOTS_WIDTH_WIN*992 # TODO: use image size
-    print("scaled: x,y ", x_scaled, y_scaled)
+    # Get the geometry of the spot window
+    geometry = self.pixmap_label.geometry()
+
+    # Access position and size attributes
+    x = geometry.x()
+    y = geometry.y()
+    width = geometry.width()
+    height = geometry.height()
+ 
+    # print("clicked:", event.pos() )
+    x_scaled = event.pos().x() / width * self.image_pixels.shape[1]
+    y_scaled = event.pos().y() / height * self.image_pixels.shape[0]
+    print("scaled: x,y ", x_scaled, y_scaled, self.image_pixels.shape)
+
+
+    if QApplication.keyboardModifiers() & Qt.ControlModifier:
+        # Ctrl key is currently pressed
+        self.sockets.centroiding.send(b"E%04d\n%04d"%(x_scaled,y_scaled) )
+        return
 
     which_box = np.where(np.all(
         ( (self.engine.box_x-self.engine.box_size_pixel/2)<x_scaled,
