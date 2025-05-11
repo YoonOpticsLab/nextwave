@@ -80,6 +80,7 @@ class NextwaveEngine():
         self.acts_inside = np.arange(97,dtype='int') # TODO
         self.acts_outside = np.array([],dtype='int')
         self.modes = 97
+        self.condition = 9999
         
     def init(self):
         if not self.ui.offline_only:
@@ -88,6 +89,9 @@ class NextwaveEngine():
         self.init_params()
 
     def init_params(self, overrides=None):
+    
+        print("Init params")
+
         #self.ccd_pixel = self.ui.get_param("system","pixel_pitch",True)
         #self.pupil_diam = self.ui.get_param("system","pupil_diam",True)
         #self.box_um = self.ui.get_param("system","lenslet_pitch",True)
@@ -118,8 +122,11 @@ class NextwaveEngine():
 
         bytez =np.array([self.ccd_pixel, self.box_um, self.pupil_radius_mm], dtype='double').tobytes() 
 
+        self.send_params_to_engine()
+
+    def send_params_to_engine(self):
         if not self.ui.offline_only:
-            self.comm.write_params(overrides)
+            self.comm.write_params(True) # "Overrides" : FIXME!! TODO
 
     def move_searchboxes(self,dx,dy):
         self.box_x += dx
@@ -157,6 +164,9 @@ class NextwaveEngine():
 
         if pupil_radius_pixel is None:
             pupil_radius_pixel=self.pupil_radius_pixel
+        else:
+            self.pupil_radius_pixel = pupil_radius_pixel
+            self.pupil_radius_mm = self.pupil_radius_pixel / 1000.0 * self.ccd_pixel
 
         box_size_pixel=self.box_size_pixel
         if box_spacing_pixel is None:
@@ -222,7 +232,7 @@ class NextwaveEngine():
             distances = (self.box_x - self.box_x[nidx])**2 + (self.box_y - self.box_y[nidx])**2
             self.neighbors[nidx]=np.argsort( distances)[1:5] # Take 4 nearest, excluding self (which will be 0)
 
-        self.update_searchboxes(send_to_engine=False) # Probably okay to send now... ?
+        self.update_searchboxes(send_to_engine=True)
         
         self.omits = np.zeros( num_boxes, dtype='uint8' )
         try:
@@ -310,16 +320,21 @@ class NextwaveEngine():
             if nsubset==0:
                 self.zterms_full=zterms
                 self.zterms_full_inv=zterms_inv
+                zpoly_full = zpoly.copy()
             elif nsubset==1:
                 self.zterms_20=zterms
                 self.zterms_20_inv=zterms_inv
+                zpoly_20 = zpoly.copy()
 
         # DBG:
         self.lenslet_dx=lenslet_dx # Debugging
         self.lenslet_dy=lenslet_dy
-        #np.save('zterms_full.npy',self.zterms_full)
-        #np.save('zterms_20.npy',self.zterms_20)
-        #np.save('zpoly.npy',zpoly)
+        np.save('zterms_full.npy',self.zterms_full)
+        np.save('zterms_full_inv.npy',self.zterms_full_inv)
+        np.save('zterms_20.npy',self.zterms_20)
+        np.save('zterms_20_inv.npy',self.zterms_20_inv)
+        np.save('zpoly_20.npy',zpoly_20)
+        np.save('zpoly_full.npy',zpoly_full)
 
     def update_influence(self):
         # if False: # Load Miniwave's inverse directly
@@ -328,8 +343,8 @@ class NextwaveEngine():
             # self.influence_inv = self.influence.T
             # self.influence = pinv( self.influence_inv ) # New way: read the interaction
         # except:
-            # influence = np.random.normal ( loc=0, scale=0.01, size=(97, self.num_boxes * 2)  )
 
+            # influence = np.random.normal ( loc=0, scale=0.01, size=(97, self.num_boxes * 2)  )
         filename_influence =self.ui.get_param_xml("MIRROR1_MirrorInfluenceMatrix") # TODO: Don't reload every time
         self.influence_full = np.loadtxt(filename_influence, skiprows=1)
         #nonzero_idxs = np.sum(influence_full**2,0)>0 
@@ -338,14 +353,16 @@ class NextwaveEngine():
         max_boxes = np.sqrt( self.influence_full.shape[1] / 2.0 )
         boxes_x = np.arange(-(max_boxes-1)/2,(max_boxes-1)/2+1) # +1 to include +max_boxes number
         boxes_y = np.arange(-(max_boxes-1)/2,(max_boxes-1)/2+1)
+        
         # Determine outer edge of each box using corners away from the center:
         # 0.5*sign: positive adds 0.5, negative substracts 0.5
         XX,YY = np.meshgrid(boxes_x, boxes_y )
         aperture = self.pupil_radius_pixel / self.box_spacing_pixel * 1.0
         RR = np.sqrt( (XX+0.5*np.sign(XX))**2 + (YY+0.5*np.sign(YY))**2 )
-        valid_boxes = np.where(RR.flatten()<=aperture)[0]
+        valid_boxes = np.where(RR.flatten()<aperture)[0]
         # For each valid index, need to make both the X and Y component
-        valid_indices = np.concatenate( (valid_boxes*2, valid_boxes*2+1) )
+#        valid_indices = np.concatenate( (valid_boxes*2, valid_boxes*2+1) )
+        valid_indices = np.vstack( (valid_boxes*2, valid_boxes*2+1) ).T.flatten()       
         self.influence = self.influence_full[:,valid_indices]
         np.save('infl', self.influence )
         
@@ -358,9 +375,11 @@ class NextwaveEngine():
         print( max_boxes, len(valid_boxes), self.influence.shape, s.max(), valid_boxes[0:10], RR.shape )
 
         if self.modes < len(s):
-            s[self.modes:] = 0 # Clear all the modes from x up
-        
-        self.influence_inv = ( (U*s_recip) @ V[0:97,:] ).T
+            s_recip[self.modes:] = 0 # Clear all the modes from x up
+            
+        self.condition = s[0]/s[modes-1]
+            
+        self.influence_inv = ( (U * s_recip) @ V[0:97,:] ).T
         self.influence_inv[:,self.acts_outside] = 0
 
         self.nActuators=self.influence.shape[0]
@@ -508,7 +527,7 @@ class NextwaveEngine():
         self.aogain_do();
 
     def modes_set(self,val):
-        self.modes = val
+        self.modes = int( val )
 
     def dmfill_set(self,val):
         self.dmfill = val
@@ -593,14 +612,17 @@ class NextwaveEngine():
         if reinit:
             #self.init_params()
             self.update_searchboxes()
+            
+        self.send_params_to_engine()
 
         val=(2+8) if (self.ui.chkLoop.isChecked() and allow_AO) else 2
         self.mode=2 # Different mode?? TODO
         self.comm.set_mode(val)
 
     def mode_run(self, reinit=True, numruns=1):
-        if reinit:
-            self.init_params()
+        #if reinit:
+        #    self.init_params()
+        self.send_params_to_engine()
 
         val= np.array( numruns, dtype='uint64' )
         #val= np.array( self.ui.edit_num_runs.text(), dtype='uint64' )
