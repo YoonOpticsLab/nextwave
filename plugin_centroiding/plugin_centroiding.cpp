@@ -25,7 +25,7 @@ using json=nlohmann::json;
 #define VERBOSE 0
 
 // Globals
-#define BUF_SIZE (2048*2048)
+#define BUF_SIZE (2048*2048*16)
 
 #define CLIPVAL 0.95
 
@@ -35,8 +35,9 @@ uint8_t omit_boxes[MAX_BOXES];
 
 uint8_t bDoSubtractBackground=0;
 uint8_t bDoSetBackground=0;
-uint8_t bDoReplaceSubtracted=1;
+uint8_t bDoReplaceSubtracted=0;
 uint8_t bDoThreshold=0;
+uint8_t bBackgroundSet=0; // First time
 
 float fThreshold=0.0;
 float fGain=1.0;
@@ -109,7 +110,7 @@ public:
   af::array x_reshape;
   af::array y_reshape;
 
-  af::array influence;
+ // af::array influence;
   af::array influence_inv;
   af::array mirror_voltages;
   
@@ -173,6 +174,11 @@ void init_buffers(int width, int height, int box_size, int nboxes) {
 	gaf->im_ycoor=af::array(width, height, fbuffer);
     gaf->new_dims=af::dim4(box_size*box_size,nboxes); // AF stacks the boxes, so do this to reshape for easier sum reduction
 
+	if (!bBackgroundSet) {
+		gaf->im_background = af::array(width, height, buffer).as(f64);
+		gaf->im_background= af::transpose( gaf->im_background ) * 0;
+		bBackgroundSet=1;
+	};
 }
 
 void rcv_boxes(int width) {
@@ -181,7 +187,6 @@ void rcv_boxes(int width) {
   struct shmem_header* pShmem = (struct shmem_header*) shmem_region1.get_address();
   struct shmem_boxes_header* pShmemBoxes = (struct shmem_boxes_header*) shmem_region3.get_address();
 
-  //focal_um=24000.0; // TODO
   num_boxes = pShmemBoxes->num_boxes;
   pixel_um = pShmemBoxes->pixel_um;
   pupil_radius_um = pShmemBoxes->pupil_radius_um;
@@ -197,24 +202,6 @@ void rcv_boxes(int width) {
   // TODO: this will be slow to do every time.
   init_buffers(width, height, box_size, num_boxes);
 
-  // DEbugging
-  //float x_ref0 = pShmemBoxes->reference_x[0];
-  //float y_ref0 = pShmemBoxes->reference_y[0];
- 
-	//spdlog::info("RB0 {} {}", x_ref0, y_ref0);
-
-	//af_print_mem_info("message", -1);
-
-	//spdlog::info("RBf {} {} {}", box_size,num_boxes,pShmemBoxes->reference_x[0]);
-	//try {
-		//af::array box_x = af::array(box_size, num_boxes, local_refs); // pShmemBoxes->reference_x);
-    //} catch (af::exception &e) { fprintf(stderr, "%s\n", e.what()); }
-#if 1
-	spdlog::info("RBf {} {} {}", box_size,num_boxes,pShmemBoxes->reference_x[0]);
-	//gaf->box_y = af::array(box_size,num_boxes,pShmemBoxes->reference_y);
-	spdlog::info("RB1");
-#endif //0
-
   // TODO: can this be done without the memcpy to local?
   memcpy(local_buf, pShmemBoxes->reference_x, sizeof(CALC_TYPE) * num_boxes);
   gaf->ref_x = af::array(1, num_boxes, local_buf);
@@ -224,7 +211,7 @@ void rcv_boxes(int width) {
   gaf->ref_x_shift=gaf->ref_x * 0;
   gaf->ref_y_shift=gaf->ref_y * 0;
 
-	spdlog::info("init: {}x{} #:{} {} {} {}\n", width,height, num_boxes, pShmemBoxes->box_x[0], pShmemBoxes->box_y[0]-box_size, pShmemBoxes->box_y[0]-box_size/2);
+  spdlog::info("init: {}x{} #:{} {} {} {}\n", width,height, num_boxes, pShmemBoxes->box_x[0], pShmemBoxes->box_y[0]-box_size, pShmemBoxes->box_y[0]-box_size/2);
 
   // Each box will have a set of 1D indices into its members
 	for (int ibox=0; ibox<num_boxes; ibox++) {
@@ -261,23 +248,18 @@ void rcv_boxes(int width) {
   printf("count1: %f\n",(float)af::count<float>(gaf->seq1(af::span,1)) );
 #endif
 
-  nActuators = pShmemBoxes->nActuators;
-  nTerms = pShmemBoxes->nTerms;
+	nActuators = pShmemBoxes->nActuators;
+	nTerms = pShmemBoxes->nTerms; // should be (valid) boxes * 2
 
-  memcpy(local_buf, pShmemBoxes->influence, sizeof(CALC_TYPE) * nActuators*nTerms);
-	gaf->influence = af::array(nActuators, nTerms, local_buf );
-  memcpy(local_buf, pShmemBoxes->influence_inv, sizeof(CALC_TYPE) * nActuators*nTerms);
+	//memcpy(local_buf, pShmemBoxes->influence, sizeof(CALC_TYPE) * nActuators*nTerms);
+	//gaf->influence = af::array(nActuators, nTerms, local_buf );
+	memcpy(local_buf, pShmemBoxes->influence_inv, sizeof(CALC_TYPE) * nActuators*nTerms);
 	gaf->influence_inv = af::array(nTerms, nActuators, local_buf );
 
 	spdlog::info("CEN rcv: {} {} {} {} {} {} {}x{} infl:{}x{} {}",
 		num_boxes, pixel_um, box_size, box_size_float, pupil_radius_um, pupil_radius_pixels,
-		width, height, nTerms, nActuators, (float)af::mean<float>(gaf->influence_inv) );
-		
-#if 0
-  	for (int i=0; i<nActuators; i++) {
-	  pShmemBoxes->mirror_voltages[i]=0;
-	}		
-#endif //0	
+		width, height, nTerms, nActuators, (float)af::max<float>(gaf->influence_inv) );
+
 }
 
 PLUGIN_API(centroiding,init,char *params)
@@ -308,14 +290,6 @@ PLUGIN_API(centroiding,init,char *params)
 
   //spdlog::info("Ok");
 
-#if 0
-// In  ALPAO now to clear mirror_voltages and zero DM
-    struct shmem_boxes_header* pShmemBoxes = (struct shmem_boxes_header*) shmem_region3.get_address();
-  	for (int i=0; i<nActuators; i++) {
-	  pShmemBoxes->mirror_voltages[i]=0;
-	}		
-#endif //0	
-
   return 0;
 }
 
@@ -328,15 +302,9 @@ int find_centroids_af(unsigned char *buffer, int width, int height) {
 	gaf->im /= 255.0;
 	
     struct shmem_boxes_header* pShmemBoxes = (struct shmem_boxes_header*) shmem_region3.get_address();
-	memcpy(omit_boxes, pShmemBoxes->centroid_omit, 1*num_boxes);
+	memcpy(omit_boxes, pShmemBoxes->centroid_omit, sizeof(pShmemBoxes->centroid_omit[0])*num_boxes);
 	auto afOmits = af::array( num_boxes, omit_boxes).as(b8);
 	
-  // Threshold pixels: (could also binarize )
-  if (bDoThreshold) {
-    //float thresholdValue = 60.0/255.0;
-    gaf->im = (gaf->im < fThreshold) * 0 + gaf->im * (gaf->im >= fThreshold);
-  }
-
   if (bDoSetBackground) {
     gaf->im_background = af::array(width, height, buffer).as(f64);
     gaf->im_background= af::transpose( gaf->im_background );
@@ -344,8 +312,16 @@ int find_centroids_af(unsigned char *buffer, int width, int height) {
     bDoSetBackground=0;
   }
 
-  if (bDoSubtractBackground)
+  if (bDoSubtractBackground) {
     gaf->im -= gaf->im_background;
+	// Some may go negative, which should get thresholded below
+  }
+  
+  // Threshold pixels: (could also binarize )
+  if (bDoThreshold) {
+    //float thresholdValue = 60.0/255.0;
+    gaf->im = (gaf->im < fThreshold) * 0 + gaf->im * (gaf->im >= fThreshold);
+  }
 
   gaf->im_subtracted_u8 = gaf->im.copy();
   gaf->im_subtracted_u8 *= 255.0;
@@ -405,20 +381,18 @@ int find_centroids_af(unsigned char *buffer, int width, int height) {
 	gaf->sums_x = af::sum( gaf->x_reshape, 0) / gaf->sums;
 	gaf->sums_y = af::sum( gaf->y_reshape, 0) / gaf->sums;
 
-  gaf->sums_x(afOmits) = af::NaN;
-  gaf->sums_y(afOmits) = af::NaN; 
+  gaf->sums_x(afOmits) = af::Inf;
+  gaf->sums_y(afOmits) = af::Inf; 
 
   CALC_TYPE *host_x = gaf->sums_x.host<CALC_TYPE>();
   CALC_TYPE *host_y = gaf->sums_y.host<CALC_TYPE>();
-
-  //struct shmem_boxes_header* pShmemBoxes = (struct shmem_boxes_header*) shmem_region3.get_address();
 
   // Compute deltas and write to shmem
   gaf->delta_x = gaf->sums_x - gaf->ref_x;
   gaf->delta_y = gaf->sums_y - gaf->ref_y;
 
-  auto valids = !af::isNaN(gaf->delta_x);
-  //auto nans = af::isNaN(gaf->delta_x);
+  // Indexes of box numbers that are okay
+  auto valids = !af::isNaN (gaf->sums_x) && !af::isInf (gaf->sums_x) ;
 
   // Remove tip and tilt
   gaf->delta_x -= (CALC_TYPE)af::mean<CALC_TYPE>(gaf->delta_x(valids) ); // weighted mean, 0 for NaNs
@@ -434,19 +408,26 @@ int find_centroids_af(unsigned char *buffer, int width, int height) {
   //memcpy(pShmemBoxes->delta_y, host_delta_y, sizeof(CALC_TYPE)*num_boxes);
 
   // If want to log deltas:
-  //memcpy(gpShmemLog[gpShmemHeader->total_frames].centroid_x, host_delta_x, sizeof(CALC_TYPE)*num_boxes);
-  //memcpy(gpShmemLog[gpShmemHeader->total_frames].centroid_y, host_delta_y, sizeof(CALC_TYPE)*num_boxes);
+  memcpy(gpShmemLog[gpShmemHeader->log_index].centroid_x, host_delta_x, sizeof(CALC_TYPE)*num_boxes);
+  memcpy(gpShmemLog[gpShmemHeader->log_index].centroid_y, host_delta_y, sizeof(CALC_TYPE)*num_boxes);
 
-  // Assumed that the dimensions of infl match
-  gaf->slopes = af::join(0, gaf->delta_x, gaf->delta_y);
-  gaf->slopes = af::moddims(gaf->slopes,af::dim4(1,num_boxes*2,1,1) ); // like flatten, but in 2nd dimension
+  // Interleave x and y slopes. Stack them side-by-side, transpose then flatten.
+  // This is correct because they are arrays with dimensions (1,x)
+  gaf->slopes = af::join(0, gaf->delta_x, gaf->delta_y); 
+  gaf->slopes = af::moddims(gaf->slopes,af::dim4(1,num_boxes*2,1,1) ); // Flatten
   gaf->slopes /= (focal_length_um/pixel_um);
 
-  auto valids2 = af::join(0, valids, valids);
+  auto idx_valid=af::where(valids);
+  auto valids2 = af::transpose( af::join(1, 2*idx_valid, 2*idx_valid+1 ) );
+  valids2 = af::moddims(valids2,af::dim4(2*idx_valid.dims(0),1,1,1) ); // like flatten, but in 2nd dimension
 
-  //gaf->mirror_voltages = af::matmul(gaf->slopes(valids2), gaf->influence_inv(valids2, af::span) );
-  gaf->mirror_voltages = af::matmul(gaf->slopes, gaf->influence_inv );
-  double *host_mirror_voltages = gaf->mirror_voltages.host<double>();
+  if (af::sum<int>(valids2)==0) {
+	  gaf->mirror_voltages = gaf->influence_inv(0,af::span) * 0;
+  } else {
+	gaf->mirror_voltages = af::matmul(gaf->slopes(valids2), gaf->influence_inv(valids2,af::span) );
+	spdlog::info("{} {} {}",(float)af::max<float>(gaf->mirror_voltages), (float)af::max<float>(gaf->slopes(valids2)), idx_valid.dims(0) );
+  }
+  //gaf->mirror_voltages = af::matmul(gaf->slopes, (gaf->influence_inv) );
 
 #if 0
   if (pShmemBoxes->header_version & 2) //Follow // TODO
@@ -455,19 +436,15 @@ int find_centroids_af(unsigned char *buffer, int width, int height) {
     memcpy(pShmemBoxes->box_y, host_y, sizeof(float)*num_boxes);
   }
 #endif //0
-
-#if VERBOSE
-  spdlog::info("Val0 x,y: {},{}",host_x[0],host_y[0]);
-  spdlog::info("Count: {}", (float)af::count<float>(sums_x));
-#endif
-
+  
   memcpy(pShmemBoxes->centroid_x, host_x, sizeof(CALC_TYPE)*num_boxes);
   memcpy(pShmemBoxes->centroid_y, host_y, sizeof(CALC_TYPE)*num_boxes);
 
   //memcpy(pShmemBoxes->mirror_voltages, host_mirror_voltages, sizeof(double)*nActuators); // Added for debugging 2025/26/02 -- see realtime voltage calcs
 
-    auto save1 = pShmemBoxes->mirror_voltages[0]; // Debugging
-
+  double *host_mirror_voltages = gaf->mirror_voltages.host<double>();
+  auto save1 = pShmemBoxes->mirror_voltages[0]; // Debuggi
+  
 	if ((pShmem->mode & MODE_AO) ) { // Closed loop
 	
 		double mirror_min=10, mirror_max=-10, mirror_mean=0;
@@ -498,36 +475,21 @@ int find_centroids_af(unsigned char *buffer, int width, int height) {
 		mirror_mean /= nActuators;
 
 		// Memory Log: for debugging/log
-		memcpy(gpShmemLog[gpShmemHeader->total_frames].mirrors, pShmemBoxes->mirror_voltages, sizeof(CALC_TYPE)*nActuators);
-		memcpy(gpShmemLog[gpShmemHeader->total_frames].mirrors, host_im_subtracted_u8, sizeof(uint8_t)*MAX_IMAGE_SIZE);
-
+		memcpy(gpShmemLog[gpShmemHeader->log_index].mirrors, pShmemBoxes->mirror_voltages, sizeof(pShmemBoxes->mirror_voltages[0])*nActuators);
+		memcpy(gpShmemLog[gpShmemHeader->log_index].im, host_im_subtracted_u8, sizeof(uint8_t)*width*height);
+		
 		// Debug:
 		spdlog::info("Mirror {}:{}/{} 0:{} 00:{}", (double)mirror_mean, (double)mirror_min, (double) mirror_max, (double)pShmemBoxes->mirror_voltages[0], (double)save1 );
 
 	} // if closed loop
 
+  af::freeHost(host_im_subtracted_u8);
   af::freeHost(host_mirror_voltages);
-
   af::freeHost(host_x);
   af::freeHost(host_y);
-
-	if (0) {
-		af_print( gaf->sums_x );
-		af_print( gaf->sums_y );
-	}
-
-#if 0
-	spdlog::info("{}", num_boxes);
-	spdlog::info("Maxx: {}", (float)af::max<float>(gaf->sums_x));
-	spdlog::info("Minx: {}", (float)af::min<float>(gaf->sums_x));
-	spdlog::info("Mayy: {}", (float)af::max<float>(gaf->sums_y));
-	spdlog::info("Miny: {}", (float)af::min<float>(gaf->sums_y));
-	spdlog::info("Meanx: {}", (float)af::mean<float>(gaf->sums_x));
-	spdlog::info("Meany: {}", (float)af::mean<float>(gaf->sums_y));
-
-  spdlog::info("Val100 x,y: {},{}",host_x[2],host_y[2]);
-#endif
-
+  
+  //spdlog::info("ZZZ");
+  
   return 0;
 }
 
@@ -576,6 +538,13 @@ void process_ui_commands(void) {
       fGain=atof(msg+1);
       spdlog::info("G={}",fGain);
       break;
+    case 'E': {
+      int xpos=atoi(msg+1);
+      int ypos=atoi(msg+6);
+	  spdlog::info("x,y={} {}",xpos,ypos);
+	  gaf->im_background( af::seq(ypos, ypos+10), af::seq(xpos,xpos+10) ) = 1.0; // Totally hot
+	  break;
+	}
     case 't':
       spdlog::info("t!");
       bDoThreshold=0;
@@ -637,3 +606,25 @@ PLUGIN_API(centroiding,get_info,char *which)
 
 
 
+// ArrayFire/debugging functions, here in case needed:
+#if 0
+  //spdlog::info(yuck.dims(0));
+
+  
+//int *host_valids = valids2.host<int>();  
+  //spdlog::info("{} {} {} {} {} {} ",host_valids[0], host_valids[1], host_valids[2], host_valids[3], host_valids[4], host_valids[5]) ;//, host_valids[1], host_valids[2], host_valids[3] );
+ //af::freeHost(host_valids);
+ //af::print("valids2",valids2) ; //(1,af::seq(4)) );
+  spdlog::info("M");
+
+/*   spdlog::info( (float)af::sum<float>(valids) );
+
+  spdlog::info((int)gaf->influence_inv.dims(0) );
+  spdlog::info((int)gaf->influence_inv.dims(1) );
+  spdlog::info((int)gaf->slopes.dims(0) );
+  spdlog::info((int)gaf->slopes.dims(1) );
+  */ //spdlog::info("N ",gaf->slopes(valids2).dims(0) ,gaf->slopes(valids2).dims(1), gaf->influence_inv.dims(0), gaf->influence_inv.dims(1) );
+
+  //gaf->mirror_voltages = gaf->influence_inv(0,af::span);
+  //gaf->mirror_voltages = af::constant<double>( 0, af::dim4(97,1,1,1) );
+#endif //0: debugging functions
