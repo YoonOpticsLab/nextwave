@@ -133,14 +133,14 @@ class NextwaveEngineComm():
         try: # TODO: Better to have an "if ready"
             if True:
                 buf = ByteStream()
-                for item in self.parent.influence.T.flatten():
+                for item in self.parent.influence.flatten():
                     buf.append(item, 'd')
                 shmem_boxes.seek(fields['influence']['bytenum_current'])
                 shmem_boxes.write(buf)
                 shmem_boxes.flush()
 
             buf = ByteStream()
-            for item in self.parent.influence_inv.T.flatten():
+            for item in self.parent.influence_inv.flatten():
                 buf.append(item, 'd')
             shmem_boxes.seek(fields['influence_inv']['bytenum_current'])
             shmem_boxes.write(buf)
@@ -281,6 +281,11 @@ class NextwaveEngineComm():
         self.shmem_boxes.seek(fields['mirror_voltages']['bytenum_current'])
         buf=self.shmem_boxes.read(self.parent.nActuators*SIZEOF_DOUBLE)
         self.mirror_voltages=np.array( struct.unpack_from(''.join((['d']*self.parent.nActuators)), buf) )
+
+        # Debugging
+        self.shmem_boxes.seek(fields['box_x_normalized']['bytenum_current'])
+        buf=self.shmem_boxes.read(num_boxes*SIZEOF_DOUBLE)
+        self.slopes_debug=np.array( struct.unpack_from(''.join((['d']*num_boxes)), buf) )
 
         DEBUGGING=False
         if DEBUGGING:

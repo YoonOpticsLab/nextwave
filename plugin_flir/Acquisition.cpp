@@ -808,7 +808,13 @@ DECL process(char *params) {
 
         //cout << endl << "Running example for camera " << i << "..." << endl;
 
-        result = result | AcquireImages(pCam);
+		try {
+			result = result | AcquireImages(pCam);
+		} catch (Spinnaker::Exception& e)
+            {
+                cout << "Error: " << e.what() << endl;
+                result = -1;
+            } 
     }
 
   pCam=camList.GetByIndex(0);

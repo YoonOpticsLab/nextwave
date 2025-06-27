@@ -429,6 +429,13 @@ int find_centroids_af(unsigned char *buffer, int width, int height) {
   }
   //gaf->mirror_voltages = af::matmul(gaf->slopes, (gaf->influence_inv) );
 
+
+// DEBUGGING
+  //af::array idx_double;
+  CALC_TYPE *host_slopes = gaf->slopes.host<CALC_TYPE>(); // as(f64).
+  memcpy(pShmemBoxes->box_x_normalized, host_slopes, sizeof(CALC_TYPE)*num_boxes*2); // Slopes have X and Y
+  af::freeHost(host_slopes);
+  
 #if 0
   if (pShmemBoxes->header_version & 2) //Follow // TODO
   {
@@ -479,7 +486,7 @@ int find_centroids_af(unsigned char *buffer, int width, int height) {
 		memcpy(gpShmemLog[gpShmemHeader->log_index].im, host_im_subtracted_u8, sizeof(uint8_t)*width*height);
 		
 		// Debug:
-		spdlog::info("Mirror {}:{}/{} 0:{} 00:{}", (double)mirror_mean, (double)mirror_min, (double) mirror_max, (double)pShmemBoxes->mirror_voltages[0], (double)save1 );
+		//spdlog::info("Mirror {}:{}/{} 0:{} 00:{}", (double)mirror_mean, (double)mirror_min, (double) mirror_max, (double)pShmemBoxes->mirror_voltages[0], (double)save1 );
 
 	} // if closed loop
 

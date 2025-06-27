@@ -7,7 +7,7 @@
 cmake_minimum_required(VERSION 3.1...3.27)
 
 # Not sure if/why this is needed. E.g., might be easier to deploy with this included:
-# set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
 # This is your project statement. You should always list languages;
 # Listing the version is nice here since it sets lots of useful variables

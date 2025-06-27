@@ -16,7 +16,7 @@
 
 #define VERBOSE 0
 
-#undef _MSC_VER : asdkDMTypes inside AlpaoSDK tries to redefine uint8_t, which fails
+#undef _MSC_VER //: asdkDMTypes inside AlpaoSDK tries to redefine uint8_t, which fails
 #include "asdkDM.h"
 
 acs::DM* dm;
@@ -40,7 +40,7 @@ DECL init(void)
   spdlog::info("ALPAO DM2");
 
 #if REAL_AO  
-  dm = new acs::DM( "BAX492" );
+  dm = new acs::DM( "BAX581" );
   num_act = (int)dm->Get( "NbOfActuator" );
 #else
   num_act=97;

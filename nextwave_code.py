@@ -280,7 +280,7 @@ class NextwaveEngine():
 
         # Compute all integrals for all box corners 
         lenslet_dx,lenslet_dy=zernike_functions.zernike_integral_average_from_corners(
-            lefts, rights, ups, downs, self.pupil_radius_mm / self.pupil_mag )
+            lefts, rights, ups, downs, self.pupil_radius_mm )
 
         # Remove piston
         lenslet_dx = lenslet_dx[1:,:]
@@ -377,7 +377,7 @@ class NextwaveEngine():
         if self.modes < len(s):
             s_recip[self.modes:] = 0 # Clear all the modes from x up
             
-        self.condition = s[0]/s[modes-1]
+        self.condition = s[0]/s[self.modes-1]
             
         self.influence_inv = ( (U * s_recip) @ V[0:97,:] ).T
         self.influence_inv[:,self.acts_outside] = 0
@@ -418,7 +418,8 @@ class NextwaveEngine():
                 spot_displace_y[nidx]=0
                 self.spot_displace_interpolated[nidx] = 2
 
-        slope = np.concatenate( (spot_displace_y, spot_displace_x)) * (self.ccd_pixel/self.focal);
+        # DRC: x and y were switched here 2025/05/29
+        slope = np.concatenate( (spot_displace_x, spot_displace_y)) * (self.ccd_pixel/self.focal);
 
         self.spot_displace_x = spot_displace_x # debugging
         self.spot_displace_y = spot_displace_y
@@ -654,14 +655,15 @@ class NextwaveEngine():
             fil.writelines('%f\n'%val)
         fil.close()
 
-        np.save('dx',self.spot_displace_x)
-        np.save('dy',self.spot_displace_y)
+        np.savetxt('dx',self.spot_displace_x)
+        np.savetxt('dy',self.spot_displace_y)
         np.save('slope',self.slope)
         #np.save('zterms_full',self.zterms_full)
         #np.save('zterms_inv',self.zterms_inv)
 
         try:
             np.savetxt('mirror_voltages.txt',self.comm.mirror_voltages)
+            np.savetxt('slopes_debug.txt',self.comm.slopes_debug)
         except:
             pass
 
