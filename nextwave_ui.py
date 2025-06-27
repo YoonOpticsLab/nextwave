@@ -1216,7 +1216,7 @@ class NextWaveMainWindow(QMainWindow):
      scaled = self.slider_gain.value()/100.0*CAM_GAIN_MAX
      self.gain.setValue(scaled)
      msg=b"G=%f"%(scaled)
-     self.sockets.camera.send( msg ) # Convert to usec
+     self.sockets.camera.send( msg ) 
 
  def loop_changed(self,state):
     self.engine.loop_changed(self.chkLoop.isChecked() )

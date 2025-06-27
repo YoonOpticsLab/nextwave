@@ -61,7 +61,8 @@
 #include "boost/interprocess/mapped_region.hpp"
 using namespace boost::interprocess;
 
-#define NUM_IMAGES 10
+// TODO: Make this a settable parameter?
+#define ACQUIRE_TIMEOUT_MS 100
 
 using namespace Spinnaker;
 using namespace Spinnaker::GenApi;
@@ -373,22 +374,74 @@ SystemPtr mySystem;
 ImageProcessor processor;
 
 uint16_t nCurrRing = 0; //persist across calls
-		
-// This function acquires and saves 10 images from a device.
-int AcquireImages(CameraPtr pCam) //, INodeMap& nodeMap, INodeMap& nodeMapTLDevice)
+
+int Acquire1Image(void)
 {
     int result = 0;
 
-#if 0
-    windows_shared_memory shmem(open_or_create, SHMEM_HEADER_NAME, read_write, (size_t)SHMEM_HEADER_SIZE);
-    mapped_region shmem_region{ shmem, read_write };
+    try {
+      ImagePtr pResultImage = pCam->GetNextImage(ACQUIRE_TIMEOUT_MS);
+    } catch (Spinnaker::Exception& e)
+    {
+      cout << "Acq1 Error: " << e.what() << endl;
+      return -1;
+    };
 
-    windows_shared_memory shmem2(open_or_create, SHMEM_BUFFER_NAME, read_write, (size_t)SHMEM_BUFFER_SIZE);
-    mapped_region shmem_region2{ shmem2, read_write };
-#endif //0
+    // Ensure image completion
+    if (pResultImage->IsIncomplete())
+    {
+        // Retrieve and print the image status description
+        cout << "Image incomplete: " << Image::GetImageStatusDescription(pResultImage->GetImageStatus())
+            << "..." << endl
+            << endl;
+        return -2;
+    }
+    else
+    {
+        const size_t width = pResultImage->GetWidth();
+        const size_t height = pResultImage->GetHeight();
+
+        nCurrRing += 1;
+        if (nCurrRing >= NW_MAX_FRAMES) nCurrRing = 0;
+
+        ImagePtr convertedImage = processor.Convert(pResultImage, PixelFormat_Mono8);
+
+        //struct shmem_header* pShmem = (struct shmem_header*) shmem_region.get_address();
+
+        gpShmemHeader->lock = (uint8_t)1; // Everyone keep out until we are done!
+
+        // Don't need to write these each time:
+        gpShmemHeader->header_version = (uint8_t)NW_HEADER_VERSION;
+        gpShmemHeader->dimensions[0] = (uint16_t)height;
+        gpShmemHeader->dimensions[1] = (uint16_t)width;
+        gpShmemHeader->dimensions[2] = (uint16_t)0;
+        gpShmemHeader->dimensions[3] = (uint16_t)0;
+        gpShmemHeader->datatype_code = (uint8_t)7;
+        gpShmemHeader->max_frames = (uint8_t)NW_MAX_FRAMES;
+
+        // For current frame:
+        gpShmemHeader->current_frame = (uint8_t)nCurrRing;
+        gpShmemHeader->timestamps[nCurrRing] = (uint8_t)NW_STATUS_READ;
+        gpShmemHeader->timestamps[nCurrRing] = convertedImage->GetTimeStamp();
+
+        memcpy( ((uint8_t *)(shmem_region2.get_address())+height*width*nCurrRing),
+            (void*)convertedImage->GetData(),
+            height*width);
+
+        gpShmemHeader->lock = (uint8_t)0; // Keep out until we are done!
+
+//spdlog::info("Acquired: {}",nCurrRing);
+    }
+
+    pResultImage->Release();
+    return 0;
+}
+
+int AcquireImage(CameraPtr pCam) //, INodeMap& nodeMap, INodeMap& nodeMapTLDevice)
+{
+    int result = 0;
 
 		INodeMap& nodeMap = pCam->GetNodeMap();
-
     // Execute software trigger
     CCommandPtr ptrSoftwareTriggerCommand = nodeMap.GetNode("TriggerSoftware");
     if (!IsWritable(ptrSoftwareTriggerCommand))
@@ -397,78 +450,18 @@ int AcquireImages(CameraPtr pCam) //, INodeMap& nodeMap, INodeMap& nodeMapTLDevi
         return -1;
       }
 
-	// Fire software trigger to start acquisition of new image
-    ptrSoftwareTriggerCommand->Execute();
+  // Fire software trigger to start acquisition of new image
+  ptrSoftwareTriggerCommand->Execute();
 
-	try {
-
-        {
-            try
-            {
-                ImagePtr pResultImage = pCam->GetNextImage(1000);
-
-                // Ensure image completion
-                if (pResultImage->IsIncomplete())
-                {
-                    // Retrieve and print the image status description
-                    cout << "Image incomplete: " << Image::GetImageStatusDescription(pResultImage->GetImageStatus())
-                        << "..." << endl
-                        << endl;
-                }
-                else
-                {
-                    const size_t width = pResultImage->GetWidth();
-                    const size_t height = pResultImage->GetHeight();
-
-                    nCurrRing += 1;
-                    if (nCurrRing >= NW_MAX_FRAMES) nCurrRing = 0;
-
-                    ImagePtr convertedImage = processor.Convert(pResultImage, PixelFormat_Mono8);
-
-                    //struct shmem_header* pShmem = (struct shmem_header*) shmem_region.get_address();
-
-                    gpShmemHeader->lock = (uint8_t)1; // Everyone keep out until we are done!
-
-                    // Don't need to write these each time:
-                    gpShmemHeader->header_version = (uint8_t)NW_HEADER_VERSION;
-                    gpShmemHeader->dimensions[0] = (uint16_t)height;
-                    gpShmemHeader->dimensions[1] = (uint16_t)width;
-                    gpShmemHeader->dimensions[2] = (uint16_t)0;
-                    gpShmemHeader->dimensions[3] = (uint16_t)0;
-                    gpShmemHeader->datatype_code = (uint8_t)7;
-                    gpShmemHeader->max_frames = (uint8_t)NW_MAX_FRAMES;
-
-                    // For current frame:
-                    gpShmemHeader->current_frame = (uint8_t)nCurrRing;
-                    gpShmemHeader->timestamps[nCurrRing] = (uint8_t)NW_STATUS_READ;
-                    gpShmemHeader->timestamps[nCurrRing] = convertedImage->GetTimeStamp();
-
-                    memcpy( ((uint8_t *)(shmem_region2.get_address())+height*width*nCurrRing),
-                        (void*)convertedImage->GetData(),
-                        height*width);
-
-                    gpShmemHeader->lock = (uint8_t)0; // Keep out until we are done!
-
-					//spdlog::info("Acquired: {}",nCurrRing);
-  
-                }
-
-                pResultImage->Release();
-            }
-            catch (Spinnaker::Exception& e)
-            {
-                cout << "Error: " << e.what() << endl;
-                result = -1;
-            }
-        }
+  if (Acquire1Image()<0) { // Some kind of error, try to restart device
+    pCam->EndAcquisition();
+    pCam->BeginAcquisition();
+    if (Acquire1Image()==0) { 
+      spdlog::info("End/begin succeeded.");
     }
-    catch (Spinnaker::Exception& e)
-    {
-        cout << "Error: " << e.what() << endl;
-        return -1;
-    }
+  }
 
-    return result;
+  return result;
 }
 
 // This function prints the device information of the camera from the transport
@@ -785,7 +778,7 @@ DECL init(void)
         // By default, if no specific color processing algorithm is set, the image
         // processor will default to NEAREST_NEIGHBOR method.
         //
-        processor.SetColorProcessing(SPINNAKER_COLOR_PROCESSING_ALGORITHM_HQ_LINEAR);
+        //processor.SetColorProcessing(SPINNAKER_COLOR_PROCESSING_ALGORITHM_HQ_LINEAR);
 	}
     catch (Spinnaker::Exception& e)
     {
