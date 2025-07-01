@@ -378,9 +378,10 @@ uint16_t nCurrRing = 0; //persist across calls
 int Acquire1Image(void)
 {
     int result = 0;
+    ImagePtr pResultImage;
 
     try {
-      ImagePtr pResultImage = pCam->GetNextImage(ACQUIRE_TIMEOUT_MS);
+      pResultImage = pCam->GetNextImage(ACQUIRE_TIMEOUT_MS);
     } catch (Spinnaker::Exception& e)
     {
       cout << "Acq1 Error: " << e.what() << endl;
@@ -457,8 +458,10 @@ int AcquireImage(CameraPtr pCam) //, INodeMap& nodeMap, INodeMap& nodeMapTLDevic
     pCam->EndAcquisition();
     pCam->BeginAcquisition();
     if (Acquire1Image()==0) { 
-      spdlog::info("End/begin succeeded.");
-    }
+      spdlog::info("NW/FLIR End/begin succeeded.");
+    } else {
+      spdlog::error("NW/FLIR Didn't recover.");
+	}
   }
 
   return result;
@@ -732,10 +735,17 @@ DECL init(void)
 
         //cout << "Acquisition mode set to continuous..." << endl;
 
-		ConfigureExposure(nodeMap, 80000);
+		// TODO: Make a general "init" function for us
+		ConfigureTrigger(nodeMap);
+		
+		ConfigureExposure(nodeMap, 80000); // TODO: Default
+		
+		//CIntegerPtr ptrSetter = nodeMap.GetNode("BinningHorizontal");
+        //ptrSetter->SetValue(2);
+		CIntegerPtr ptrSetter = nodeMap.GetNode("BinningVertical");
+        ptrSetter->SetValue(2);
 
-    ConfigureTrigger(nodeMap);
-
+		
         //
         // Begin acquiring images
         //
@@ -802,7 +812,7 @@ DECL process(char *params) {
         //cout << endl << "Running example for camera " << i << "..." << endl;
 
 		try {
-			result = result | AcquireImages(pCam);
+			result = result | AcquireImage(pCam);
 		} catch (Spinnaker::Exception& e)
             {
                 cout << "Error: " << e.what() << endl;

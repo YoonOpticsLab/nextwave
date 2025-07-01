@@ -425,7 +425,7 @@ int find_centroids_af(unsigned char *buffer, int width, int height) {
 	  gaf->mirror_voltages = gaf->influence_inv(0,af::span) * 0;
   } else {
 	gaf->mirror_voltages = af::matmul(gaf->slopes(valids2), gaf->influence_inv(valids2,af::span) );
-	spdlog::info("{} {} {}",(float)af::max<float>(gaf->mirror_voltages), (float)af::max<float>(gaf->slopes(valids2)), idx_valid.dims(0) );
+	//spdlog::info("{} {} {}",(float)af::max<float>(gaf->mirror_voltages), (float)af::max<float>(gaf->slopes(valids2)), idx_valid.dims(0) );
   }
   //gaf->mirror_voltages = af::matmul(gaf->slopes, (gaf->influence_inv) );
 
