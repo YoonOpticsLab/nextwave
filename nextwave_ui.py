@@ -21,8 +21,11 @@ import matplotlib.cm as cmap
 
 from nextwave_code import NextwaveEngine
 from nextwave_sockets import NextwaveSocketComm
+import defaults
 
 from nextwave_widgets import ZernikeDialog, BoxInfoDialog, ActuatorPlot, MyBarWidget, OfflineDialog
+
+from nextwave_build import build_message
 
 from threading import Thread
 
@@ -31,26 +34,6 @@ from zernike_functions import calc_rms
 import xml.etree.ElementTree as ET
 
 WINDOWS=(os.name == 'nt')
-
-# TODO: Configurable?
-QIMAGE_HEIGHT=1024
-QIMAGE_WIDTH=1024
-
-MAIN_HEIGHT_WIN=1024
-MAIN_WIDTH_WIN=1800
-
-# These not used anymore:
-SPOTS_HEIGHT_WIN=768
-SPOTS_WIDTH_WIN=768
-
-# This is used, but should be based on image, not hard-coded:
-SPOTS_WIDTH_WIN_MINIMUM=1024
-
-# TODO
-CAM_EXPO_MIN = 32./1000.0 # TODO
-CAM_EXPO_MAX = 100000 # TODO
-CAM_GAIN_MIN = 0
-CAM_GAIN_MAX = 9.83
 
 def clear_widget_list(layout1,nkeep=0):
   idx=layout1.count()
@@ -78,6 +61,7 @@ class NextWaveMainWindow(QMainWindow):
     self.draw_boxes = True
     self.draw_centroids = True
     self.draw_arrows = False
+    self.draw_zonal_arrows = False
     self.draw_crosshair = True
     self.iterative_first=True
     self.draw_pupil=False
@@ -223,6 +207,21 @@ class NextWaveMainWindow(QMainWindow):
                        self.engine.centroids_x[n],
                        self.engine.centroids_y[n]) for n in np.arange(0,self.engine.num_boxes)]
         painter.drawLines(arrows)
+        
+    if self.draw_zonal_arrows:
+        #conicalGradient gradient;
+		#gradient.setCenter(rect().center());
+		#gradient.setAngle(90);
+		#gradient.setColorAt(1.0, Qt::black);
+		#gradient.setColorAt(0.0, palette().background().color());
+        pen = QPen(Qt.green, 2)
+        painter.setPen(pen)
+        arrows=[QLineF(self.engine.box_x[n],
+                       self.engine.box_y[n],
+                       self.engine.centroids_x[n],
+                       self.engine.centroids_y[n]) for n in np.arange(0,self.engine.num_boxes)]
+        painter.drawLines(arrows)
+
 
     if self.draw_refs and self.engine.num_boxes>0: # and self.engine.mode>1:
         pen = QPen(Qt.green, 2.0)
@@ -417,7 +416,7 @@ class NextWaveMainWindow(QMainWindow):
         self.box_info_dlg.hide()
 
     pixmap = pixmap.scaled(self.scales[self.scale_num], self.scales[self.scale_num], Qt.KeepAspectRatio)
-    self.widget_centrals.setMinimumWidth(SPOTS_WIDTH_WIN_MINIMUM)
+    self.widget_centrals.setMinimumWidth(defaults.SPOTS_WIDTH_WIN_MINIMUM)
     self.pixmap_label.setPixmap(pixmap)
     #print ('%0.2f'%bytez.mean(),end=' ', flush=True);
     
@@ -516,8 +515,12 @@ class NextWaveMainWindow(QMainWindow):
 
     #print( self.bar_plot.getViewBox().state['limits'] )
     # First_term will now be the first of the next order
-    maxval=np.max( self.engine.zernikes[5:first_term-1] )
-    minval=np.min( self.engine.zernikes[5:first_term-1] )
+    if len(self.engine.zernikes)>5:
+        maxval=np.max( self.engine.zernikes[5:first_term-1] )
+        minval=np.min( self.engine.zernikes[5:first_term-1] )
+    else:
+        maxval=1 # TODO
+        minval=-1
 
     if False: # TODO: indicate 3-5 out of range
     #for ntrunc in np.arange(3,6):
@@ -687,7 +690,7 @@ class NextWaveMainWindow(QMainWindow):
   if self.offline_curr >= self.offline_nframes:
    self.offline_curr = self.offline_nframes-1
 
-  #print("Offline move %d, curr=%d:"%(n,self.offline_curr) )
+  print("Offline move %d, curr=%d:/%d"%(n,self.offline_curr,self.offline_nframes) )
   self.engine.offline_frame(self.offline_curr)
 
   self.lbl_frame_curr.setText("%d/%d"%(self.offline_curr,self.offline_nframes-1) )
@@ -717,7 +720,7 @@ class NextWaveMainWindow(QMainWindow):
      pixmap_label.setAlignment(Qt.AlignCenter)
      self.pixmap_label=pixmap_label
 
-     im_np = np.ones((QIMAGE_HEIGHT,QIMAGE_WIDTH),dtype='uint8')
+     im_np = np.ones((defaults.QIMAGE_HEIGHT,defaults.QIMAGE_WIDTH),dtype='uint8')
      #im_np = np.transpose(im_np, (1,0,2))
      qimage = QImage(im_np, im_np.shape[1], im_np.shape[0],
                      QImage.Format_Mono)
@@ -820,7 +823,7 @@ class NextWaveMainWindow(QMainWindow):
      #btnFind.setStyleSheet("color : orange")
      #layout1.addWidget(btnFind,2,1)
 
-     self.it_start = QLineEdit("3.5")
+     self.it_start = QLineEdit("2.65") # TODO: grab from defaults
      layout1.addWidget(self.it_start,4,0)
      self.it_step = QLineEdit("0.25")
      layout1.addWidget(self.it_step,4,1)
@@ -874,6 +877,15 @@ class NextWaveMainWindow(QMainWindow):
      layout1.addWidget(btn,6,5)
      btn.clicked.connect(lambda: self.engine.offline.offline_auto_dumb() )
 
+     btn = QPushButton("Auto shrink")
+     layout1.addWidget(btn,6,4)
+     btn.clicked.connect(lambda: self.engine.offline.offline_auto_shrink() )
+
+     btn = QPushButton("Auto shrink1")
+     layout1.addWidget(btn,6,3)
+     btn.clicked.connect(lambda: self.engine.offline.offline_auto_shrink1() )
+
+
      
 #     btn = QPushButton("Dialog2")
      #layout1.addWidget(btn,6,3)
@@ -926,8 +938,8 @@ class NextWaveMainWindow(QMainWindow):
      self.exposure = QDoubleSpinBox()
      layout1.addWidget(self.exposure,2,2)
      self.exposure.setDecimals(4)
-     self.exposure.setMinimum(CAM_EXPO_MIN)
-     self.exposure.setMaximum(CAM_EXPO_MAX)
+     self.exposure.setMinimum(defaults.CAM_EXPO_MIN)
+     self.exposure.setMaximum(defaults.CAM_EXPO_MAX)
 
      lbl = QLabel("Gain (dB)")
      layout1.addWidget(lbl,3,0)
@@ -940,8 +952,8 @@ class NextWaveMainWindow(QMainWindow):
 
      self.gain = QDoubleSpinBox()
      layout1.addWidget(self.gain,3,2)
-     self.gain.setMinimum(CAM_GAIN_MIN)
-     self.gain.setMaximum(CAM_GAIN_MAX)
+     self.gain.setMinimum(defaults.CAM_GAIN_MIN)
+     self.gain.setMaximum(defaults.CAM_GAIN_MAX)
 
      ### DM Ops
      layout1 = QGridLayout(self.ops_dm)
@@ -1089,13 +1101,6 @@ class NextWaveMainWindow(QMainWindow):
 
      layout1.addWidget(self.scroll_off,3,0) #,-1,-1)
 
-     #btn = QPushButton("\u2190") # left
-     #layout1.addWidget(btn,4,0)
-     #btn.clicked.connect(lambda: self.offline_move(-1) )
-     #btn = QPushButton("\u2192") # right
-     #layout1.addWidget(btn,4,1)
-     #btn.clicked.connect(lambda: self.offline_move (1) )
-
      self.chkOfflineAlgorithm = QCheckBox("Use offline algorithm")
      self.chkOfflineAlgorithm.stateChanged.connect(self.offline_algorithm)
      layout1.addWidget(self.chkOfflineAlgorithm,5,0)
@@ -1119,9 +1124,12 @@ class NextWaveMainWindow(QMainWindow):
      menu.addAction('Run &Calibration', self.do_calibration)
      menu.addAction('e&Xit', self.close)
 
+     menu=self.menuBar().addMenu('&Help')
+     menu.addAction('&About', self.show_about)
+
      pixmap_label.setFocus()
 
-     self.setGeometry(2,2,MAIN_WIDTH_WIN,MAIN_HEIGHT_WIN)
+     self.setGeometry(2,2,defaults.MAIN_WIDTH_WIN,defaults.MAIN_HEIGHT_WIN)
      self.setWindowFlags(Qt.Window | Qt.WindowTitleHint | Qt.WindowMinimizeButtonHint | Qt.WindowMaximizeButtonHint | Qt.WindowCloseButtonHint)
      self.show()
 
@@ -1146,7 +1154,8 @@ class NextWaveMainWindow(QMainWindow):
      self.threshold_val.setValue(scaled)
 
  def slider_exposure_changed(self):
-     scaled = 10**( float( self.slider_exposure.value())/100.0*np.log10(CAM_EXPO_MAX/CAM_EXPO_MIN)+np.log10(CAM_EXPO_MIN))
+     scaled = 10**( float( self.slider_exposure.value())/100.0
+        *np.log10(defaults.CAM_EXPO_MAX/defaults.CAM_EXPO_MIN)+np.log10(defaults.CAM_EXPO_MIN))
      self.exposure.setValue(scaled)
      self.sockets.camera.send(b"E=%f\x00"%(scaled*1000) ) # Convert to usec
 
@@ -1262,6 +1271,8 @@ class NextWaveMainWindow(QMainWindow):
     update_search_boxes=False
     if event.key()==ord('A'):
         self.draw_arrows = not( self.draw_arrows )
+    if event.key()==ord('Z'):
+        self.draw_zonal_arrows = not( self.draw_zonal_arrows )
     elif event.key()==ord('R'):
         self.draw_refs = not( self.draw_refs )
     elif event.key()==ord('B'):
@@ -1368,6 +1379,9 @@ class NextWaveMainWindow(QMainWindow):
     #self.sockets.init() #Later
 
 
+ def show_about(self):
+    QMessageBox.about(self, "About NextWave", build_message )
+            
  """def offline_image_click(*arg, **kwargs):
    ui=arg[0]
    #print("Bar", arg, kwargs)

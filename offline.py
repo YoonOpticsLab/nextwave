@@ -22,24 +22,10 @@ import zernike_functions
 import iterative
 
 from nextwave_comm import NextwaveEngineComm
+import defaults
 
 # import ffmpegcv # Read AVI... Better than OpenCV (built-in ffmpeg?)
-
 from PIL import Image, TiffImagePlugin # Needed
-
-GAUSS_SD=3
-BOX_THRESH=2.0
-SUBSET_FIT_SIZE=5  # Size of pixel subset to fit a Gaussian to for centroiding
-
-OFFLINE_ITERATIVE_START=3.0
-
-scan_frame_to_ecc={
-    'H': np.linspace(-35,35,37),
-    'V': np.linspace(-20,20,27),
-    'D': np.linspace(-28.28,28.28,27),
-    'D2': np.linspace(-28.28,28.28,27)
-    }
-
 
 class info_saver():
     def __init__(self,parent):
@@ -61,7 +47,7 @@ class info_saver():
             'est_y':self.offline.est_y,
             'cx':self.ui.cx,
             'cy':self.ui.cy,
-            'pupil_diam':self.engine.pupil_diam / self.engine.pupil_mag,
+            'pupil_diam':self.engine.pupil_diam / self.engine.pupil_mag, # In pupil coords, not sensor
             'zernikes':self.engine.zernikes}
         self.data[nframe]=data_record
         #print( 'saved: ', data_record, flush=True)
@@ -91,7 +77,7 @@ class info_saver():
         data_record=self.load1(nframe)
         if not data_record is None:
             try:
-                s=("%s,%s,%d,%0.2f,%0.3f,%d,%d,")%(self.offline.sub_id,self.offline.scan_dir,nframe,scan_frame_to_ecc[self.offline.scan_dir][nframe],data_record['pupil_diam'],data_record['cx'],data_record['cy'])
+                s=("%s,%s,%d,%0.2f,%0.3f,%d,%d,")%(self.offline.sub_id,self.offline.scan_dir,nframe,defaults.scan_frame_to_ecc[self.offline.scan_dir][nframe],data_record['pupil_diam'],data_record['cx'],data_record['cy'])
             except: # without the sub_id params
                 s=("%s,%s,%d,%0.2f,%0.3f,%d,%d,")%("","",nframe,0.0,data_record['pupil_diam'],data_record['cx'],data_record['cy'])
             for nz1,z1 in enumerate(data_record['zernikes']):
@@ -128,7 +114,7 @@ class NextwaveOffline():
         self.engine = self.parent
         self.ui = self.parent.ui
         self.saver = info_saver(self)
-
+        
     def iterative_run(self, cx, cy, step):
         return
 
@@ -187,7 +173,7 @@ class NextwaveOffline():
                 self.offline_movie = self.offline_movie - offline_mean
                 self.offline_movie[ self.offline_movie<0] = 0
                 self.offline_movie = np.array( self.offline_movie, dtype='uint8')
-                self.parent.ui.add_offline(buf_movie)
+                self.parent.ui.add_offline(self.offline_movie)
             else:
                 print("Sub whole movie")
                 subbed = np.array(self.offline_movie,dtype='int32') - self.offline_background
@@ -219,7 +205,7 @@ class NextwaveOffline():
                 self.offline_movie = self.offline_movie - offline_mean
                 self.offline_movie[ self.offline_movie<0] = 0
                 self.offline_movie = np.array( self.offline_movie, dtype='uint8')
-                self.parent.ui.add_offline(buf_movie)
+                self.parent.ui.add_offline(self.offline_movie)
             else:
                 print("Sub each frame from each frame")
                 subbed = np.array(self.offline_movie,dtype='int32') - self.offline_background
@@ -283,6 +269,8 @@ class NextwaveOffline():
                 #print("Offline: ",nf,frame1)
                 im = Image.open(frame1)
                 f1 = np.array(im) # TODO: assumes Im is already 8bit monochrome
+                if len(f1.shape)==3: # It's an RGB
+                    f1 = f1.mean(2)
                 if buf_movie is None:
                         buf_movie=np.zeros( (2048,f1.shape[0],f1.shape[1]), dtype='uint8') # TODO: grow new chunk if necessary
                 buf_movie[nf]=f1
@@ -411,18 +399,42 @@ class NextwaveOffline():
         #self.good_dbg4 = np.sort(permed.flatten())[-500:]
         return metric1 #_norm
 
-    def box_fit_gauss(self,box_pix,siz,n_which_box=-1):
+    def box_fit_gauss(self,box_pix,siz,n_which_box=-1,conservative_threshold=True):
         # n_which_box is for debugging
         sizo=((siz-1)//2) 
         if np.prod(box_pix.shape) < 1:
             #print("Too small")
             return 0,0, -997
+            
         ind_max = np.unravel_index(np.argmax(box_pix, axis=None), box_pix.shape)
         local_pix=box_pix[ind_max[0]-sizo:ind_max[0]+sizo+1,ind_max[1]-sizo:ind_max[1]+sizo+1]
 
-        if np.any( (ind_max[0]<sizo,ind_max[1]<sizo,ind_max[0]>=box_pix.shape[0]+sizo,ind_max[1] >= box_pix.shape[1]+sizo ) ):
-            return ind_max[1], ind_max[0],-999 # give up if too close to edge
+        if conservative_threshold:
+            if np.max(box_pix) - np.mean(box_pix) < 10:
+                return np.nan, np.nan, -989     
 
+            # When expanding, use old heuristic that bails (makes NaN) if centroids are too close to the edge to do Gaussian fit.
+            if np.any( (ind_max[0]<sizo,ind_max[1]<sizo,ind_max[0]>=box_pix.shape[0]-sizo,ind_max[1] >= box_pix.shape[1]-sizo )
+            ):
+                return ind_max[1], ind_max[0],-999 # give up if too close to edge
+ 
+        else:
+            # Shrinking step
+            if np.max(box_pix) - np.mean(box_pix) < 0: # WILL NEVER HAPPEN: allow all boxes
+                return np.nan, np.nan, -988
+            
+        if np.any( (ind_max[0]<sizo,ind_max[1]<sizo,ind_max[0]>=box_pix.shape[0]+sizo,ind_max[1] >= box_pix.shape[1]+sizo )
+            ) or np.prod(local_pix.shape) < 25: # Tiny. Use  center of mass
+            #idxs = np.arange(box_pix.shape[3]) #-box_pix.shape[1]//2
+            XX,YY=np.meshgrid(np.arange(box_pix.shape[0]), np.arange(box_pix.shape[1] ) )
+            XXf=XX.flatten()
+            YYf=YY.flatten()
+            bp1=box_pix.flatten()/255.0
+            com_x = np.sum( XXf * bp1 ) / np.sum( bp1 )
+            com_y = np.sum( YYf * bp1 ) / np.sum( bp1 )
+            print( n_which_box, com_x, com_y )
+            return com_x,com_y, 256
+            
         lf=local_pix.flatten()
 
         try:
@@ -438,12 +450,12 @@ class NextwaveOffline():
             try:
                 soln=np.matmul( lf, self.mati)
             except ValueError:
-                #print( "-998 #1 %d: "%n_which_box + str(lf.min()) + " " + str( lf.max()  ) )
+                print( "-998 #1 %d: "%n_which_box + str(lf.min()) + " " + str( lf.max()  ) )
                 return ind_max[1], ind_max[0],-998 # give up if too close to edge
-        except ValueError:
+        #except ValueError:
             # On the edge maybe?
-            #print( "-998 #2 %d:"%n_which_box + str(lf.min()) + " " + str( lf.max()  ) )
-            return ind_max[1], ind_max[0],-998 # give up if too close to edge
+            #print( "-998 #2 %d:"%n_which_box ) #+ str(lf.min()) + " " + str( lf.max()  ) )
+            #return ind_max[1], ind_max[0],-998 # give up if too close to edge
 
             # Equivalent loopy code:
             #print(idxs)
@@ -470,9 +482,10 @@ class NextwaveOffline():
         xidx=int(round(goodx))
         yidx=int(round(goody))
         try:
-            gof = box_pix[yidx,xidx] - np.mean(box_pix)
+            gof = box_pix[yidx,xidx] - np.min(box_pix)
         except:
             gof = 0
+            print("Couldn't COF, n=%d, xidx=%d,yidx=%d"%(n_which_box,xidx,yidx) )
 
         return goodx,goody,gof
 
@@ -484,7 +497,7 @@ class NextwaveOffline():
         pix=np.array( im[ yUL:yUL+int(box_size_pixel), xUL:xUL+int(box_size_pixel) ]).copy()
         return pix,xUL,yUL
 
-    def offline_centroids(self,do_apply=True,dark_as_nan=True):
+    def offline_centroids(self,do_apply=True,dark_as_nan=True,conservative_threshold=True):
         num_boxes = self.parent.num_boxes
 
         self.box_metrics = np.zeros( num_boxes)
@@ -501,6 +514,7 @@ class NextwaveOffline():
             #    val = -999.0
             #self.box_metrics[nbox]=val
             #self.box_metrics[nbox]=BOX_THRESH*2.0
+            # Boxes that are off the screen edges
             if ( (self.parent.box_x[nbox]<box_size_pixel//2) or (self.parent.box_y[nbox]<box_size_pixel//2) or
                     (self.parent.box_x[nbox]+box_size_pixel//2>self.im.shape[1]) or 
                     (self.parent.box_y[nbox]+box_size_pixel//2>self.im.shape[0]) ):
@@ -508,15 +522,15 @@ class NextwaveOffline():
                 ceny[nbox] = np.nan
                 self.box_metrics[nbox]=-990               
             else:
-                pix=gaussian_filter(pix,GAUSS_SD)
+                pix=gaussian_filter(pix,defaults.GAUSS_SD)
                 #print( '%03d %s %s'%(nbox, str(pix.shape), str(box_size_pixel) ) )
-                centroids=self.box_fit_gauss(pix, SUBSET_FIT_SIZE, nbox)
+                centroids=self.box_fit_gauss(pix, defaults.SUBSET_FIT_SIZE, nbox, conservative_threshold=conservative_threshold)
                 cenx[nbox] = centroids[0] + xUL
                 ceny[nbox] = centroids[1] + yUL
                 self.box_metrics[nbox] = centroids[2] # gof
 
             # Want to keep dark (but in-range) patches for proper optimization
-            if (centroids[2] < BOX_THRESH) and (dark_as_nan):
+            if (centroids[2] < defaults.BOX_THRESH) and (dark_as_nan):
                 cenx[nbox] = np.nan
                 ceny[nbox] = np.nan
 
@@ -555,11 +569,16 @@ class NextwaveOffline():
         step_size = float(self.parent.ui.it_step.text() )
         ccd_pixel = self.parent.ccd_pixel
         focal = self.parent.focal
+        zs_for_extrapolate = np.zeros( 24 ) # Needed for extrapolate function
 
         self.iterative_size_pixels = self.iterative_size/2.0 * 1000 / ccd_pixel
         if self.iterative_size_pixels < self.iterative_max_pixels: #max_size /2.0 * 1000 / ccd_pixel:
+            
             factor = self.iterative_size / (self.iterative_size+step_size)
-            z_new =  iterative.extrapolate_zernikes(zs, factor)
+            num_zs_for_extrapolate = np.min( (defaults.NUM_ZS_FOR_EXTRAPOLATE, len(zs), len(zs_for_extrapolate) ) )
+            zs_for_extrapolate *= 0
+            zs_for_extrapolate[0:num_zs_for_extrapolate] = zs[0:num_zs_for_extrapolate]
+            z_new =  iterative.extrapolate_zernikes(zs_for_extrapolate, factor)
 
             self.iterative_size += step_size # Diameter
             self.iterative_size_pixels = self.iterative_size/2.0 * 1000 / ccd_pixel # radius
@@ -571,23 +590,18 @@ class NextwaveOffline():
             self.parent.ui.cx -= int( z_new[1] / focal * ccd_pixel )
             self.parent.ui.cy += int( z_new[0] / focal * ccd_pixel )
 
-            self.parent.init_params( {'pupil_diam': self.iterative_size/ self.parent.pupil_mag})
+            self.parent.init_params( {'pupil_diam': self.iterative_size / self.parent.pupil_mag} )
             self.parent.make_searchboxes() #pupil_radius_pixel=self.iterative_size_pixels)
-            print( self.iterative_size_pixels, self.parent.pupil_radius_pixel) # They should match already (debugging)
-            
-            z_bigger = np.zeros( self.parent.zterms_full.shape[0])
-            z_bigger[0:len(z_new)] = z_new
+            #print( self.iterative_size_pixels, self.parent.pupil_radius_pixel) # They should match already (debugging)
 
-            self.parent.shift_search_boxes(z_bigger,from_dialog=False) 
-            self.offline_centroids()
+            # Now shift searchboxes
+            zs_for_shift = np.zeros(20) # Needed for shift
+            num_zs_for_shift = np.min( (self.parent.zterms_full.shape[0], len(z_new), len(zs_for_shift), defaults.NUM_ZS_FOR_SHIFT) )
+            zs_for_shift[0:num_zs_for_shift] = z_new[0:num_zs_for_shift]
+            self.parent.shift_search_boxes(zs_for_shift,from_dialog=False) 
+            self.offline_centroids(conservative_threshold=True)
             zs = self.zernikes
-            self.parent.shift_search_boxes(zs,from_dialog=False) 
-        else:
-            print ("Shrink!")
-
-            self.saver.save1(self.parent.ui.offline_curr)
-            return -1
-     
+            self.parent.shift_search_boxes(zs,from_dialog=False)      
 
     def offline_serialize(self):
         self.saver.save1(self.parent.ui.offline_curr)
@@ -600,9 +614,14 @@ class NextwaveOffline():
 
     def offline_autoall(self):
         for nframe in np.arange(self.max_frame):
+            # Load
             self.parent.ui.offline_curr=nframe
             self.parent.offline_frame(self.parent.ui.offline_curr)
+            #Process
             self.iterative_run_good()
+            #self.offline_centroids(conservative_threshold=True) # Now redo, with less conservative
+            self.offline_auto_shrink()
+            #Save
             self.saver.save1(nframe)
         self.saver.serialize()
     
@@ -618,115 +637,126 @@ class NextwaveOffline():
             self.parent.ui.repaint()            
         self.saver.serialize()
 
-# iterative_size is a real pupil size, not size on sensor (so always need to be multiplied by mag)
+# iterative_size is size on sensor
     def offline_reset(self):
         pupil_diam = float(self.parent.ui.it_start.text())
-        pupil_diam = pupil_diam #* self.parent.pupil_mag
+        pupil_diam = pupil_diam * self.parent.pupil_mag
         self.iterative_size = pupil_diam
         self.iterative_size_pixels = self.iterative_size/2.0 * 1000 / self.parent.ccd_pixel
-        self.parent.ui.line_pupil_diam.setText('%2.2f'%(self.iterative_size * self.parent.pupil_mag) ) 
+        self.parent.ui.line_pupil_diam.setText('%2.2f'%(self.iterative_size ) ) 
         # pupil_diam is the size on sensor, so divide by mag (because init code multiplies by mag)
-        self.parent.init_params( { 'pupil_diam': pupil_diam / self.parent.pupil_mag } )
+        self.parent.init_params( { 'pupil_diam': pupil_diam / self.parent.pupil_mag } ) # Back to real pupil size
         self.parent.make_searchboxes() 
 
     def fit1(self,r):
         self.pupil_radius_pixel = r * 1000 / self.parent.ccd_pixel 
         self.parent.init_params(
-            {'pupil_diam': self.pupil_radius_pixel*2.0/1000.0*self.parent.ccd_pixel / self.parent.pupil_mag} )
+            {'pupil_diam': self.pupil_radius_pixel*2.0/1000.0*self.parent.ccd_pixel } ) #/ self.parent.pupil_mag} )
         self.parent.make_searchboxes(pupil_radius_pixel=self.pupil_radius_pixel)
         self.offline_centroids(dark_as_nan=False)
 
-    def offline_startbox(self):
-        # First start small
-        pupil_radius_small = float(self.parent.ui.it_start.text()) * self.parent.pupil_mag / 2.0
-        self.fit1(pupil_radius_small)
+    def offline_auto_shrink(self):
+        size_before = self.parent.box_size_pixel
+        while self.parent.box_size_pixel > defaults.SHRINK_MIN:
+            self.offline_auto_shrink1()
+        self.parent.box_size_pixel = size_before
         
-        # Now go big (maximal based on image), but correct from extrapolated small
-        pupil_radius_max_image_pixel = np.sqrt(np.sum( (self.dims/2.0)**2))
-        pupil_radius_max_image = pupil_radius_max_image_pixel /1000 * self.parent.ccd_pixel
-            
-        factor = pupil_radius_small / pupil_radius_max_image
-        z_full = np.zeros( 24 ) # Extrapolate wants at least 20
-        #z_full[0:len(self.zernikes)] = self.zernikes
-        z_full[0:6] = self.zernikes[0:6]
-        z_new =  iterative.extrapolate_zernikes(z_full, factor)
-        
-        num_z_possible = np.min( (self.parent.zterms_full.shape[0],len(self.zernikes) ) )
-        z_full = np.zeros( self.parent.zterms_full.shape[0] )
-        z_full[0:num_z_possible] = z_new[0:num_z_possible]
-
-        self.parent.init_params(
-            {'pupil_diam': pupil_radius_max_image * 2.0 / self.parent.pupil_mag} )
-        self.parent.make_searchboxes(pupil_radius_pixel=pupil_radius_max_image_pixel)
-        self.parent.shift_search_boxes(z_full,from_dialog=False) 
-        
-        if False: # OLD WAU
-            #pix=gaussian_filter(pix,GAUSS_SD) 
-            self.pupil_radius_pixel = np.sqrt(np.sum( (self.dims/2.0)**2)) # Start big: hypotenuse
-            self.parent.init_params(
-                {'pupil_diam': self.pupil_radius_pixel*2.0/1000.0*self.parent.ccd_pixel / self.parent.pupil_mag} )
-                
-            #self.parent.ui.move_center_abs( self.dims[1]/2, self.dims[0]/2)
-            self.parent.make_searchboxes(pupil_radius_pixel=self.pupil_radius_pixel)
-        
-        self.offline_centroids(dark_as_nan=False)
-
-        desired = np.all((self.box_metrics > BOX_THRESH, np.isnan(self.cenx)==False ), 0) *1.0 # binarize 
-        self.desired=desired
-        
-        guess =[ np.sum( desired*self.parent.box_x / np.sum(desired ) ) ,
-            np.sum( desired*self.parent.box_y / np.sum(desired ) ),
-            6.5*1000/self.parent.ccd_pixel*self.parent.pupil_mag / 2.0 ] #self.pupil_radius_pixel ]
-
-        #print( guess)
-
-        self.desired=desired
-
-        opt1=minimize( self.circle_err, guess, method='Nelder-Mead', bounds=[[None,None] ,[None,None], [None, None] ] );
-            #[0,6.75*1000/self.parent.ccd_pixel/self.parent.pupil_mag] ] )
-        self.opt1=opt1['x']
-
-        if False: # TODO: DEBUG
-            np.savez("desired_%d"%self.parent.ui.offline_curr, desired,
-                self.parent.box_x, self.parent.box_y, self.box_metrics, self.cenx, self.ceny, self.opt1, guess )
-        
-        #print ( desired.shape, desired )
-
-        # Find closest box center
-        distances =(self.parent.box_x - self.opt1[0])**2 + (self.parent.box_y - self.opt1[1])**2 + 100 * (
-            np.isnan(self.cenx)) # Hack to exclude NaN boxes 
-        box_min = np.argmin( distances )
-        
-        self.parent.ui.cx = self.parent.box_x[box_min]
-        self.parent.ui.cy = self.parent.box_y[box_min]
-        self.cx_best = self.parent.box_x[box_min]
-        self.cy_best = self.parent.box_y[box_min]
-
-        r_pix = self.opt1[2] - self.parent.box_size_pixel/2 # remove half a box
-        #r_pix *= 1.5 # TODO:
-        
-        p_diam = r_pix*2.0/1000.0*self.parent.ccd_pixel
-
-        #print( p_diam )
-        self.iterative_max = p_diam
-        self.iterative_max_pixels = r_pix
-        #print( "STARTBOX OK", opt1, self.iterative_max, self.iterative_max_pixels)
-
-        # TODO: rmovemoeme, this is just visualization
-        #self.parent.init_params( {'pupil_diam': p_diam} )
-        #self.parent.make_searchboxes(pupil_radius_pixel=r_pix)
-
-        #self.parent.make_searchboxes() # Use new center
+    def offline_auto_shrink1(self):
+        print( self.parent.box_size_pixel )
         #self.offline_centroids()
-        #self.parent.centroids_x=self.cenx
-        #self.parent.centroids_y=self.ceny
+        #self.parent.make_searchboxes( box_spacing_pixel=self.parent.box_size_pixel-10 )
+        #self.parent.shift_search_boxes(-self.zernikes[0:20],from_dialog=False) 
 
-        self.parent.ui.it_stop.setText('%2.2f'%(self.iterative_max)) # / self.parent.pupil_mag) ) 
+        self.offline_centroids(conservative_threshold=False)
+        zs = self.zernikes.copy()
+        zs[20:] = 0 # Zero out higher-order
+        if self.parent.box_size_pixel > 30:
+            self.parent.box_size_pixel -= 2
+        elif self.parent.box_size_pixel > defaults.SHRINK_MIN:
+            self.parent.box_size_pixel -= 2
+        else:
+            pass
+        self.parent.shift_search_boxes(zs,from_dialog=False) 
+        
+        # Dangerous/maybe doesn't work without new thread
+        self.parent.ui.update_ui()
+        self.parent.ui.repaint()  
+
+    def auto_center(self):
+        if defaults.centering_method=='estimate_boxes':
+            # First start small
+            pupil_radius_small = float(self.parent.ui.it_start.text()) * self.parent.pupil_mag / 2.0
+            self.fit1(pupil_radius_small) # 
+            
+            # Now go big (maximal based on image), but correct from extrapolated small
+            pupil_radius_max_image_pixel = np.sqrt(np.sum( (self.dims/2.0)**2))
+            pupil_radius_max_image = pupil_radius_max_image_pixel /1000 * self.parent.ccd_pixel
+                
+            # Extrapolate based on "N" zernikes
+            factor = pupil_radius_small / pupil_radius_max_image
+            z_subset = np.zeros( 24 ) # Extrapolate wants at least 20
+            self.offline_centroids(conservative_threshold=True)
+            num_zs = np.min( (len(z_subset), defaults.ZERNIKES_FOR_INITIAL_CENTERING, len(self.zernikes) ) ) 
+            z_subset[0:num_zs] = self.zernikes[0:num_zs]
+            z_new =  iterative.extrapolate_zernikes(z_subset, factor)
+            
+            num_z_possible = np.min( (self.parent.zterms_full.shape[0],len(self.zernikes) ) )
+            z_full = np.zeros( self.parent.zterms_full.shape[0] )
+            z_full[0:num_z_possible] = z_new[0:num_z_possible]
+
+            self.parent.init_params(
+                {'pupil_diam': pupil_radius_max_image * 2.0 / self.parent.pupil_mag} )
+            self.parent.make_searchboxes(pupil_radius_pixel=pupil_radius_max_image_pixel)
+            self.parent.shift_search_boxes(z_full,from_dialog=False) 
+            
+            self.offline_centroids(dark_as_nan=False,conservative_threshold=True)
+
+            desired = np.all((self.box_metrics > defaults.BOX_THRESH, np.isnan(self.cenx)==False ), 0) *1.0 # binarize 
+            self.desired=desired
+            
+            guess =[ np.sum( desired*self.parent.box_x / np.sum(desired ) ) ,
+                np.sum( desired*self.parent.box_y / np.sum(desired ) ),
+                6.5*1000/self.parent.ccd_pixel*self.parent.pupil_mag / 2.0 ] #self.pupil_radius_pixel ]
+            self.desired=desired
+
+            opt1=minimize( self.circle_err, guess, method='Nelder-Mead', bounds=[[None,None] ,[None,None], [0, None] ] );
+            self.opt1=opt1['x']
+
+            if False: # TODO: DEBUG
+                np.savez("desired_%d"%self.parent.ui.offline_curr, desired,
+                    self.parent.box_x, self.parent.box_y, self.box_metrics, self.cenx, self.ceny, self.opt1, guess )
+
+            # Find closest box center
+            distances =(self.parent.box_x - self.opt1[0])**2 + (self.parent.box_y - self.opt1[1])**2 + 100 * (
+                np.isnan(self.cenx)) # Hack to exclude NaN boxes 
+            box_min = np.argmin( distances )
+            
+            self.parent.ui.cx = self.parent.box_x[box_min]
+            self.parent.ui.cy = self.parent.box_y[box_min]
+            self.cx_best = self.parent.box_x[box_min]
+            self.cy_best = self.parent.box_y[box_min]
+
+            r_pix = self.opt1[2] - self.parent.box_size_pixel/2 # remove half a box
+            
+            p_diam = r_pix*2.0/1000.0*self.parent.ccd_pixel
+
+            # TODO: Figure out real diameter using max outermost box corner
+
+            self.iterative_max = p_diam         # On the sensor
+            self.iterative_max_pixels = r_pix   # On the sensor
+        elif defaults.centering_method=='convex_hull':
+            pass
+            
+    def offline_startbox(self):
+        self.iterative_size = float(self.parent.ui.it_start.text()) * self.parent.pupil_mag
+        self.iterative_size_pixels = self.iterative_size/2.0 * 1000 / self.parent.ccd_pixel
+        self.auto_center()
+        self.parent.ui.it_stop.setText('%2.2f'%(self.iterative_max/ self.parent.pupil_mag) )
         self.parent.ui.mode_offline=True
-
+        self.offline_reset()
+        
     def iterative_offline(self):
         pass
-
 
     def iterative_step_good(self):
         self.iterative_size_pixels = self.iterative_size/2.0 * 1000 / self.parent.ccd_pixel
@@ -734,12 +764,10 @@ class NextwaveOffline():
         self.parent.ui.line_pupil_diam.setText('%2.2f'%(self.iterative_size / self.parent.pupil_mag) ) #+step) )
 
     def iterative_run_good(self):
-        self.iterative_size = float(self.parent.ui.it_start.text()) * self.parent.pupil_mag
-        self.iterative_size_pixels = self.iterative_size/2.0 * 1000 / self.parent.ccd_pixel
         self.offline_startbox()
-        self.offline_reset()
+
         #self.engine.offline.iterative_max_pixels = float(self.it_stop.text())/2.0 * 1000 / self.engine.ccd_pixel
-        while self.iterative_size_pixels < self.iterative_max_pixels: # TODO
+        while self.iterative_size_pixels < self.iterative_max_pixels:
             self.iterative_step_good()
             self.parent.ui.update_ui()
             self.parent.ui.repaint()
@@ -747,6 +775,7 @@ class NextwaveOffline():
             s="Frame %02d/%02d; %04d boxes. %04d zern terms. Pupil: %02.2f/%02.2f"%(self.parent.ui.offline_curr, self.max_frame,
                                                                                     self.parent.num_boxes, self.parent.zterms_full.shape[0], self.iterative_size, self.iterative_max )
             print(s,flush=True)
+            
 
     def offline_navigate(self):
         self.saver.load1(self.parent.ui.offline_curr)
@@ -763,10 +792,10 @@ class NextwaveOffline():
 
     def show_dialog_debug(self):
         self.parent.ui.offline_dialog.sc.axes.plot( self.box_metrics, 'x-', label='rands')
-        self.parent.ui.offline_dialog.sc.axes.axhline( BOX_THRESH, color='r' )
+        self.parent.ui.offline_dialog.sc.axes.axhline( defaults.BOX_THRESH, color='r' )
         self.parent.ui.offline_dialog.sc.axes.legend(loc='best', fontsize=16)
         #self.parent.ui.offline_dialog.sc.axes.set_xlabel('Frame #', fontsize=16)
-        self.parent.ui.offline_dialog.sc.axes.set_ylim([-10, BOX_THRESH*2] )
+        self.parent.ui.offline_dialog.sc.axes.set_ylim([-10, defaults.BOX_THRESH*2] )
         self.parent.ui.offline_dialog.sc.axes.grid()
         self.parent.ui.offline_dialog.sc.draw()
         self.parent.ui.offline_dialog.show()

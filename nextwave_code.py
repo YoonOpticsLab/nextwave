@@ -21,6 +21,7 @@ import iterative
 
 from nextwave_comm import NextwaveEngineComm
 from offline import NextwaveOffline
+import defaults
 
 #import ffmpegcv # Read AVI... Better than OpenCV (built-in ffmpeg?)
 
@@ -28,9 +29,6 @@ from PIL import Image, TiffImagePlugin
 
 WINDOWS=(os.name == 'nt')
 
-# Analysis. Minimum # of boxes needed per zernike term
-# TODO: Make this a maleable parameter
-MIN_BOXES_PER_NZERN=2
 
 # TODO: Get this from the .h file
 MEM_LEN=512
@@ -247,7 +245,7 @@ class NextwaveEngine():
 
         # Compute all integrals for all box corners 
         lenslet_dx,lenslet_dy=zernike_functions.zernike_integral_average_from_corners(
-            lefts, rights, ups, downs, self.pupil_radius_mm/self.pupil_mag)
+            lefts, rights, ups, downs, self.pupil_radius_mm )
 
         # Remove piston
         lenslet_dx = lenslet_dx[1:,:]
@@ -256,7 +254,7 @@ class NextwaveEngine():
         # TODO: Dumb to make loop, making into function would be better
         # first iteration gets the full matrix, second one gets the 20term matrix 
         for nsubset in [0,1]:
-            nmax_from_boxes=int(self.num_boxes/MIN_BOXES_PER_NZERN)
+            nmax_from_boxes=int(self.num_boxes/defaults.MIN_BOXES_PER_NZERN)
             
             # New heuristics from GYY 2/3/2025
             #if self.pupil_radius_mm*2 /self.pupil_mag<=3:
@@ -266,8 +264,8 @@ class NextwaveEngine():
             #else: #3<x<5
             #    nmax_from_boxes = 20
                 
-            nmax_from_boxes= np.min( (nmax_from_boxes,zernike_functions.MAX_ZERNIKES))
-            orders_max=np.cumsum(np.arange(zernike_functions.MAX_ORDER+2)) - 1 # Last index in each order
+            nmax_from_boxes= np.min( (nmax_from_boxes,defaults.MAX_ZERNIKES))
+            orders_max=np.cumsum(np.arange(defaults.MAX_ORDER+2)) - 1 # Last index in each order
             print( orders_max )
             valid_max = orders_max[nmax_from_boxes>=orders_max][-1]
             print( 'MAX', nmax_from_boxes, valid_max)
@@ -503,7 +501,7 @@ class NextwaveEngine():
         np.save('dy',self.spot_displace_y)
         np.save('slope',self.slope)
         np.save('zterms_full',self.zterms_full)
-        np.save('zterms_inv',self.zterms_inv)
+        #np.save('zterms_inv',self.zterms_inv)
 
         try:
             np.savetxt('mirror_voltages.txt',self.mirror_voltages)

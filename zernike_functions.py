@@ -1,10 +1,6 @@
 import numpy as np
 
-MAX_ZERNIKES=65 # Absolute max for 10th order: np.sum( np.arange(10+1+1))-1 .first of 11th order is np.sum(np.arange(12)) )
-MAX_ORDER=10
 
-NUM_ZCS=21 # 
-START_ZC=1
 
 # Order copied from MATLAB code
 CVS_to_OSA_map = np.array([ 3, 2,
