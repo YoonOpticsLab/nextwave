@@ -494,7 +494,7 @@ class NextwaveOffline():
             gof = box_pix[yidx,xidx] - np.min(box_pix)
         except:
             gof = 0
-            print("Couldn't COF, n=%d, xidx=%d,yidx=%d"%(n_which_box,xidx,yidx) )
+            #print("Couldn't COF, n=%d, xidx=%d,yidx=%d"%(n_which_box,xidx,yidx) )
 
         return goodx,goody,gof
 
