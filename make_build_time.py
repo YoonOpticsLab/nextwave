@@ -1,7 +1,7 @@
 import datetime
 
 extra_info="STANDALONE OFFLINE"
-extra_info2="Start expand smaller pupil."
+extra_info2="Zero saturated. Editable defaults.py"
 
 
 fil=open("nextwave_build.py","wt")

@@ -12,8 +12,14 @@ import scipy
 from scipy.optimize import minimize
 
 import numpy.random as random
-from scipy.ndimage import gaussian_filter
 
+# Image processing:
+from scipy.ndimage import gaussian_filter
+from scipy.spatial import ConvexHull, convex_hull_plot_2d
+from scipy.optimize import minimize
+from skimage import filters
+
+from fit_circle import circle_fitter
 import mmap
 import struct
 import extract_memory
@@ -328,6 +334,9 @@ class NextwaveOffline():
             print(pathname, self.condition, self.scan_dir, self.sub_id)
             print("Read %d frames of %dx%d"%(nf,f1.shape[0],f1.shape[1]) )
             buf_movie=buf_movie[0:nf,:,:] # Trim to correct
+            
+            buf_movie[buf_movie >= defaults.SATURATION_MINIMUM] = 0
+            
             self.offline_movie = buf_movie
             self.parent.ui.add_offline(buf_movie)
             self.dims=np.array([buf_movie.shape[1],buf_movie.shape[2]])
@@ -432,7 +441,7 @@ class NextwaveOffline():
             bp1=box_pix.flatten()/255.0
             com_x = np.sum( XXf * bp1 ) / np.sum( bp1 )
             com_y = np.sum( YYf * bp1 ) / np.sum( bp1 )
-            print( n_which_box, com_x, com_y )
+            #print( "Too small box: ", n_which_box, com_x, com_y )
             return com_x,com_y, 256
             
         lf=local_pix.flatten()
@@ -601,7 +610,10 @@ class NextwaveOffline():
             self.parent.shift_search_boxes(zs_for_shift,from_dialog=False) 
             self.offline_centroids(conservative_threshold=True)
             zs = self.zernikes
-            self.parent.shift_search_boxes(zs,from_dialog=False)      
+            self.parent.shift_search_boxes(zs,from_dialog=False)
+
+            # Now shrink the boxes
+            self.offline_auto_shrink()
 
     def offline_serialize(self):
         self.saver.save1(self.parent.ui.offline_curr)
@@ -662,18 +674,18 @@ class NextwaveOffline():
         self.parent.box_size_pixel = size_before
         
     def offline_auto_shrink1(self):
-        print( self.parent.box_size_pixel )
+        #print( self.parent.box_size_pixel )
         #self.offline_centroids()
         #self.parent.make_searchboxes( box_spacing_pixel=self.parent.box_size_pixel-10 )
         #self.parent.shift_search_boxes(-self.zernikes[0:20],from_dialog=False) 
 
         self.offline_centroids(conservative_threshold=False)
         zs = self.zernikes.copy()
-        zs[20:] = 0 # Zero out higher-order
+        zs[defaults.NUM_ZS_FOR_SHRINK:] = 0 # Zero out higher-order
         if self.parent.box_size_pixel > 30:
-            self.parent.box_size_pixel -= 2
+            self.parent.box_size_pixel -= defaults.SHRINK_PIXELS
         elif self.parent.box_size_pixel > defaults.SHRINK_MIN:
-            self.parent.box_size_pixel -= 2
+            self.parent.box_size_pixel -= defaults.SHRINK_PIXELS
         else:
             pass
         self.parent.shift_search_boxes(zs,from_dialog=False) 
@@ -727,31 +739,47 @@ class NextwaveOffline():
                     self.parent.box_x, self.parent.box_y, self.box_metrics, self.cenx, self.ceny, self.opt1, guess )
 
             # Find closest box center
-            distances =(self.parent.box_x - self.opt1[0])**2 + (self.parent.box_y - self.opt1[1])**2 + 100 * (
-                np.isnan(self.cenx)) # Hack to exclude NaN boxes 
-            box_min = np.argmin( distances )
-            
-            self.parent.ui.cx = self.parent.box_x[box_min]
-            self.parent.ui.cy = self.parent.box_y[box_min]
-            self.cx_best = self.parent.box_x[box_min]
-            self.cy_best = self.parent.box_y[box_min]
-
+            distances =(self.parent.box_x - self.opt1[0])**2 + (self.parent.box_y - self.opt1[1])**2 + (
+                100 * np.isnan(self.cenx)) # 100=Hack to exclude NaN boxes 
             r_pix = self.opt1[2] - self.parent.box_size_pixel/2 # remove half a box
-            
-            p_diam = r_pix*2.0/1000.0*self.parent.ccd_pixel
-
-            # TODO: Figure out real diameter using max outermost box corner
-
-            self.iterative_max = p_diam         # On the sensor
-            self.iterative_max_pixels = r_pix   # On the sensor
         elif defaults.centering_method=='convex_hull':
-            pass
+            im_smooth = gaussian_filter(self.im,defaults.CENTERING_GAUSS_SD)
+            im_nonsat = im_smooth[im_smooth<defaults.NONSAT_MAX_OTSU]
+            cutoff = filters.threshold_otsu(im_nonsat)
+            #print( cutoff ) # DBG
+            im_smooth[im_smooth<cutoff] = 0
+            #np.save('ims',im_smooth) # DBG
+            points = np.array( np.where( im_smooth ) ).T     # Coords of non-zero points
+            hull = ConvexHull(points)
+            fit1 = circle_fitter(hull.points[hull.vertices,1], hull.points[hull.vertices,0] ) # Note dimensions switched!
+            fit1.solve()
+            self.opt1 = fit1.params
+            
+            r_pix = self.opt1[2]
+            # Find closest box center
+            distances =(self.parent.box_x - self.opt1[0])**2 + (self.parent.box_y - self.opt1[1])**2
+
+        box_min = np.argmin( distances )
+        
+        self.parent.ui.cx = self.parent.box_x[box_min]
+        self.parent.ui.cy = self.parent.box_y[box_min]
+        self.cx_best = self.parent.box_x[box_min]
+        self.cy_best = self.parent.box_y[box_min]
+        
+        p_diam = r_pix*2.0/1000.0*self.parent.ccd_pixel
+
+        # TODO: Figure out more correct diameter using max outermost box corner
+
+        self.iterative_max = p_diam         # On the sensor
+        self.iterative_max_pixels = r_pix   # On the sensor
+   
             
     def offline_startbox(self):
         self.iterative_size = float(self.parent.ui.it_start.text()) * self.parent.pupil_mag
         self.iterative_size_pixels = self.iterative_size/2.0 * 1000 / self.parent.ccd_pixel
         self.auto_center()
-        self.parent.ui.it_stop.setText('%2.2f'%(self.iterative_max/ self.parent.pupil_mag) )
+        if not self.parent.ui.it_stop_dirty:
+            self.parent.ui.it_stop.setText('%2.2f'%(self.iterative_max/ self.parent.pupil_mag) )
         self.parent.ui.mode_offline=True
         self.offline_reset()
         
@@ -804,7 +832,7 @@ class NextwaveOffline():
         self.parent.ui.offline_dialog.sc.axes.clear();
 
         diams=np.array([self.saver.data[key1]['pupil_diam'] for key1 in self.saver.data.keys()])
-        zerns=np.array([self.saver.data[key1]['zernikes'][0:10] for key1 in self.saver.data.keys()])
+        zerns=np.array([self.saver.data[key1]['zernikes'][0:5] for key1 in self.saver.data.keys()])
 
         diams = diams / self.parent.pupil_mag # Convert to real "pupil space", not "sensor space"
         

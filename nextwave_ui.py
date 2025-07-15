@@ -80,7 +80,10 @@ class NextWaveMainWindow(QMainWindow):
     self.scales=[512,768,1024,1536,2048]
 
     self.image_pixels = np.zeros( (10,10))
-
+ 
+    self.it_stop_dirty=False
+ 
+ 
  def params_json(self):
     f=open("./config.json")
     self.json_data = json.load(f)
@@ -607,10 +610,13 @@ class NextWaveMainWindow(QMainWindow):
     else:
         self.params["children"][name_parent]["children"][name]["value"] = newval
 
+ def it_stop_changed(self):
+     self.it_stop_dirty=True
+ 
  def pupil_changed(self):
    #return # require init
      val=float( self.line_pupil_diam.text() )
-     print("From UI: %s"%val)
+     #print("From UI: %s"%val)
      #self.engine.init_params() # will read from UI
      #self.engine.make_searchboxes(self.cx,self.cy)
   
@@ -823,12 +829,13 @@ class NextWaveMainWindow(QMainWindow):
      #btnFind.setStyleSheet("color : orange")
      #layout1.addWidget(btnFind,2,1)
 
-     self.it_start = QLineEdit("2.65") # TODO: grab from defaults
+     self.it_start = QLineEdit(str(defaults.ITERATIVE_PUPIL_START)) # TODO: grab from defaults
      layout1.addWidget(self.it_start,4,0)
-     self.it_step = QLineEdit("0.25")
+     self.it_step = QLineEdit(str(defaults.ITERATIVE_PUPIL_STEP_SIZE))
      layout1.addWidget(self.it_step,4,1)
      self.it_stop = QLineEdit("6.4")
      layout1.addWidget(self.it_stop,4,2)
+     self.it_stop.textChanged.connect(self.it_stop_changed)
 
      btn = QPushButton("Start")
      layout1.addWidget(btn,4,3)

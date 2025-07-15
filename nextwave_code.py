@@ -266,9 +266,9 @@ class NextwaveEngine():
                 
             nmax_from_boxes= np.min( (nmax_from_boxes,defaults.MAX_ZERNIKES))
             orders_max=np.cumsum(np.arange(defaults.MAX_ORDER+2)) - 1 # Last index in each order
-            print( orders_max )
+            #print( orders_max )
             valid_max = orders_max[nmax_from_boxes>=orders_max][-1]
-            print( 'MAX', nmax_from_boxes, valid_max)
+            #print( 'MAX', nmax_from_boxes, valid_max)
             
             if nsubset==0:
                 nvalid = valid_max
@@ -360,7 +360,7 @@ class NextwaveEngine():
         self.slope = slope
 
         coeff=np.matmul(self.zterms_full,slope)
-        print( coeff.shape )
+        #print( coeff.shape )
         self.zernikes=coeff[zernike_functions.CVS_to_OSA_map[0:len(coeff)]] # Return value will is OSA
 
         #print ("CompZ spot means:",np.mean(self.spot_displace_x), np.mean(self.spot_displace_y))
@@ -385,7 +385,7 @@ class NextwaveEngine():
             valid_idxs=np.arange(0,mat1.shape[1] )
 
         idxs_remap  = zernike_functions.OSA_to_CVS_map[valid_idxs]
-        print(len(zs), len(idxs_remap), len(valid_idxs), idxs_remap)
+        #print(len(zs), len(idxs_remap), len(valid_idxs), idxs_remap)
         zern_new=zs[valid_idxs] [idxs_remap ]
         #zern_new[0:2]=0 # Remove tip/tilt TODO: Need to move the pupil center?
 
