@@ -45,11 +45,11 @@ centering_method="convex_hull"
 CENTERING_GAUSS_SD=10
 NONSAT_MAX_OTSU=100
 
-# For estimate boxes:
-ZERNIKES_FOR_INITIAL_CENTERING=10
-NUM_ZS_FOR_EXTRAPOLATE=10
-NUM_ZS_FOR_SHIFT=10
-NUM_ZS_FOR_SHRINK=20
+# For estimate boxes. Max Zernike number to use. 5=all 2rd order. 9=all 3rd order.
+ZERNIKES_FOR_INITIAL_CENTERING=9
+NUM_ZS_FOR_EXTRAPOLATE=9
+NUM_ZS_FOR_SHIFT=9
+NUM_ZS_FOR_SHRINK=9
 
 ############################################################
 # Zernike etc.
