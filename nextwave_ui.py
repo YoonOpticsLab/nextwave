@@ -835,7 +835,7 @@ class NextWaveMainWindow(QMainWindow):
      layout1.addWidget(self.it_step,4,1)
      self.it_stop = QLineEdit(str(defaults.ITERATIVE_PUPIL_STOP))
      layout1.addWidget(self.it_stop,4,2)
-     self.it_stop.textChanged.connect(self.it_stop_changed)
+     self.it_stop.editingFinished.connect(self.it_stop_changed)
 
      btn = QPushButton("Start")
      layout1.addWidget(btn,4,3)
@@ -893,8 +893,6 @@ class NextWaveMainWindow(QMainWindow):
      layout1.addWidget(btn,6,3)
      btn.clicked.connect(lambda: self.engine.offline.offline_auto_shrink1() )
 
-
-     
 #     btn = QPushButton("Dialog2")
      #layout1.addWidget(btn,6,3)
      #btn.clicked.connect(lambda: self.engine.offline.show_dialog_debug() )

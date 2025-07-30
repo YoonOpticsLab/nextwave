@@ -771,9 +771,13 @@ class NextwaveOffline():
 
         if self.parent.ui.it_stop_dirty:
             p_diam =  float( self.parent.ui.it_stop.text() ) * self.parent.pupil_mag
+            print("Dirty:", p_diam)
         elif p_diam > defaults.ITERATIVE_PUPIL_STOP * self.parent.pupil_mag:
             p_diam = defaults.ITERATIVE_PUPIL_STOP * self.parent.pupil_mag
-            
+            print("TOO BIG:", p_diam)
+        else:
+            print("Normal auto:", p_diam)
+
         # Size on the sensor, max pixel radius in the image
         self.iterative_max = p_diam
         self.iterative_max_pixels = self.iterative_max/2.0 * 1000 / self.parent.ccd_pixel
