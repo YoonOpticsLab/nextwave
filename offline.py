@@ -769,10 +769,12 @@ class NextwaveOffline():
         p_diam = r_pix*2.0/1000.0*self.parent.ccd_pixel
 
         # TODO: Figure out more correct diameter using max outermost box corner
-
-        self.iterative_max = p_diam         # On the sensor
-        self.iterative_max_pixels = r_pix   # On the sensor
-   
+        if not self.parent.ui.it_stop_dirty:
+            self.iterative_max = p_diam         # On the sensor
+            self.iterative_max_pixels = r_pix   # On the sensor
+        else:
+            self.iterative_max = float( self.parent.ui.it_stop.text() ) * self.parent.pupil_mag
+            self.iterative_max_pixels = self.iterative_max/2.0 * 1000 / self.parent.ccd_pixel
             
     def offline_startbox(self):
         self.iterative_size = float(self.parent.ui.it_start.text()) * self.parent.pupil_mag
