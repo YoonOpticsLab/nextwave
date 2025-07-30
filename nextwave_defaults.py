@@ -27,6 +27,7 @@ CAM_GAIN_MAX = 9.83
 ############################################################
 ITERATIVE_PUPIL_START=2.65 # TODO: Maybe should determine based on magnification, etc., pupil for minimum # of boxes
 ITERATIVE_PUPIL_STEP_SIZE=0.25
+ITERATIVE_PUPIL_STOP=8.0
 
 GAUSS_SD=3
 BOX_THRESH=2.0

@@ -833,7 +833,7 @@ class NextWaveMainWindow(QMainWindow):
      layout1.addWidget(self.it_start,4,0)
      self.it_step = QLineEdit(str(defaults.ITERATIVE_PUPIL_STEP_SIZE))
      layout1.addWidget(self.it_step,4,1)
-     self.it_stop = QLineEdit("6.4")
+     self.it_stop = QLineEdit(str(defaults.ITERATIVE_PUPIL_STOP))
      layout1.addWidget(self.it_stop,4,2)
      self.it_stop.textChanged.connect(self.it_stop_changed)
 
@@ -880,7 +880,8 @@ class NextWaveMainWindow(QMainWindow):
      layout1.addWidget(btn,5,3)
      btn.clicked.connect(lambda: self.engine.offline.show_dialog() )
 
-     btn = QPushButton("Auto dumb")
+    # Dumb: Don't expand and shrink. Best for e.g. calibration images
+     btn = QPushButton("Auto simple")
      layout1.addWidget(btn,6,5)
      btn.clicked.connect(lambda: self.engine.offline.offline_auto_dumb() )
 

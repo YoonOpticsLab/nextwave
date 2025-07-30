@@ -748,7 +748,7 @@ class NextwaveOffline():
             cutoff = filters.threshold_otsu(im_nonsat)
             #print( cutoff ) # DBG
             im_smooth[im_smooth<cutoff] = 0
-            #np.save('ims',im_smooth) # DBG
+            np.save('ims',im_smooth) # DBG
             points = np.array( np.where( im_smooth ) ).T     # Coords of non-zero points
             hull = ConvexHull(points)
             fit1 = circle_fitter(hull.points[hull.vertices,1], hull.points[hull.vertices,0] ) # Note dimensions switched!
@@ -766,20 +766,23 @@ class NextwaveOffline():
         self.cx_best = self.parent.box_x[box_min]
         self.cy_best = self.parent.box_y[box_min]
         
+        # TODO: Figure out more correct diameter using max outermost box corner
         p_diam = r_pix*2.0/1000.0*self.parent.ccd_pixel
 
-        # TODO: Figure out more correct diameter using max outermost box corner
-        if not self.parent.ui.it_stop_dirty:
-            self.iterative_max = p_diam         # On the sensor
-            self.iterative_max_pixels = r_pix   # On the sensor
-        else:
-            self.iterative_max = float( self.parent.ui.it_stop.text() ) * self.parent.pupil_mag
-            self.iterative_max_pixels = self.iterative_max/2.0 * 1000 / self.parent.ccd_pixel
+        if self.parent.ui.it_stop_dirty:
+            p_diam =  float( self.parent.ui.it_stop.text() ) * self.parent.pupil_mag
+        elif p_diam > defaults.ITERATIVE_PUPIL_STOP * self.parent.pupil_mag:
+            p_diam = defaults.ITERATIVE_PUPIL_STOP * self.parent.pupil_mag
+            
+        # Size on the sensor, max pixel radius in the image
+        self.iterative_max = p_diam
+        self.iterative_max_pixels = self.iterative_max/2.0 * 1000 / self.parent.ccd_pixel
             
     def offline_startbox(self):
         self.iterative_size = float(self.parent.ui.it_start.text()) * self.parent.pupil_mag
         self.iterative_size_pixels = self.iterative_size/2.0 * 1000 / self.parent.ccd_pixel
         self.auto_center()
+        # Show the computed max in the box:
         if not self.parent.ui.it_stop_dirty:
             self.parent.ui.it_stop.setText('%2.2f'%(self.iterative_max/ self.parent.pupil_mag) )
         self.parent.ui.mode_offline=True
