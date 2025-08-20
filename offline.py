@@ -769,13 +769,13 @@ class NextwaveOffline():
         # TODO: Figure out more correct diameter using max outermost box corner
         p_diam = r_pix*2.0/1000.0*self.parent.ccd_pixel
 
-        if self.parent.ui.it_stop_dirty:
+        if self.parent.ui.it_stop_dirty: # If edited in the UI, override.
             p_diam =  float( self.parent.ui.it_stop.text() ) * self.parent.pupil_mag
             print("Dirty:", p_diam)
-        elif p_diam > defaults.ITERATIVE_PUPIL_STOP * self.parent.pupil_mag:
+        elif p_diam > defaults.ITERATIVE_PUPIL_STOP * self.parent.pupil_mag: # Never exceed max.
             p_diam = defaults.ITERATIVE_PUPIL_STOP * self.parent.pupil_mag
             print("TOO BIG:", p_diam)
-        else:
+        else: # Or, use the estimated value
             print("Normal auto:", p_diam)
 
         # Size on the sensor, max pixel radius in the image
