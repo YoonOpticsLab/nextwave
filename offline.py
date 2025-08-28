@@ -740,9 +740,8 @@ class NextwaveOffline():
                 break
 
         best_guess = np.mean( bootres[idxs[nstart:nstart+nagree]],0)
-        print( nstart, best_guess)
-        return best_guess
-
+        #print( nstart, best_guess)
+        return best_guess,im_smooth
 
     def auto_center(self):
         if defaults.centering_method=='estimate_boxes':
@@ -804,25 +803,25 @@ class NextwaveOffline():
             fit1 = circle_fitter(hull.points[hull.vertices,1], hull.points[hull.vertices,0] ) # Note dimensions switched!
             fit1.solve()
             self.opt1 = fit1.params
-            
+
             r_pix = self.opt1[2]
             # Find closest box center
             distances =(self.parent.box_x - self.opt1[0])**2 + (self.parent.box_y - self.opt1[1])**2
         elif defaults.centering_method=='convex_hull_robust':
             # Try random subsamples to omit outliers:
             # Get best consensus from random sample of convex hull inliers
-            self.opt1 = self.convex_hull_robust()
+            self.opt1,im_smooth = self.convex_hull_robust()
             r_pix = self.opt1[2]
             # Find closest box center
             distances =(self.parent.box_x - self.opt1[0])**2 + (self.parent.box_y - self.opt1[1])**2
 
         box_min = np.argmin( distances )
-        
+
         self.parent.ui.cx = self.parent.box_x[box_min]
         self.parent.ui.cy = self.parent.box_y[box_min]
         self.cx_best = self.parent.box_x[box_min]
         self.cy_best = self.parent.box_y[box_min]
-        
+
         # TODO: Figure out more correct diameter using max outermost box corner
         p_diam = r_pix*2.0/1000.0*self.parent.ccd_pixel
 
@@ -838,7 +837,15 @@ class NextwaveOffline():
         # Size on the sensor, max pixel radius in the image
         self.iterative_max = p_diam
         self.iterative_max_pixels = self.iterative_max/2.0 * 1000 / self.parent.ccd_pixel
-            
+
+        if 'convex_hull' in defaults.centering_method:
+            crop_left=int( np.max( (0,self.cx_best-r_pix)) )
+            crop_top=int( np.max( (0,self.cy_best-r_pix)) )
+            crop_right=int( np.min( (self.dims[1],self.cx_best+r_pix)) )
+            crop_bottom=int( np.min( (self.dims[0],self.cy_best+r_pix)) )
+            self.im_smooth_cropped = im_smooth[crop_top:crop_bottom,crop_left:crop_right]
+            np.save('im_crop',self.im_smooth_cropped) # DBG
+
     def offline_startbox(self):
         self.iterative_size = float(self.parent.ui.it_start.text()) * self.parent.pupil_mag
         self.iterative_size_pixels = self.iterative_size/2.0 * 1000 / self.parent.ccd_pixel
