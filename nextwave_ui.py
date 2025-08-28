@@ -235,9 +235,9 @@ class NextWaveMainWindow(QMainWindow):
     if self.draw_boxes and self.engine.num_boxes>0: # and self.engine.mode>1:
     #if self.get_param("UI","show_boxes"):
 
-        dark_blue = QtGui.QColor.fromRgb(0,0,200)
+        searchbox_color = QtGui.QColor.fromRgb( *defaults.ui_searchbox_color)
 
-        pen = QPen(dark_blue, 1.00, Qt.DotLine)
+        pen = QPen(searchbox_color, defaults.ui_searchbox_width, Qt.DotLine)
         painter.setPen(pen)
         BOX_BORDER=2
         box_size_pixel = self.engine.box_size_pixel
