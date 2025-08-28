@@ -22,6 +22,9 @@ CAM_EXPO_MAX = 100000 # TODO
 CAM_GAIN_MIN = 0
 CAM_GAIN_MAX = 9.83
 
+ui_searchbox_color=(0,128,200)
+ui_searchbox_width=1.5
+
 ############################################################
 # For offline processing: (originally offline.py)
 ############################################################
@@ -42,9 +45,12 @@ SATURATION_MINIMUM=255
 #Centering method:
 # "estimate_boxes" (use default positions and find best circle to optimize box population)
 # "convex_hull"    (gaussian, threshold (otsu's method), convex hull, fit circle)
-centering_method="convex_hull"
+centering_method="convex_hull_robust"
 CENTERING_GAUSS_SD=10
 NONSAT_MAX_OTSU=100
+centering_convex_robust_nboots=100
+centering_convex_robust_fraction=3
+centering_convex_robust_nagree=5
 
 # For estimate boxes. Max Zernike number to use. 5=all 2rd order. 9=all 3rd order.
 ZERNIKES_FOR_INITIAL_CENTERING=9

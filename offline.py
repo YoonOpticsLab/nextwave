@@ -694,6 +694,56 @@ class NextwaveOffline():
         self.parent.ui.update_ui()
         self.parent.ui.repaint()  
 
+    def convex_hull_robust(self):
+        # Try random subsamples to omit outliers
+        im_smooth = gaussian_filter(self.im,defaults.CENTERING_GAUSS_SD)
+        im_nonsat = im_smooth[im_smooth<defaults.NONSAT_MAX_OTSU]
+        cutoff = filters.threshold_otsu(im_nonsat)
+        #print( cutoff ) # DBG
+        im_smooth[im_smooth<cutoff] = 0
+        np.save('ims',im_smooth) # DBG
+
+        points = np.array( np.where( im_smooth ) ).T     # Coords of non-zero points
+        hull = ConvexHull(points) # Entire convex hull. Maybe outliers
+
+        nboots=defaults.centering_convex_robust_nboots
+        fraction=defaults.centering_convex_robust_fraction
+        sample_size=hull.vertices.shape[0]//fraction
+        bootres = np.zeros( (nboots,4))
+        samples = np.zeros( (nboots,sample_size))
+
+        for nboot in np.arange(nboots):
+            hull_sample = np.random.randint(0,hull.vertices.shape,size=sample_size )
+            samples[nboot] = hull_sample
+            hull_idxs = hull.vertices[hull_sample]
+            fit1 = circle_fitter(hull.points[hull_idxs,1], hull.points[hull_idxs,0] ) # Note dimensions switched!
+            fit1.solve()
+            opt1 = fit1.params
+            logloss=np.log10(fit1.circle_err(opt1 ) )
+            bootres[nboot]=np.concatenate( (opt1, [logloss]))
+
+        idxs=np.argsort(bootres[:,3])
+
+        # Sort by log total_error of the sample fit.
+        # Make sure we don't get a weird sample that fits too well--
+        # We want 5 boots to agree.
+        nagree=defaults.centering_convex_robust_nagree
+        candidates=np.arange(0,len(bootres))
+        stds = np.zeros( (len(candidates),4))
+        for nstart in candidates:
+            # Examine std of fitted centers and radii
+            std_boot1 = np.std( bootres[idxs[nstart:nstart+nagree]], 0)
+            stds[nstart] = std_boot1
+            #print( bootres[idxs[nstart]], std_boot1)
+            # radius of 5 pixels of x and y and radii std of<10
+            if (std_boot1[0]**2+std_boot1[1]**2 < 50) and (std_boot1[2]<10):
+                break
+
+        best_guess = np.mean( bootres[idxs[nstart:nstart+nagree]],0)
+        print( nstart, best_guess)
+        return best_guess
+
+
     def auto_center(self):
         if defaults.centering_method=='estimate_boxes':
             # First start small
@@ -755,6 +805,13 @@ class NextwaveOffline():
             fit1.solve()
             self.opt1 = fit1.params
             
+            r_pix = self.opt1[2]
+            # Find closest box center
+            distances =(self.parent.box_x - self.opt1[0])**2 + (self.parent.box_y - self.opt1[1])**2
+        elif defaults.centering_method=='convex_hull_robust':
+            # Try random subsamples to omit outliers:
+            # Get best consensus from random sample of convex hull inliers
+            self.opt1 = self.convex_hull_robust()
             r_pix = self.opt1[2]
             # Find closest box center
             distances =(self.parent.box_x - self.opt1[0])**2 + (self.parent.box_y - self.opt1[1])**2
