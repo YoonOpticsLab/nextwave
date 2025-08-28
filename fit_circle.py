@@ -10,9 +10,9 @@ class circle_fitter():
         cx,cy,rad=p
         X=self.x
         Y=self.y
-        losses = (X-cx)**2 +(Y-cy)**2 - rad**2
-        loss = np.sum( losses**2 )
-        return loss
+        self.losses = (X-cx)**2 +(Y-cy)**2 - rad**2
+        self.loss = np.sum( self.losses**2 )
+        return self.loss
 
     def solve(self):
         guess = np.array ( [np.mean( self.x), np.mean(self.y), 0] )
