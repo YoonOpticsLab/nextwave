@@ -25,7 +25,7 @@ CAM_GAIN_MAX = 9.83
 ui_searchbox_color=(0,128,200)
 ui_searchbox_width=1.5
 
-ui_normalize_max = 20
+ui_normalize_max = 50
 
 ############################################################
 # For offline processing: (originally offline.py)

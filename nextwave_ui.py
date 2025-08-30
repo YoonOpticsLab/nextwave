@@ -81,10 +81,10 @@ class NextWaveMainWindow(QMainWindow):
     self.scales=[512,768,1024,1536,2048]
 
     self.image_pixels = np.zeros( (10,10))
- 
+
     self.it_stop_dirty=False
- 
- 
+    self.center_dirty=False
+
  def params_json(self):
     f=open("./config.json")
     self.json_data = json.load(f)
@@ -158,6 +158,7 @@ class NextWaveMainWindow(QMainWindow):
         self.engine.offline.load_offline(thedir)
         self.mode_offline = True
         self.chkOfflineAlgorithm.setChecked(True)
+        self.center_dirty = False
 
  def offline_load_background(self):
     #ffilt='Movies (*.avi);; Binary files (*.bin);; BMP Images (*.bmp);; files (*.*)'
@@ -180,6 +181,17 @@ class NextWaveMainWindow(QMainWindow):
         print( thedir )
 
     return
+
+ def normalize_contrast(self,im):
+    cuml=np.zeros(256)
+    cuml[0] = np.sum(im1==0)
+    for nval in np.arange(1,256):
+        cuml[nval] = np.sum(im1==nval) + cuml[nval-1]
+
+    cuml -= cuml.min()
+    cuml /= cuml.max()
+    cut=np.interp(0.95,cuml,np.arange(256))
+    im[im<cut]=0
 
  def update_ui(self):
     image_pixels = self.engine.receive_image()
@@ -1232,6 +1244,7 @@ class NextWaveMainWindow(QMainWindow):
         self.sockets.centroiding.send(b"t\x00")
 
  def move_center(self, dx, dy, m=1, do_update=True):
+    self.center_dirty = True
     m = self.m
     self.cx += (dx * m)
     self.cy += (dy * m)

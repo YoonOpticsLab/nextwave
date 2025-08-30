@@ -879,13 +879,19 @@ class NextwaveOffline():
 
     def offline_startbox(self):
         try:
-            self.parent.box_x # Needed
+            self.parent.box_x 
         except:
-            self.parent.ui.mode_init()
+            self.parent.ui.mode_init() # Call init if needed
 
         self.iterative_size = float(self.parent.ui.it_start.text()) * self.parent.pupil_mag
         self.iterative_size_pixels = self.iterative_size/2.0 * 1000 / self.parent.ccd_pixel
-        self.auto_center()
+
+        if not self.parent.ui.center_dirty:
+            self.auto_center()
+            # Is this circular? Where to get box centers from?
+            #self.parent.init_params( { 'pupil_diam': pupil_diam / self.parent.pupil_mag } ) # Back to real pupil size
+            #self.parent.make_searchboxes() 
+
         # Show the computed max in the box:
         if not self.parent.ui.it_stop_dirty:
             self.parent.ui.it_stop.setText('%2.2f'%(self.iterative_max/ self.parent.pupil_mag) )
