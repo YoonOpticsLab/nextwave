@@ -20,6 +20,11 @@ from scipy.spatial import ConvexHull, convex_hull_plot_2d
 from scipy.optimize import minimize
 from skimage import filters
 
+# Rotation fix:
+import cv2 as cv
+from numpy import fft
+from scipy.signal import find_peaks
+
 from fit_circle import circle_fitter
 import mmap
 import struct
@@ -710,7 +715,7 @@ class NextwaveOffline():
                 points = np.array( np.where( im_copy ) ).T     # Coords of non-zero points
                 hull=ConvexHull(points)
                 area=hull.area
-                print (num_components,area)
+                #print (num_components,area)
                 if num_components<defaults.centering_dynamic_ncomponents and area<defaults.centering_dynamic_area:
                     break # Good. First "few enough" components (around # of spots)
             if thresh_lower>=maxn-1:
@@ -769,7 +774,7 @@ class NextwaveOffline():
         #print( nstart, best_guess)
         return best_guess,im_smooth
 
-    def auto_center(self):
+    def autocenter(self):
         if defaults.centering_method=='estimate_boxes':
             # First start small
             pupil_radius_small = float(self.parent.ui.it_start.text()) * self.parent.pupil_mag / 2.0
@@ -887,10 +892,13 @@ class NextwaveOffline():
         self.iterative_size_pixels = self.iterative_size/2.0 * 1000 / self.parent.ccd_pixel
 
         if not self.parent.ui.center_dirty:
-            self.auto_center()
+            self.autocenter()
             # Is this circular? Where to get box centers from?
             #self.parent.init_params( { 'pupil_diam': pupil_diam / self.parent.pupil_mag } ) # Back to real pupil size
             #self.parent.make_searchboxes() 
+
+        if defaults.do_auto_rotation_fix:
+            self.offline_rotation_fix(self.im)
 
         # Show the computed max in the box:
         if not self.parent.ui.it_stop_dirty:
@@ -932,6 +940,52 @@ class NextwaveOffline():
         #self.good_idx=np.where( self.good_template>GOOD_THRESH)[0][0]
         self.good_idx=int(len(self.good_template)*0.6) # TODO
         #print("Goodbox", nbox,nframe,self.good_idx, patch.shape, self.box_size_pixel)
+
+    def offline_rotation_fix(self,img):
+        angls=defaults.rotation_fix_angles
+        powers=np.zeros( (2,len(angls)))
+
+        height,width=img.shape
+        # Find the largest term at 0 degrees to use as freq of interest
+        M = cv.getRotationMatrix2D((width/2,height/2),0,1)
+        res = cv.warpAffine(img,M, (width,height) )
+        sig=np.sum(res,0)
+        ft=fft.fft(sig)
+        smallest_candidate=10 # Can't be lower than this (large low Freq terms)
+        idx_good = np.argmax(ft[smallest_candidate:len(ft)//2])+smallest_candidate
+
+        # Get the right freq from dimensional component 
+        for nangle,angl1 in enumerate(angls):
+            M = cv.getRotationMatrix2D((width/2,height/2),angl1,1)
+            res = cv.warpAffine(img,M, (width,height) )
+            for dim in [0]:
+                margin_sum=np.sum(res,dim)
+                ft=fft.fft(margin_sum);
+                powers[dim,nangle] = np.abs(ft[idx_good])
+
+        # For now check horizontal only
+        for dim in [0]:
+            power1=powers[dim]
+            max_loc = np.argmax(power1)
+            max_peak = power1[max_loc]
+            angl1=angls[max_loc]
+            pks=find_peaks(power1)[0]
+            if len(pks)==1: # Only the one max
+                minor_peaks = power1.min()
+                second_peak = power1.min()
+            else:
+                minor_peaks = np.mean( power1[pks[pks != max_loc ]])
+                second_peak = np.max( power1[pks[pks != max_loc ]] )
+            ratio = max_peak / second_peak
+            if ratio > defaults.rotation_fix_min_peak_ratio:
+                print( "ROTATED ", dim, ratio, angl1 )
+                im1 = self.im
+                M = cv.getRotationMatrix2D((width/2,height/2),angl1,1)
+                rotated = cv.warpAffine(im1,M, (width,height) )
+
+                self.im = rotated
+                self.parent.comm.write_image(self.dims,rotated)
+                self.ui.image_pixels = rotated
 
     def show_dialog_debug(self):
         self.parent.ui.offline_dialog.sc.axes.plot( self.box_metrics, 'x-', label='rands')

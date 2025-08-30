@@ -58,6 +58,11 @@ centering_convex_robust_nagree=5
 centering_dynamic_ncomponents=600 # TODO: Better would to base on # of spots/lenslets, known from spacing etc.
 centering_dynamic_area=3500 # TODO: Better would be based on image size
 
+# AUTO Rotation detection and correction
+do_auto_rotation_fix=True
+rotation_fix_angles=np.linspace(-6,6,100)
+rotation_fix_min_peak_ratio=3.0
+
 # For estimate boxes. Max Zernike number to use. 5=all 2rd order. 9=all 3rd order.
 ZERNIKES_FOR_INITIAL_CENTERING=9
 NUM_ZS_FOR_EXTRAPOLATE=9
