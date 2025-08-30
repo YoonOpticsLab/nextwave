@@ -25,6 +25,8 @@ CAM_GAIN_MAX = 9.83
 ui_searchbox_color=(0,128,200)
 ui_searchbox_width=1.5
 
+ui_normalize_max = 20
+
 ############################################################
 # For offline processing: (originally offline.py)
 ############################################################
@@ -45,12 +47,16 @@ SATURATION_MINIMUM=255
 #Centering method:
 # "estimate_boxes" (use default positions and find best circle to optimize box population)
 # "convex_hull"    (gaussian, threshold (otsu's method), convex hull, fit circle)
-centering_method="convex_hull_robust"
-CENTERING_GAUSS_SD=10
+# "convex_hull_robust"    + outlier detection
+# "convex_hull_robust_dynamic" : dynamic threshold based on components(spots), not OTSU
+centering_method="convex_hull_robust_dynamic"
+CENTERING_GAUSS_SD=1
 NONSAT_MAX_OTSU=100
 centering_convex_robust_nboots=100
 centering_convex_robust_fraction=3
 centering_convex_robust_nagree=5
+centering_dynamic_ncomponents=600 # TODO: Better would to base on # of spots/lenslets, known from spacing etc.
+centering_dynamic_area=3500 # TODO: Better would be based on image size
 
 # For estimate boxes. Max Zernike number to use. 5=all 2rd order. 9=all 3rd order.
 ZERNIKES_FOR_INITIAL_CENTERING=9

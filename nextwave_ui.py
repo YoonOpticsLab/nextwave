@@ -66,6 +66,7 @@ class NextWaveMainWindow(QMainWindow):
     self.iterative_first=True
     self.draw_pupil=False
     self.draw_predicted=False
+    self.normalize_contrast=True
     self.box_info = -1
     self.box_info_dlg = BoxInfoDialog("HiINFO",self)
 
@@ -181,14 +182,24 @@ class NextWaveMainWindow(QMainWindow):
     return
 
  def update_ui(self):
-
     image_pixels = self.engine.receive_image()
 
     if not self.mode_offline and not self.offline_only: # TODO: Put offline intelligence into engine itself
       self.engine.receive_centroids()
       self.engine.compute_zernikes()
 
-    qimage = QImage(image_pixels, image_pixels.shape[1], image_pixels.shape[0],
+    image_pixels_draw = image_pixels.copy()
+    if self.normalize_contrast:
+      try:
+        thresh=self.engine.offline.thresh_lower
+        image_pixels_draw[image_pixels_draw<thresh] = 0
+      except:
+        thresh=1
+      image_pixels_draw[image_pixels_draw>defaults.ui_normalize_max]=defaults.ui_normalize_max
+      #image_pixels_draw -= (thresh-1)
+      image_pixels_draw = image_pixels_draw * (255//(defaults.ui_normalize_max) )
+
+    qimage = QImage(image_pixels_draw, image_pixels_draw.shape[1], image_pixels_draw.shape[0],
                  QImage.Format_Grayscale8)
     pixmap = QPixmap(qimage)
     self.image = pixmap
@@ -1288,6 +1299,8 @@ class NextWaveMainWindow(QMainWindow):
         self.draw_predicted = not( self.draw_predicted )
     elif event.key()==ord('C'):
         self.draw_centroids = not( self.draw_centroids )
+    elif event.key()==ord('N'):
+        self.normalize_contrast = not( self.normalize_contrast)
     elif event.key()==ord('X'):
         self.draw_crosshair = not( self.draw_crosshair )
     elif event.key()==ord('P'):

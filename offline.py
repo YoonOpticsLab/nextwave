@@ -10,6 +10,7 @@ import matplotlib.cm as cmap
 from numpy.linalg import svd,lstsq
 import scipy
 from scipy.optimize import minimize
+from scipy import ndimage
 
 import numpy.random as random
 
@@ -694,14 +695,39 @@ class NextwaveOffline():
         self.parent.ui.update_ui()
         self.parent.ui.repaint()  
 
-    def convex_hull_robust(self):
+    def convex_hull_robust(self,dynamic_threshold=False):
         # Try random subsamples to omit outliers
         im_smooth = gaussian_filter(self.im,defaults.CENTERING_GAUSS_SD)
-        im_nonsat = im_smooth[im_smooth<defaults.NONSAT_MAX_OTSU]
-        cutoff = filters.threshold_otsu(im_nonsat)
-        #print( cutoff ) # DBG
-        im_smooth[im_smooth<cutoff] = 0
+        if dynamic_threshold:
+            maxn=50
+            #ncomponents=np.zeros(maxn)
+            for thresh_lower in np.arange(2,maxn):
+                # Could also check for the area of the ConvexHull, but components seems good
+                im_copy=im_smooth.copy()
+                im_copy[im_copy<thresh_lower]=0
+                labeled_image, num_components = ndimage.label(im_copy)
+
+                points = np.array( np.where( im_copy ) ).T     # Coords of non-zero points
+                hull=ConvexHull(points)
+                area=hull.area
+                print (num_components,area)
+                if num_components<defaults.centering_dynamic_ncomponents and area<defaults.centering_dynamic_area:
+                    break # Good. First "few enough" components (around # of spots)
+            if thresh_lower>=maxn-1:
+                print( "Error: couldn't find good dynamic threshold under %d. Using OTSU."%(maxn) ) # DBG
+                im_nonsat = im_smooth[im_smooth<defaults.NONSAT_MAX_OTSU]
+                self.thresh_lower = filters.threshold_otsu(im_nonsat)
+            else:
+                self.thresh_lower = thresh_lower
+                print( "Dynamic threshold=%d. Num_components=%d. Area=%d"%(thresh_lower,num_components,area) ) # DBG
+
+            im_smooth[im_smooth<thresh_lower] = 0
+        else:
+            im_nonsat = im_smooth[im_smooth<defaults.NONSAT_MAX_OTSU]
+            cutoff = filters.threshold_otsu(im_nonsat)
+            im_smooth[im_smooth<cutoff] = 0
         np.save('ims',im_smooth) # DBG
+        np.save('im_raw',self.im) # DBG
 
         points = np.array( np.where( im_smooth ) ).T     # Coords of non-zero points
         hull = ConvexHull(points) # Entire convex hull. Maybe outliers
@@ -798,6 +824,7 @@ class NextwaveOffline():
             #print( cutoff ) # DBG
             im_smooth[im_smooth<cutoff] = 0
             np.save('ims',im_smooth) # DBG
+            np.save('im_raw',self.im) # DBG
             points = np.array( np.where( im_smooth ) ).T     # Coords of non-zero points
             hull = ConvexHull(points)
             fit1 = circle_fitter(hull.points[hull.vertices,1], hull.points[hull.vertices,0] ) # Note dimensions switched!
@@ -807,10 +834,14 @@ class NextwaveOffline():
             r_pix = self.opt1[2]
             # Find closest box center
             distances =(self.parent.box_x - self.opt1[0])**2 + (self.parent.box_y - self.opt1[1])**2
-        elif defaults.centering_method=='convex_hull_robust':
+        elif 'convex_hull_robust' in defaults.centering_method:
             # Try random subsamples to omit outliers:
             # Get best consensus from random sample of convex hull inliers
-            self.opt1,im_smooth = self.convex_hull_robust()
+            if 'dynamic' in defaults.centering_method:
+                do_dynamic=True
+            else:
+                do_dynamic=False
+            self.opt1,im_smooth = self.convex_hull_robust(do_dynamic)
             r_pix = self.opt1[2]
             # Find closest box center
             distances =(self.parent.box_x - self.opt1[0])**2 + (self.parent.box_y - self.opt1[1])**2
@@ -847,6 +878,11 @@ class NextwaveOffline():
             np.save('im_crop',self.im_smooth_cropped) # DBG
 
     def offline_startbox(self):
+        try:
+            self.parent.box_x # Needed
+        except:
+            self.parent.ui.mode_init()
+
         self.iterative_size = float(self.parent.ui.it_start.text()) * self.parent.pupil_mag
         self.iterative_size_pixels = self.iterative_size/2.0 * 1000 / self.parent.ccd_pixel
         self.auto_center()
