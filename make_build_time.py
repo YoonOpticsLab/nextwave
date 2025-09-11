@@ -10,7 +10,8 @@ if USE_GIT_LOG:
 
     fil=open("nextwave_build.py","wt")
     # LAst git commit ID, date, message
-    fil.writelines("build_message='Version info:\\n%s\\n%s\\n%s'"%(lins[0].strip(),lins[2].strip(),lins[4].strip() ) ) 
+    msg=lins[4].strip().replace("'",'"') # replace since quote with double
+    fil.writelines("build_message='Version info:\\n%s\\n%s\\n%s'"%(lins[0].strip(),lins[2].strip(),msg) )
     fil.close()
     
 else:

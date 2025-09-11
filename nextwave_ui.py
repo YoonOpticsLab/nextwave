@@ -196,7 +196,7 @@ class NextWaveMainWindow(QMainWindow):
  def update_ui(self):
     image_pixels = self.engine.receive_image()
 
-    if not self.mode_offline and not self.offline_only: # TODO: Put offline intelligence into engine itself
+    if not (self.mode_offline or self.offline_only): # TODO: Put offline intelligence into engine itself
       self.engine.receive_centroids()
       self.engine.compute_zernikes()
 

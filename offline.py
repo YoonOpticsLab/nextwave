@@ -584,7 +584,15 @@ class NextwaveOffline():
             self.parent.centroids_y=self.ceny
 
         self.parent.compute_zernikes()
-        self.zernikes = self.parent.zernikes # TODO: 
+        
+        if defaults.DO_CORRECT_LCA:
+            wfs_wavelength = self.ui.get_param_xml("OPTICS_LaserWavelength")
+            ref_wavelength = defaults.LCA_REFERENCE_WAVELENGTH
+            pupil_rad = self.engine.pupil_diam / self.engine.pupil_mag / 2.0
+            correction = zernike_functions.LCA_z4_correction( wfs_wavelength, ref_wavelength, pupil_rad )
+            print( correction, pupil_rad, wfs_wavelength, ref_wavelength)
+            self.parent.zernikes[3] += correction
+        self.zernikes = self.parent.zernikes 
 
         dx,dy=self.parent.get_deltas(self.zernikes,from_dialog=False)
 

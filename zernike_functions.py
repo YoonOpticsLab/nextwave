@@ -1,7 +1,5 @@
 import numpy as np
 
-
-
 # Order copied from MATLAB code
 CVS_to_OSA_map = np.array([ 3, 2,
                             5, 4, 6,
@@ -213,3 +211,13 @@ def zernike_integral_average_from_corners(left,right,upper,lower,pupil_radius,te
     inty=(zernike_inty1(right,upper) - zernike_inty1(left,upper) -
           zernike_inty1(right,lower) + zernike_inty1(left,lower))/spacing_x/spacing_y
     return intx/pupil_radius,inty/pupil_radius
+
+def LCA(wavelength):
+    dd=1.7312 - 0.63346 / (wavelength-0.2141)
+    return dd
+    
+def LCA_z4_correction(wavelength,wavelength_ref,pupil_radius):
+    value = LCA(wavelength/1000.0)-LCA(wavelength_ref/1000.0)
+    LCA_um = -(value * pupil_radius**2)/(4*np.sqrt(3))
+    print( "LCA_D=",value, "LCA_m=",LCA_um, wavelength, wavelength_ref, pupil_radius)
+    return LCA_um
