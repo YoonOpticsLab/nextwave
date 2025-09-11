@@ -249,30 +249,43 @@ class NextwaveOffline():
         elif '.png' in file_info[1]:
             buf_movie=None
             pathname = file_info[0][0].upper()
-            idxSub=pathname.find("SWS") # TODO
-            if idxSub==-1:
-                self.sub_id="NONAME"
-            else:
-                self.sub_id = pathname[idxSub+4:idxSub+8]
-            
-            # Condition might exist as a middle directory, between subId and last directory
-            i0=pathname[idxSub:].find('/') + idxSub + 1
-            i1=pathname[i0:].find('/') + i0 + 1
-            i2=pathname[i1:].find('/') + i1 + 1
-            if True or (i1==i2) or -1 in (i0,i1,i2):
-                self.condition="COND" # There was no directory between subId and last
-            else:
-                self.condition=pathname[i0:i1-1]
 
-            idxScanDir=pathname.find("CAM") # TODO
-            if idxScanDir==-1:
-                self.scan_dir='X'
+            GY_RESTRUCTURE=True
+            if GY_RESTRUCTURE:
+                # Find the last 3 (from the right) subdirs
+                i0=pathname[:].rfind('/')
+                i1=pathname[:i0].find('/')
+                i2=pathname[:i1].find('/')
+                self.scan_dir = pathname[i0+1:]
+                self.condition=pathname[i1+1:i0]
+                self.sub_id=pathname[i2+1:i1]
+                #print( self.scan_dir, self.condition, self.sub_id )
             else:
-                idxScanDir += 5
-                if pathname[idxScanDir:idxScanDir+2] == 'D2':
-                    self.scan_dir = 'D2'
+                idxSub=pathname.find("SWS") # TODO
+                if idxSub==-1:
+                    self.sub_id="NONAME"
                 else:
-                    self.scan_dir = pathname[idxScanDir:idxScanDir+1]  
+                    self.sub_id = pathname[idxSub+4:idxSub+8]
+                
+                # For Chloe's file layout    
+                # Condition might exist as a middle directory, between subId and last directory
+                i0=pathname[idxSub:].find('/') + idxSub + 1
+                i1=pathname[i0:].find('/') + i0 + 1
+                i2=pathname[i1:].find('/') + i1 + 1
+                if True or (i1==i2) or -1 in (i0,i1,i2):
+                    self.condition="COND" # There was no directory between subId and last
+                else:
+                    self.condition=pathname[i0:i1-1]
+
+                idxScanDir=pathname.find("CAM") # TODO
+                if idxScanDir==-1:
+                    self.scan_dir='X'
+                else:
+                    idxScanDir += 5
+                    if pathname[idxScanDir:idxScanDir+2] == 'D2':
+                        self.scan_dir = 'D2'
+                    else:
+                        self.scan_dir = pathname[idxScanDir:idxScanDir+1]  
             
             nf=0 # USE nf instead of nf_x to allow skipping (e.g. if directory is in there)
             for nf_x,frame1 in enumerate(file_info[0]):
@@ -300,31 +313,45 @@ class NextwaveOffline():
         elif '.bmp' in file_info[1]:
             buf_movie=None
             pathname = file_info[0][0].upper()
-            idxSub=pathname.find("SWS") # TODO
-            if idxSub==-1:
-                self.sub_id="NONAME"
-            else:
-                self.sub_id = pathname[idxSub+4:idxSub+8]
-            
-            # Condition might exist as a middle directory, between subId and last directory
-            i0=pathname[idxSub:].find('/') + idxSub + 1
-            i1=pathname[i0:].find('/') + i0 + 1
-            i2=pathname[i1:].find('/') + i1 + 1
-            if (i1==i2) or -1 in (i0,i1,i2):
-                self.condition="COND" # There was no directory between subId and last
-            else:
-                self.condition=pathname[i0:i1-1]
 
-            idxScanDir=pathname.find("CAM") # TODO
-            if idxScanDir==-1:
-                self.scan_dir='X'
+            GY_RESTRUCTURE=True
+            if GY_RESTRUCTURE:
+                # Find the last 3 (from the right) subdirs
+                i0=pathname[:].rfind('/')
+                i1=pathname[:i0].rfind('/')
+                i2=pathname[:i1].rfind('/')
+                i3=pathname[:i2].rfind('/')
+                self.scan_dir = pathname[i1+1:i0]
+                self.condition=pathname[i2+1:i1]
+                self.sub_id=pathname[i3+1:i2]
+                #print( i0, i1, i2, i3, self.scan_dir, self.condition, self.sub_id )
             else:
-                idxScanDir += 5
-                if pathname[idxScanDir:idxScanDir+2] == 'D2':
-                    self.scan_dir = 'D2'
+                idxSub=pathname.find("SWS") # TODO
+                if idxSub==-1:
+                    self.sub_id="NONAME"
                 else:
-                    self.scan_dir = pathname[idxScanDir:idxScanDir+1]  
-            
+                    self.sub_id = pathname[idxSub+4:idxSub+8]
+                
+                # For Chloe's file layout    
+                # Condition might exist as a middle directory, between subId and last directory
+                i0=pathname[idxSub:].find('/') + idxSub + 1
+                i1=pathname[i0:].find('/') + i0 + 1
+                i2=pathname[i1:].find('/') + i1 + 1
+                if True or (i1==i2) or -1 in (i0,i1,i2):
+                    self.condition="COND" # There was no directory between subId and last
+                else:
+                    self.condition=pathname[i0:i1-1]
+
+                idxScanDir=pathname.find("CAM") # TODO
+                if idxScanDir==-1:
+                    self.scan_dir='X'
+                else:
+                    idxScanDir += 5
+                    if pathname[idxScanDir:idxScanDir+2] == 'D2':
+                        self.scan_dir = 'D2'
+                    else:
+                        self.scan_dir = pathname[idxScanDir:idxScanDir+1]  
+                        
             nf=0 # USE nf instead of nf_x to allow skipping (e.g. if directory is in there)
             for nf_x,frame1 in enumerate(file_info[0]):
                 if not (".bmp" in frame1):
@@ -377,12 +404,12 @@ class NextwaveOffline():
     def export_all_zernikes(self,dir1="."):
         idx=0
         #out_fname = self.offline_fname + "_zern_%02d.csv"%idx        
-        out_fname = "%s/%s_%s_%s_%02d.csv"%(dir1,self.sub_id,self.condition,self.scan_dir,idx)
+        out_fname = "%s/zc_%s_%s_%s.csv"%(dir1,self.sub_id,self.condition,self.scan_dir)
         
         while Path(out_fname).exists():
             idx += 1
             #out_fname = self.offline_fname + "_zern_%02d.csv"%idx
-            out_fname = "%s/%s_%s_%s_%02d.csv"%(dir1,self.sub_id,self.condition,self.scan_dir,idx)
+            out_fname = "%s/zc_%s_%s_%s_%02d.csv"%(dir1,self.sub_id,self.condition,self.scan_dir,idx)
         
         self.f_out = open(out_fname,'w')
         s="subject_id,scan_dir,frame_num,ecc,pupil_diam_mm,cx,cy,"
