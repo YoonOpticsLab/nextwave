@@ -133,14 +133,14 @@ class NextwaveEngineComm():
         try: # TODO: Better to have an "if ready"
             if True:
                 buf = ByteStream()
-                for item in self.parent.influence.flatten():
+                for item in self.parent.influence.T.flatten():
                     buf.append(item, 'd')
                 shmem_boxes.seek(fields['influence']['bytenum_current'])
                 shmem_boxes.write(buf)
                 shmem_boxes.flush()
 
             buf = ByteStream()
-            for item in self.parent.influence_inv.flatten():
+            for item in self.parent.influence_inv.T.flatten():
                 buf.append(item, 'd')
             shmem_boxes.seek(fields['influence_inv']['bytenum_current'])
             shmem_boxes.write(buf)
@@ -250,7 +250,18 @@ class NextwaveEngineComm():
         
     def flat_save(self):
         self.mirror_state_flat = np.copy(self.mirror_voltages)
-
+    
+    def zero_log_index(self):
+        buf = ByteStream()
+        fields=self.layout[1]
+        buf.append(0)
+        buf.append(0)
+        buf.append(0)
+        buf.append(0)
+        self.shmem_hdr.seek(fields['log_index']['bytenum_current'])
+        self.shmem_hdr.write(buf)
+        self.shmem_hdr.flush()  
+        
     def do_snap(self, mode):
         buf = ByteStream()
         buf.append(mode) # TODO: MODE_CENTROIDING

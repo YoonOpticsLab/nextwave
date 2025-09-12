@@ -1040,6 +1040,10 @@ class NextWaveMainWindow(QMainWindow):
      self.mode_btn2.setEnabled( True )
      self.mode_btn3.setEnabled( True )
      #self.mode_btn4.setEnabled( False )
+
+     btn = QPushButton("Reset Counts")
+     layoutStatusButtons.addWidget(btn)
+     btn.clicked.connect(self.reset_counts)
      
      # Config
      layout1 = QGridLayout(pages[2])
@@ -1399,6 +1403,9 @@ class NextWaveMainWindow(QMainWindow):
     self.engine.mode_stop()
     #self.sockets.camera.send(b"E=3.14")
     #self.engine.update_searchboxes()
+
+ def reset_counts(self):
+    self.engine.comm.zero_log_index()
 
  def export(self):
     default_filename="centroids.dat"

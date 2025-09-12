@@ -34,17 +34,29 @@ int loop=0;
 DECL init(void)
 {
   spdlog::info("ALPAO DM1");
-
   plugin_access_shmem();
-
-  spdlog::info("ALPAO DM2");
+  spdlog::info("ALPAO DM1 OK");
 
 #if REAL_AO  
-  dm = new acs::DM( "BAX581" );
+  dm = new acs::DM( "BAX492" );
+  
+  printf( "valid?: %xl", (void*) dm);
+  
+  if (dm==NULL) { 
+	spdlog::error("ALPAO DM failed");
+	return -1;
+}
+  spdlog::info("ALPAO DM2");
+
   num_act = (int)dm->Get( "NbOfActuator" );
 #else
   num_act=97;
 #endif
+
+  if (num_act==0) {
+	spdlog::error("DM reports 0 actuators.");
+	return -1;
+  }
 
   data = new acs::Scalar[num_act]; // TODO: update if num_act changes (smaller pupil, etc.)
 

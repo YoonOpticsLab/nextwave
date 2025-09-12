@@ -434,8 +434,8 @@ int main(int argc, char** argv)
 
     } else { // Not running at all. Sleep a bit until summoned.
 
-      if (pShmem1->mode == MODE_OFF)
-        pShmem1->total_frames=0; // TODO: not sure if we want this long-term
+     // if (pShmem1->mode == MODE_OFF)
+     //   pShmem1->total_frames=0; // TODO: not sure if we want this long-term
 
       bRunning=0;
       std::this_thread::sleep_for(std::chrono::milliseconds(5));

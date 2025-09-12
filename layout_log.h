@@ -2,7 +2,7 @@
 #define SHMEM_LOG_MAX 2048
 #define MAX_BOXES 2048
 #define MAX_ACTUATORS 256
-#define MAX_IMAGE_SIZE 2048*2048
+#define MAX_IMAGE_SIZE 4194304
 struct shmem_log_entry {
   uint8_t frame_number;
   uint8_t total_frame_number;

@@ -56,7 +56,7 @@ endif()
 # add_subdirectory(plugin_ximea)
 # add_subdirectory(plugin_fileplayer)
 add_subdirectory(plugin_rawplayer)
-add_subdirectory(plugin_centroiding)
+#add_subdirectory(plugin_centroiding)
 
 if (WIN32)
     include_directories(.)

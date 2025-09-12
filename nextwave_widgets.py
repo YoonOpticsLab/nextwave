@@ -135,6 +135,7 @@ class BoxInfoDialog(QDialog):
         self.box_pix=box_pix
         self.cent_x=cent_x
         self.cent_y=cent_y
+        self.nbox = n
 
     def update_ui(self):
         self.image_label.resize(200,200)
@@ -170,7 +171,14 @@ class BoxInfoDialog(QDialog):
 
     def closeEvent(self, event):
         self.ui_parent.box_info = -1
-
+        
+    def event(self, event): 
+        if event.type() == QtCore.QEvent.EnterWhatsThisMode:
+            self.ui_parent.engine.omits[self.nbox] = not ( self.ui_parent.engine.omits[self.nbox] )
+            print( "Omit: %d",self.nbox);
+            return True
+        return QDialog.event(self, event)
+    
 COLOR_INDICATOR_VAL=0.05
 
 def actuator_color(nval):

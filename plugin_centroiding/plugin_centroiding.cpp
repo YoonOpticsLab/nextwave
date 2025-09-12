@@ -211,7 +211,7 @@ void rcv_boxes(int width) {
   gaf->ref_x_shift=gaf->ref_x * 0;
   gaf->ref_y_shift=gaf->ref_y * 0;
 
-  spdlog::info("init: {}x{} #:{} {} {} {}\n", width,height, num_boxes, pShmemBoxes->box_x[0], pShmemBoxes->box_y[0]-box_size, pShmemBoxes->box_y[0]-box_size/2);
+  spdlog::info("InIt: {}x{} #:{} {} {} {}\n", width,height, num_boxes, pShmemBoxes->box_x[0], pShmemBoxes->box_y[0]-box_size, pShmemBoxes->box_y[0]-box_size/2);
 
   // Each box will have a set of 1D indices into its members
 	for (int ibox=0; ibox<num_boxes; ibox++) {
@@ -381,8 +381,8 @@ int find_centroids_af(unsigned char *buffer, int width, int height) {
 	gaf->sums_x = af::sum( gaf->x_reshape, 0) / gaf->sums;
 	gaf->sums_y = af::sum( gaf->y_reshape, 0) / gaf->sums;
 
-  gaf->sums_x(afOmits) = af::Inf;
-  gaf->sums_y(afOmits) = af::Inf; 
+  gaf->sums_x(afOmits) = af::NaN;
+  gaf->sums_y(afOmits) = af::NaN; 
 
   CALC_TYPE *host_x = gaf->sums_x.host<CALC_TYPE>();
   CALC_TYPE *host_y = gaf->sums_y.host<CALC_TYPE>();
@@ -391,9 +391,21 @@ int find_centroids_af(unsigned char *buffer, int width, int height) {
   gaf->delta_x = gaf->sums_x - gaf->ref_x;
   gaf->delta_y = gaf->sums_y - gaf->ref_y;
 
-  // Indexes of box numbers that are okay
-  auto valids = !af::isNaN (gaf->sums_x) && !af::isInf (gaf->sums_x) ;
+  // TODO: Might this be slow?
+  memcpy(gpShmemLog[gpShmemHeader->log_index].im, host_im_subtracted_u8, sizeof(uint8_t)*width*height);
 
+  // Indexes of box numbers that are okay
+  af::array valids = !af::isNaN (gaf->sums_x) && !af::isInf (gaf->sums_x) ; // BOOL array
+  af::array idx_valid=af::where(valids); // Array of non-zeros
+  af::array valids2; // Later, stacking valid (x,y)s for recon matrix
+
+  af::dim4 dims=idx_valid.dims();
+  if (dims[0]==0 ) {
+	spdlog::info("{} {}",dims[0], dims[1]);
+	  goto free_afterwards;
+  }
+ // Check that valids are okay
+ 
   // Remove tip and tilt
   gaf->delta_x -= (CALC_TYPE)af::mean<CALC_TYPE>(gaf->delta_x(valids) ); // weighted mean, 0 for NaNs
   gaf->delta_y -= (CALC_TYPE)af::mean<CALC_TYPE>(gaf->delta_y(valids) );
@@ -417,8 +429,7 @@ int find_centroids_af(unsigned char *buffer, int width, int height) {
   gaf->slopes = af::moddims(gaf->slopes,af::dim4(1,num_boxes*2,1,1) ); // Flatten
   gaf->slopes /= (focal_length_um/pixel_um);
 
-  auto idx_valid=af::where(valids);
-  auto valids2 = af::transpose( af::join(1, 2*idx_valid, 2*idx_valid+1 ) );
+  valids2 = af::transpose( af::join(1, 2*idx_valid, 2*idx_valid+1 ) );
   valids2 = af::moddims(valids2,af::dim4(2*idx_valid.dims(0),1,1,1) ); // like flatten, but in 2nd dimension
 
   if (af::sum<int>(valids2)==0) {
@@ -483,15 +494,15 @@ int find_centroids_af(unsigned char *buffer, int width, int height) {
 
 		// Memory Log: for debugging/log
 		memcpy(gpShmemLog[gpShmemHeader->log_index].mirrors, pShmemBoxes->mirror_voltages, sizeof(pShmemBoxes->mirror_voltages[0])*nActuators);
-		memcpy(gpShmemLog[gpShmemHeader->log_index].im, host_im_subtracted_u8, sizeof(uint8_t)*width*height);
 		
 		// Debug:
 		//spdlog::info("Mirror {}:{}/{} 0:{} 00:{}", (double)mirror_mean, (double)mirror_min, (double) mirror_max, (double)pShmemBoxes->mirror_voltages[0], (double)save1 );
 
 	} // if closed loop
-
-  af::freeHost(host_im_subtracted_u8);
   af::freeHost(host_mirror_voltages);
+
+free_afterwards:
+  af::freeHost(host_im_subtracted_u8);
   af::freeHost(host_x);
   af::freeHost(host_y);
   

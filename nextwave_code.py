@@ -239,9 +239,11 @@ class NextwaveEngine():
             #fil=open("omits.txt","rt")
             #lins=fil.readlines();
             omits = np.loadtxt("omits.txt", dtype='int')
-            print( omits )
+            print( "OMITS!", end=' ' )
             for omit1 in omits:
                 self.omits[omit1]=1
+                print( omit1, end=' ');
+            print()
         except:
             pass
         
