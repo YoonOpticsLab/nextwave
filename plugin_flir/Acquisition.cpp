@@ -69,7 +69,7 @@ using namespace Spinnaker::GenApi;
 using namespace Spinnaker::GenICam;
 using namespace std;
 
-#include "../include/spdlog/spdlog.h"
+#include "spdlog/spdlog.h"
 
 // UI Socket communication
 #include <cstring>

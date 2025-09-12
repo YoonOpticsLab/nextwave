@@ -7,15 +7,13 @@ list(APPEND SOURCES
   VERSION 1.0
   LANGUAGES CXX)
 
-include_directories(../include)
 include_directories(..)
-include_directories(d:/code/boost_1_83_0)
-include_directories(include)
+include_directories(../../nextwave_include)
+include_directories(../../nextwave_include/boost)
 
 add_library(plugin_rawplayer SHARED plugin_rawplayer.cpp ../nextwave_plugin.hpp)
 if (WIN32)
-  set_target_properties(plugin_rawplayer PROPERTIES LIBRARY_OUTPUT_DIRECTORY "../../nextwave/build"  )
-  set_target_properties(plugin_rawplayer PROPERTIES RUNTIME_OUTPUT_DIRECTORY "../../nextwave/build"  )
+  set_target_properties(plugin_rawplayer PROPERTIES RUNTIME_OUTPUT_DIRECTORY ".."  )
 else()
   set_target_properties(plugin_rawplayer PROPERTIES
     LIBRARY_OUTPUT_DIRECTORY "../../build"

@@ -11,9 +11,9 @@ set(SPINNAKER_DIR "C:/Program Files/Teledyne/Spinnaker")
 
 include_directories(${SPINNAKER_DIR}/include)
 
-include_directories(../)
-include_directories(../common/include)
-include_directories(../common/include/boost_1_83_0)
+include_directories(..)
+include_directories(../../nextwave_include)
+include_directories(../../nextwave_include/boost)
 
 # include_directories(${XIMEA_DIR}/_libs/xiAPI)
 include(add_spinnaker.cmake)
@@ -21,5 +21,4 @@ include(add_spinnaker.cmake)
 
 add_library(plugin_flir SHARED Acquisition.cpp)
 
-set_target_properties(plugin_flir PROPERTIES RUNTIME_OUTPUT_DIRECTORY "c:/nextwave/build"  )
-# set_target_properties(plugin_flir PROPERTIES LIBRARY_OUTPUT_DIRECTORY "../debug"  )
+set_target_properties(plugin_flir PROPERTIES RUNTIME_OUTPUT_DIRECTORY ".."  )

@@ -22,6 +22,7 @@ if (UNIX) # For Dan
   SET(CMAKE_CXX_FLAGS  ${CMAKE_CXX_FLAGS} ${GCC_OPT} )
   SET(CMAKE_EXE_LINKER_FLAGS  ${CMAKE_EXE_LINKER_FLAG} ${GCC_OPT} )
 else() # For Windows, need AF here
+	set(ArrayFire_DIR "C:/Program Files/ArrayFire/v3/cmake")
 	find_package(ArrayFire REQUIRED)
 
 	include_directories(${ArrayFire_INCLUDE_DIRS})
@@ -60,7 +61,7 @@ add_subdirectory(plugin_rawplayer)
 
 if (WIN32)
     include_directories(.)
-    include_directories(..)
+    include_directories(../nextwave_include)
 	add_executable(engine engine.cpp plugin_centroiding/plugin_centroiding.cpp)
 	#add_executable(engine engine.cpp plugin_centroiding/plugin_centroiding.cpp)
 	#target_link_libraries(engine ${ArrayFire_Unified_LIBRARIES} )

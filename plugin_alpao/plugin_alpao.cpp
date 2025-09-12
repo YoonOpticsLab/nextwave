@@ -38,9 +38,9 @@ DECL init(void)
   spdlog::info("ALPAO DM1 OK");
 
 #if REAL_AO  
-  dm = new acs::DM( "BAX492" );
+  dm = new acs::DM( "BAX581" );
   
-  printf( "valid?: %xl", (void*) dm);
+  //printf( "valid?: %xl", (void*) dm);
   
   if (dm==NULL) { 
 	spdlog::error("ALPAO DM failed");
