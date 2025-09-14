@@ -287,8 +287,11 @@ class MyBarWidget(pg.PlotWidget):
         if event.type() == QEvent.ToolTip:
             pos_plot = self.getViewBox().mapSceneToView(event.pos())
             bar_which = round(pos_plot.x())
-            zernike_val = self.app.engine.zernikes[bar_which-1]
-            self.setToolTip("Z%d=%+0.3f"%(bar_which,zernike_val) )
+            try:
+                zernike_val = self.app.engine.zernikes[bar_which-1]
+                self.setToolTip("Z%d=%+0.3f"%(bar_which,zernike_val) )
+            except IndexError:
+                pass # Ok, bad position
 
         return super(MyBarWidget, self).eventFilter(obj, event)
 

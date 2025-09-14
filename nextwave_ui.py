@@ -637,8 +637,11 @@ class NextWaveMainWindow(QMainWindow):
      self.it_stop_dirty=True
  
  def pupil_changed(self):
-   #return # require init
-     val=float( self.line_pupil_diam.text() )
+   try:
+       val=float( self.line_pupil_diam.text() )
+   except ValueError:
+       pass # Perhaps in the midst of changing it. Ignore until it's valid
+       
      #print("From UI: %s"%val)
      #self.engine.init_params() # will read from UI
      #self.engine.make_searchboxes(self.cx,self.cy)
