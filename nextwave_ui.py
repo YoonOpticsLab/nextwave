@@ -220,6 +220,7 @@ class NextWaveMainWindow(QMainWindow):
     painter.begin(pixmap)
     
 
+    ARROW_MAGNITUDE=10
     if self.draw_arrows:
         #conicalGradient gradient;
 		#gradient.setCenter(rect().center());
@@ -228,10 +229,11 @@ class NextWaveMainWindow(QMainWindow):
 		#gradient.setColorAt(0.0, palette().background().color());
         pen = QPen(Qt.green, 2)
         painter.setPen(pen)
+
         arrows=[QLineF(self.engine.ref_x[n],
                        self.engine.ref_y[n],
-                       self.engine.centroids_x[n],
-                       self.engine.centroids_y[n]) for n in np.arange(0,self.engine.num_boxes)]
+                       self.engine.ref_x[n] + (self.engine.centroids_x[n]-self.engine.ref_x[n])*ARROW_MAGNITUDE,
+                       self.engine.centroids_y[n] + (self.engine.centroids_y[n]-self.engine.ref_y[n])*ARROW_MAGNITUDE) for n in np.arange(0,self.engine.num_boxes)]
         painter.drawLines(arrows)
         
     if self.draw_zonal_arrows:
