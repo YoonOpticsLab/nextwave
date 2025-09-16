@@ -558,7 +558,7 @@ class NextWaveMainWindow(QMainWindow):
                 return(node["value"])
 
  def get_param_xml(self,name):
-     #print( self.params_xml)
+     #print( self.params_xml_state )
      #print( self.params_params)
      val = self.params_xml_state["children"][name]["value"]
      try:
@@ -1531,6 +1531,11 @@ def main():
   win.slider_defocus.setValue(500)
   win.slider_aogain.setValue(50)
   win.slider_dmfill.setValue(1000)
+  
+  expo=win.get_param_xml("CAMERA1_CameraExposure") 
+  sliderval = int( (np.log10(expo) - np.log10(CAM_EXPO_MIN) ) / (np.log10(CAM_EXPO_MAX) - np.log10(CAM_EXPO_MIN) )  * 100 )
+  win.slider_exposure.setValue(sliderval)
+#  print( expo, sliderval )
   
   start_backdoor(win)
 
