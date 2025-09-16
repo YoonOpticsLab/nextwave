@@ -109,6 +109,8 @@ public:
   af::array atemp;
   af::array x_reshape;
   af::array y_reshape;
+  
+  af::array submask;
 
  // af::array influence;
   af::array influence_inv;
@@ -181,6 +183,8 @@ void init_buffers(int width, int height, int box_size, int nboxes) {
 	};
 }
 
+#define EXTENT 8
+
 void rcv_boxes(int width) {
 
   // TODO: is dynamically changing the size allowed?
@@ -211,7 +215,7 @@ void rcv_boxes(int width) {
   gaf->ref_x_shift=gaf->ref_x * 0;
   gaf->ref_y_shift=gaf->ref_y * 0;
 
-  spdlog::info("InIt: {}x{} #:{} {} {} {}\n", width,height, num_boxes, pShmemBoxes->box_x[0], pShmemBoxes->box_y[0]-box_size, pShmemBoxes->box_y[0]-box_size/2);
+  spdlog::info("InIt: {}x{} #:{} {} {} {} {}\n", width,height, num_boxes, box_size, pShmemBoxes->box_x[0], pShmemBoxes->box_y[0]-box_size, pShmemBoxes->box_y[0]-box_size/2);
 
   // Each box will have a set of 1D indices into its members
 	for (int ibox=0; ibox<num_boxes; ibox++) {
@@ -235,6 +239,28 @@ void rcv_boxes(int width) {
 		}
 	}
 	gaf->seq1 = af::array(box_size*box_size, num_boxes, nbuffer );
+
+	for (int ibox=0; ibox<box_size*box_size; ibox++) {
+		int x_within = ibox / box_size ;
+		int y_within = ibox % box_size;
+		for (int y=0; y<box_size; y++)  {
+			for (int x=0; x<box_size; x++) {
+				int maskval=1;
+				if ((x-x_within) > EXTENT)
+					maskval=0;
+				if ((x_within-x) > EXTENT)
+					maskval=0;
+				if ((y_within-y) > EXTENT)
+					maskval=0;
+				if ((y-y_within) > EXTENT)
+					maskval=0;
+				nbuffer[ibox*box_size*box_size+x*box_size+y]=maskval;
+			}
+		}
+	}
+ 	gaf->submask = af::array(box_size*box_size, box_size*box_size, nbuffer );
+ 	gaf->submask = af::reorder(gaf->submask, 1, 0);
+ 	//gaf->submask = af::transpose(gaf->submask);
 
   spdlog::info("boxes: #={} size={} pupil={}", num_boxes, box_size, pupil_radius_pixels );
   //spdlog::info("x0={} y0={}", x_ref0, y_ref0 );
@@ -354,7 +380,6 @@ int find_centroids_af(unsigned char *buffer, int width, int height) {
 	if (0)
     af_print(gaf->seq1(af::span,0));
 
-	gaf->atemp = gaf->weighted_x(gaf->seq1); //weighted_x or im_xcoor for debug
 
 #if VERBOSE
   spdlog::info("mean={} min={} max={}",(float)af::mean<float>(atemp),
@@ -362,6 +387,7 @@ int find_centroids_af(unsigned char *buffer, int width, int height) {
                (float)af::max<float>(atemp) );
 #endif
 
+	gaf->atemp = gaf->weighted_x(gaf->seq1); //weighted_x or im_xcoor for debug
 	if (doprint*0)
 		af_print(gaf->atemp );
 	gaf->x_reshape = af::moddims( gaf->atemp, gaf->new_dims );
@@ -375,11 +401,40 @@ int find_centroids_af(unsigned char *buffer, int width, int height) {
 	
 	// Reshape the array so each box can be summed  
 	gaf->im2 = af::moddims( gaf->im2, gaf->new_dims );
-	gaf->sums = af::sum( gaf->im2, 0);
 	
+    af::array max_vals, max_indices, box_masks;
+    af::max(max_vals, max_indices, gaf->im2, 0); // 0=within each box. Find max pixel in each box, put idxs into max_indices
+	//max_indices = af::reorder(max_indices, 1, 0);
+    //spdlog::info("mean={}",(float)af::mean<float>(max_indices) );
+
+    //float idx0 = max_indices(0,0).scalar<float>();
+    //spdlog::info("max0={}", idx0 );
+    //af_print(max_indices(af::seq(2))); 
+	
+	// Submax for each box will comprise the appropriate mask for its Max pixel
+	box_masks = gaf->submask(af::span, max_indices );
+	
+	// Disable MAX sub-boxing: (Make all full-mask masks.)
+	//box_masks = box_masks * 0 + 1.0;
+
+#if 0
+	af::dim4 dimX = gaf->submask.dims();
+	spdlog::info("{},{}",dimX[0], dimX[1]);
+	dimX = box_masks.dims();
+	spdlog::info("{},{}",dimX[0], dimX[1]);
+	dimX = gaf->im2.dims();
+	spdlog::info("{},{}",dimX[0], dimX[1]);
+	dimX = max_indices.dims();
+	spdlog::info("{},{}",dimX[0], dimX[1]);
+	dimX = gaf->seq1.dims();
+	spdlog::info("{},{}",dimX[0], dimX[1]);	
+#endif //0	
+	
+	gaf->sums = af::sum( gaf->im2 * box_masks, 0);
+
 	// Sum all pixels divide by total to get center of mass
-	gaf->sums_x = af::sum( gaf->x_reshape, 0) / gaf->sums;
-	gaf->sums_y = af::sum( gaf->y_reshape, 0) / gaf->sums;
+	gaf->sums_x = af::sum( gaf->x_reshape * box_masks, 0) / gaf->sums;
+	gaf->sums_y = af::sum( gaf->y_reshape * box_masks, 0) / gaf->sums;
 
   gaf->sums_x(afOmits) = af::NaN;
   gaf->sums_y(afOmits) = af::NaN; 

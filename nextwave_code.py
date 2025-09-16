@@ -128,6 +128,11 @@ class NextwaveEngine():
         if not self.ui.offline_only:
             self.comm.write_params(True) # "Overrides" : FIXME!! TODO
 
+    def null_tip_tilt(self):
+        dx=int( -round(self.mean_displacements[0] ) )
+        dy=int( round(self.mean_displacements[1] ) )
+        self.move_searchboxes(dx,dy)
+        
     def move_searchboxes(self,dx,dy):
         self.box_x += dx
         self.box_y += dy
@@ -423,8 +428,8 @@ class NextwaveEngine():
                 spot_displace_y[nidx]=0
                 self.spot_displace_interpolated[nidx] = 2
 
-        # DRC: x and y were switched here 2025/05/29
-        slope = np.concatenate( (spot_displace_x, spot_displace_y)) * (self.ccd_pixel/self.focal);
+        # DRC: x and y were switched here 2025/05/29. Hmm, Not so sure 9/14/25
+        slope = np.concatenate( (spot_displace_y, spot_displace_x)) * (self.ccd_pixel/self.focal);
 
         self.spot_displace_x = spot_displace_x # debugging
         self.spot_displace_y = spot_displace_y

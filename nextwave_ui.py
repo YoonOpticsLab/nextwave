@@ -17,7 +17,7 @@ from PyQt5.QtCore import Qt
 
 import pyqtgraph as pg
 from pyqtgraph.parametertree import Parameter, ParameterTree
-#from pyqtkeybind import keybinder
+from pyqtkeybind import keybinder
 
 import numpy as np
 import sys
@@ -72,6 +72,8 @@ class NextWaveMainWindow(QMainWindow):
  def __init__(self):
     super().__init__(parent=None)
 
+    self.engine = NextwaveEngine(self)
+
     # self.worker=Worker();
     #self.worker_thread=QThread()
     #self.worker.moveToThread(self.worker_thread);
@@ -105,6 +107,13 @@ class NextWaveMainWindow(QMainWindow):
     self.scales=[512,768,1024,1536,2048]
 
     self.image_pixels = np.zeros( (10,10))
+    
+    keybinder.init()
+    keybinder.register_hotkey(self.winId(), "F7", self.on_hotkey_pressed)
+
+ def on_hotkey_pressed(self):
+     # THIS IS NOT WORKING
+     print("Global hotkey activated!")    
 
  def params_json(self):
     f=open("./config.json")
@@ -550,7 +559,7 @@ class NextWaveMainWindow(QMainWindow):
                 return(node["value"])
 
  def get_param_xml(self,name):
-     #print( self.params_xml)
+     #print( self.params_xml_state )
      #print( self.params_params)
      val = self.params_xml_state["children"][name]["value"]
      try:
@@ -1376,6 +1385,14 @@ class NextWaveMainWindow(QMainWindow):
     elif event.key()==Qt.Key_Down:
         self.cy += 1 + 10 * self.key_control
         update_search_boxes=True
+        
+    elif event.key()==Qt.Key_7:
+        self.engine.null_tip_tilt()
+    elif event.key()==Qt.Key_0:
+        self.engine.zero_do()
+    elif event.key()==Qt.Key_9:
+        self.engine.mode_snap()
+        
     else:
         print( "Uknown Key:", event.key() )
 
@@ -1428,7 +1445,6 @@ class NextWaveMainWindow(QMainWindow):
     self.close()
 
  def initEngine(self):
-    self.engine = NextwaveEngine(self)
     self.engine.init()
     if not self.offline_only:
        self.engine.make_searchboxes(self.cx,self.cy)
@@ -1516,6 +1532,11 @@ def main():
   win.slider_defocus.setValue(500)
   win.slider_aogain.setValue(50)
   win.slider_dmfill.setValue(1000)
+  
+  expo=win.get_param_xml("CAMERA1_CameraExposure") 
+  sliderval = int( (np.log10(expo) - np.log10(CAM_EXPO_MIN) ) / (np.log10(CAM_EXPO_MAX) - np.log10(CAM_EXPO_MIN) )  * 100 )
+  win.slider_exposure.setValue(sliderval)
+#  print( expo, sliderval )
   
   start_backdoor(win)
 
