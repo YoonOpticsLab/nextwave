@@ -17,7 +17,7 @@ from PyQt5.QtCore import Qt
 
 import pyqtgraph as pg
 from pyqtgraph.parametertree import Parameter, ParameterTree
-#from pyqtkeybind import keybinder
+from pyqtkeybind import keybinder
 
 import numpy as np
 import sys
@@ -72,6 +72,8 @@ class NextWaveMainWindow(QMainWindow):
  def __init__(self):
     super().__init__(parent=None)
 
+    self.engine = NextwaveEngine(self)
+
     # self.worker=Worker();
     #self.worker_thread=QThread()
     #self.worker.moveToThread(self.worker_thread);
@@ -105,6 +107,13 @@ class NextWaveMainWindow(QMainWindow):
     self.scales=[512,768,1024,1536,2048]
 
     self.image_pixels = np.zeros( (10,10))
+    
+    keybinder.init()
+    keybinder.register_hotkey(self.winId(), "F7", self.on_hotkey_pressed)
+
+ def on_hotkey_pressed(self):
+     # THIS IS NOT WORKING
+     print("Global hotkey activated!")    
 
  def params_json(self):
     f=open("./config.json")
@@ -1427,7 +1436,6 @@ class NextWaveMainWindow(QMainWindow):
     self.close()
 
  def initEngine(self):
-    self.engine = NextwaveEngine(self)
     self.engine.init()
     if not self.offline_only:
        self.engine.make_searchboxes(self.cx,self.cy)

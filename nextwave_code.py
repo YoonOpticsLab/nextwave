@@ -420,8 +420,8 @@ class NextwaveEngine():
                 spot_displace_y[nidx]=0
                 self.spot_displace_interpolated[nidx] = 2
 
-        # DRC: x and y were switched here 2025/05/29
-        slope = np.concatenate( (spot_displace_x, spot_displace_y)) * (self.ccd_pixel/self.focal);
+        # DRC: x and y were switched here 2025/05/29. Hmm, Not so sure 9/14/25
+        slope = np.concatenate( (spot_displace_y, spot_displace_x)) * (self.ccd_pixel/self.focal);
 
         self.spot_displace_x = spot_displace_x # debugging
         self.spot_displace_y = spot_displace_y

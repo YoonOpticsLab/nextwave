@@ -109,7 +109,8 @@ class BoxInfoDialog(QDialog):
         #self.setWindowFlag(Qt.FramelessWindowHint) 
         #self.setWindowTitle(titl)
         self.ui_parent = ui_parent
-
+        self.engine = ui_parent.engine
+        
         layout=QVBoxLayout()
         self.text_num = QLabel()
         layout.addWidget(self.text_num)
@@ -131,7 +132,9 @@ class BoxInfoDialog(QDialog):
             pass
         self.text_num.setText(line1)
         self.text_box.setText("box center=(%0.3f,%0.3f)"%(box_x,box_y))
-        self.text_centroid.setText("centroid=(%0.3f,%0.3f)"%(centroid_x_abs,centroid_y_abs))
+        self.text_centroid.setText("centroid=(%0.3f,%0.3f) {%+0.3f,%+0.3f}"%(centroid_x_abs,centroid_y_abs,
+            centroid_x_abs - self.engine.ref_x[n],
+            centroid_y_abs - self.engine.ref_y[n]) )
         self.box_pix=box_pix
         self.cent_x=cent_x
         self.cent_y=cent_y
@@ -155,7 +158,14 @@ class BoxInfoDialog(QDialog):
         painter.setPen(pen)
         points=[QPointF(self.cent_x,self.cent_y)]
         painter.drawPoints(points)
-
+        
+        if self.ui_parent.draw_refs and self.ui_parent.engine.num_boxes>0: # and self.engine.mode>1:
+            pen = QPen(Qt.green, 1.0)
+            painter.setPen(pen)
+            points_ref=[QPointF(self.ui_parent.engine.ref_x[n],
+                self.ui_parent.engine.ref_y[n]) for n in [self.nbox] ]
+            painter.drawPoints(points_ref)
+            
         if self.ui_parent.draw_predicted: 
             pen2 = QPen(Qt.green, 1.0)
             painter.setPen(pen2)
