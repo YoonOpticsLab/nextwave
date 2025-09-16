@@ -128,6 +128,11 @@ class NextwaveEngine():
         if not self.ui.offline_only:
             self.comm.write_params(True) # "Overrides" : FIXME!! TODO
 
+    def null_tip_tilt(self):
+        dx=int( -round(self.mean_displacements[0] ) )
+        dy=int( round(self.mean_displacements[1] ) )
+        self.move_searchboxes(dx,dy)
+        
     def move_searchboxes(self,dx,dy):
         self.box_x += dx
         self.box_y += dy

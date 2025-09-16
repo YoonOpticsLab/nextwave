@@ -1384,6 +1384,14 @@ class NextWaveMainWindow(QMainWindow):
     elif event.key()==Qt.Key_Down:
         self.cy += 1 + 10 * self.key_control
         update_search_boxes=True
+        
+    elif event.key()==Qt.Key_7:
+        self.engine.null_tip_tilt()
+    elif event.key()==Qt.Key_0:
+        self.engine.zero_do()
+    elif event.key()==Qt.Key_9:
+        self.engine.mode_snap()
+        
     else:
         print( "Uknown Key:", event.key() )
 
