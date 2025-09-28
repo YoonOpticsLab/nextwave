@@ -89,7 +89,7 @@ class info_saver():
         data_record=self.load1(nframe)
         if not data_record is None:
             try:
-                s=("%s,%s,%d,%0.2f,%0.3f,%d,%d,")%(self.offline.sub_id,self.offline.scan_dir,nframe,defaults.scan_frame_to_ecc[self.offline.scan_dir][nframe],data_record['pupil_diam'],data_record['cx'],data_record['cy'])
+                s=("%s,%s,%s,%0.2f,%0.3f,%d,%d,")%(self.offline.sub_id,self.offline.scan_dir,self.offline.fnames[nframe],defaults.scan_frame_to_ecc[self.offline.scan_dir][nframe],data_record['pupil_diam'],data_record['cx'],data_record['cy'])
             except: # without the sub_id params
                 s=("%s,%s,%d,%0.2f,%0.3f,%d,%d,")%("","",nframe,0.0,data_record['pupil_diam'],data_record['cx'],data_record['cy'])
             for nz1,z1 in enumerate(data_record['zernikes']):
@@ -288,6 +288,7 @@ class NextwaveOffline():
                         self.scan_dir = pathname[idxScanDir:idxScanDir+1]  
             
             nf=0 # USE nf instead of nf_x to allow skipping (e.g. if directory is in there)
+            self.fnames = np.zeros( len(file_info[0]) )
             for nf_x,frame1 in enumerate(file_info[0]):
                 if not (".png" in frame1):
                     continue
@@ -299,10 +300,12 @@ class NextwaveOffline():
                 if buf_movie is None:
                         buf_movie=np.zeros( (2048,f1.shape[0],f1.shape[1]), dtype='uint8') # TODO: grow new chunk if necessary
                 buf_movie[nf]=f1
+                self.fnames[nf] = frame1
                 nf += 1
 
             buf_movie = buf_movie[0:nf]
-
+            self.fnames = self.fnames[0:nf]
+            
             print(pathname, self.condition, self.scan_dir, self.sub_id)
             print("Read %d frames of %dx%d"%(nf,f1.shape[0],f1.shape[1]) )
             buf_movie=buf_movie[0:nf,:,:] # Trim to correct
@@ -353,6 +356,7 @@ class NextwaveOffline():
                         self.scan_dir = pathname[idxScanDir:idxScanDir+1]  
                         
             nf=0 # USE nf instead of nf_x to allow skipping (e.g. if directory is in there)
+            self.fnames = ["" for n in np.arange( len(file_info[0]) )]
             for nf_x,frame1 in enumerate(file_info[0]):
                 if not (".bmp" in frame1):
                     continue
@@ -362,11 +366,19 @@ class NextwaveOffline():
                 if buf_movie is None:
                         buf_movie=np.zeros( (50,f1.shape[0],f1.shape[1]), dtype='uint8') # TODO: grow new chunk if necessary
                 buf_movie[nf]=f1
+                
+                # Assume fname is xxxx_nnn.bmp : extract nnn
+                idx_number=frame1.rfind('_')+1
+                idx_number_after=frame1[idx_number:].find('.')+idx_number
+                #print( frame1, idx_number, frame1[idx_number:idx_number_after] )
+                self.fnames[nf] = int(frame1[idx_number:idx_number_after])
+                
                 nf += 1
 
-            print(pathname, self.condition, self.scan_dir, self.sub_id)
+            print(pathname, self.condition, self.scan_dir, self.sub_id, self.fnames)
             print("Read %d frames of %dx%d"%(nf,f1.shape[0],f1.shape[1]) )
             buf_movie=buf_movie[0:nf,:,:] # Trim to correct
+            self.fnames = self.fnames[0:nf]
             
             buf_movie[buf_movie >= defaults.SATURATION_MINIMUM] = 0
             
@@ -716,7 +728,7 @@ class NextwaveOffline():
         size_before = self.parent.box_size_pixel
         while self.parent.box_size_pixel > defaults.SHRINK_MIN:
             self.offline_auto_shrink1()
-        self.parent.box_size_pixel = size_before
+        #self.parent.box_size_pixel = size_before
         
     def offline_auto_shrink1(self):
         #print( self.parent.box_size_pixel )
@@ -734,7 +746,7 @@ class NextwaveOffline():
         else:
             pass
         self.parent.shift_search_boxes(zs,from_dialog=False) 
-        
+        self.parent.ui.widget_boxsize.setValue(self.parent.box_size_pixel)
         # Dangerous/maybe doesn't work without new thread
         #self.parent.ui.update_ui()
         #self.parent.ui.repaint()  

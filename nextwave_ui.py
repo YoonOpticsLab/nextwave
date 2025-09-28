@@ -70,6 +70,7 @@ class OfflineWorker(QtCore.QObject):
                 self.do_finished()
                 return
             self.engine.offline.offline_auto1(nframe)
+            self.ui.center_dirty=False # Only true for first frame
         self.engine.offline.saver.serialize()
         self.do_finished()
         
@@ -792,6 +793,9 @@ class NextWaveMainWindow(QMainWindow):
      #self.param_tree.setParameters(self.p, showTop=False)
 
  def offline_move(self,n,restore_mode=False):
+  if not n==0:
+      self.center_dirty = False
+
   self.offline_curr += n
   if self.offline_curr < 0:
    self.offline_curr = 0
@@ -801,7 +805,7 @@ class NextWaveMainWindow(QMainWindow):
   #print("Offline move %d, curr=%d:/%d"%(n,self.offline_curr,self.offline_nframes) )
   self.engine.offline_frame(self.offline_curr)
 
-  self.lbl_frame_curr.setText("Frame %d/%d"%(self.offline_curr,self.offline_nframes-1) )
+  self.lbl_frame_curr.setText("Frame %d/%d"%(self.offline_curr+1,self.offline_nframes) )
 
   if restore_mode:
    self.engine.offline.offline_navigate()
@@ -879,11 +883,14 @@ class NextWaveMainWindow(QMainWindow):
      layout_op.addWidget(self.ops_pupil)
      self.ops_source = QGroupBox('Camera/Source')
      self.ops_dm = QGroupBox('DM')
+     self.ops_boxes = QGroupBox('Boxes/Centroids')
      self.ops_offline = QGroupBox('Offline')
      if not self.offline_only:     
+        layout_op.addWidget(self.ops_boxes)
         layout_op.addWidget(self.ops_source)
         layout_op.addWidget(self.ops_dm)
      else:
+        layout_op.addWidget(self.ops_boxes)
         layout_op.addWidget(self.ops_offline)
      self.widget_op.setLayout(layout_op)
 
@@ -960,7 +967,6 @@ class NextWaveMainWindow(QMainWindow):
      btn = QPushButton("Reset")
      layout1.addWidget(btn,4,6)
      btn.clicked.connect(lambda: self.iterative_reset() )
-
 
 #     btn = QPushButton("Dialog2")
      #layout1.addWidget(btn,6,3)
@@ -1047,25 +1053,6 @@ class NextWaveMainWindow(QMainWindow):
      btn.clicked.connect(self.zero_do)
      layout1.addWidget(btn, 0,2 )
 
-     btn = QPushButton("Search box shift")
-     btn.clicked.connect(lambda: self.show_zernike_dialog("Shift search boxes", self.engine.shift_search_boxes ) )
-     layout1.addWidget(btn, 1,0 )
-
-     btn = QPushButton("Reference shift")
-     btn.clicked.connect(lambda: self.show_zernike_dialog("Shift references", self.engine.reset_references ) )
-     layout1.addWidget(btn, 2,0 )
-
-     self.chkFollow = QCheckBox("Boxes follow centroids")
-     self.chkFollow.stateChanged.connect(lambda:self.set_follow(self.chkFollow.isChecked()))
-     layout1.addWidget(self.chkFollow, 1,3 )
-
-     btn = QPushButton("Search box RESET")
-     btn.clicked.connect(self.engine.reset_search_boxes )
-     layout1.addWidget(btn, 1,1 )
-
-     btn = QPushButton("Reference RESET")
-     btn.clicked.connect(self.engine.reset_references )
-     layout1.addWidget(btn, 2,1 )
 
      self.widget_mode_buttons = QWidget()
      layoutStatusButtons = QHBoxLayout(self.widget_mode_buttons)
@@ -1142,6 +1129,44 @@ class NextWaveMainWindow(QMainWindow):
      self.text_stats.setReadOnly(True)
      layout.addWidget(self.text_stats)
 
+     layout1 = QGridLayout(self.ops_boxes) #pages[3])
+     
+     lbl = QLabel("Box size:")
+     layout1.addWidget(lbl,0,0)
+     self.widget_boxsize = QDoubleSpinBox()
+     layout1.addWidget(self.widget_boxsize,0,1)
+     self.widget_boxsize.setDecimals(2)
+     self.widget_boxsize.valueChanged.connect(self.boxsize_changed)
+
+     btn = QPushButton("Search box shift")
+     btn.clicked.connect(lambda: self.show_zernike_dialog("Shift search boxes", self.engine.shift_search_boxes ) )
+     layout1.addWidget(btn, 1,0 )
+
+     btn = QPushButton("Reference shift")
+     btn.clicked.connect(lambda: self.show_zernike_dialog("Shift references", self.engine.reset_references ) )
+     layout1.addWidget(btn, 2,0 )
+
+     self.chkFollow = QCheckBox("Boxes follow centroids")
+     self.chkFollow.stateChanged.connect(lambda:self.set_follow(self.chkFollow.isChecked()))
+     layout1.addWidget(self.chkFollow, 1,3 )
+
+     btn = QPushButton("Search box RESET")
+     btn.clicked.connect(self.engine.reset_search_boxes )
+     layout1.addWidget(btn, 1,1 )
+
+     btn = QPushButton("Reference RESET")
+     btn.clicked.connect(self.engine.reset_references )
+     layout1.addWidget(btn, 2,1 )
+
+     btn = QPushButton("Shrink+Shift1")
+     layout1.addWidget(btn,0,2)
+     btn.clicked.connect(lambda: self.engine.offline.offline_auto_shrink1() )
+
+     btn = QPushButton("Shrink+Autoshift")
+     layout1.addWidget(btn,0,3)
+     btn.clicked.connect(lambda: self.engine.offline.offline_auto_shrink() )
+
+
      # OFFLINE
      layout1 = QGridLayout(self.ops_offline) #pages[3])
      #btn1 = QPushButton("Load spot image")
@@ -1194,14 +1219,6 @@ class NextWaveMainWindow(QMainWindow):
      btn = QPushButton("Auto simple")
      layout1.addWidget(btn,6,0)
      btn.clicked.connect(lambda: self.engine.offline.offline_auto_dumb() )
-
-     btn = QPushButton("Auto shrink")
-     layout1.addWidget(btn,6,1)
-     btn.clicked.connect(lambda: self.engine.offline.offline_auto_shrink() )
-
-     btn = QPushButton("Auto shrink1")
-     layout1.addWidget(btn,6,2)
-     btn.clicked.connect(lambda: self.engine.offline.offline_auto_shrink1() )
 
      # Offline scroll image:
      self.scroll_off = QScrollArea()
@@ -1265,6 +1282,10 @@ class NextWaveMainWindow(QMainWindow):
     #msgBox.repaint()
     #msgBox.update()
     self.engine.do_calibration(self.calibration_status)
+
+ def boxsize_changed(self):
+    self.engine.init_params( {'box_size_pixel': self.widget_boxsize.value() })
+    #self.engine.make_searchboxes() #cx,cy,pupil_radius_pixel=self.size/2.0*1000/self.ccd_pixel)
     
  def slider_threshold_changed(self):
      scaled = self.slider_threshold.value()/100.0
@@ -1444,6 +1465,7 @@ class NextWaveMainWindow(QMainWindow):
     pupil_diam = float(self.line_pupil_diam.text() )
     self.engine.init_params( {'pupil_diam': pupil_diam})
     self.engine.make_searchboxes() #cx,cy,pupil_radius_pixel=self.size/2.0*1000/self.ccd_pixel)
+    self.widget_boxsize.setValue(self.engine.box_size_pixel)
 
     ##if self.sockets is None:
         #self.sockets = NextwaveSocketComm(self)
