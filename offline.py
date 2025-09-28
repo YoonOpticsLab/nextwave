@@ -665,17 +665,24 @@ class NextwaveOffline():
         self.iterative_run_good()
         #self.saver.save1(nframe)        
 
+    def offline_auto1(self,nframe):
+        # Load
+        print(nframe, "1")
+        self.parent.ui.offline_curr=nframe
+        self.parent.offline_frame(self.parent.ui.offline_curr)
+        print(nframe, "2", flush=True)
+        #Process
+        self.iterative_run_good()
+        #self.offline_centroids(conservative_threshold=True) # Now redo, with less conservative
+        print(nframe, "3", flush=True)
+        self.offline_auto_shrink()
+        #Save
+        print(nframe, "4", flush=True)
+        self.saver.save1(nframe)
+            
     def offline_autoall(self):
         for nframe in np.arange(self.max_frame):
-            # Load
-            self.parent.ui.offline_curr=nframe
-            self.parent.offline_frame(self.parent.ui.offline_curr)
-            #Process
-            self.iterative_run_good()
-            #self.offline_centroids(conservative_threshold=True) # Now redo, with less conservative
-            self.offline_auto_shrink()
-            #Save
-            self.saver.save1(nframe)
+            self.offline_auto1(nframe)
         self.saver.serialize()
     
     def offline_auto_dumb(self):
@@ -684,10 +691,7 @@ class NextwaveOffline():
             self.parent.ui.offline_curr=nframe
             self.parent.offline_frame(self.parent.ui.offline_curr)
             self.offline_centroids()
-            self.saver.save1(nframe)
-            
-            self.parent.ui.update_ui()
-            self.parent.ui.repaint()            
+            self.saver.save1(nframe)         
         self.saver.serialize()
 
 # iterative_size is size on sensor
@@ -696,7 +700,7 @@ class NextwaveOffline():
         pupil_diam = pupil_diam * self.parent.pupil_mag
         self.iterative_size = pupil_diam
         self.iterative_size_pixels = self.iterative_size/2.0 * 1000 / self.parent.ccd_pixel
-        self.parent.ui.line_pupil_diam.setText('%2.2f'%(self.iterative_size ) ) 
+        self.parent.ui.line_pupil_diam.setText('%2.2f'%(self.iterative_size ) )
         # pupil_diam is the size on sensor, so divide by mag (because init code multiplies by mag)
         self.parent.init_params( { 'pupil_diam': pupil_diam / self.parent.pupil_mag } ) # Back to real pupil size
         self.parent.make_searchboxes() 
@@ -732,8 +736,8 @@ class NextwaveOffline():
         self.parent.shift_search_boxes(zs,from_dialog=False) 
         
         # Dangerous/maybe doesn't work without new thread
-        self.parent.ui.update_ui()
-        self.parent.ui.repaint()  
+        #self.parent.ui.update_ui()
+        #self.parent.ui.repaint()  
 
     def convex_hull_robust(self,dynamic_threshold=False):
         # Try random subsamples to omit outliers
@@ -918,10 +922,10 @@ class NextwaveOffline():
             np.save('im_crop',self.im_smooth_cropped) # DBG
 
     def offline_startbox(self):
-        try:
-            self.parent.box_x 
-        except:
-            self.parent.ui.mode_init() # Call init if needed
+       # try:
+       #     self.parent.box_x 
+       # except:
+       #     self.parent.ui.mode_init() # Call init if needed
 
         self.iterative_size = float(self.parent.ui.it_start.text()) * self.parent.pupil_mag
         self.iterative_size_pixels = self.iterative_size/2.0 * 1000 / self.parent.ccd_pixel
@@ -948,15 +952,13 @@ class NextwaveOffline():
         self.iterative_size_pixels = self.iterative_size/2.0 * 1000 / self.parent.ccd_pixel
         self.offline_stepbox()
         self.parent.ui.line_pupil_diam.setText('%2.2f'%(self.iterative_size / self.parent.pupil_mag) ) #+step) )
-
+        
     def iterative_run_good(self):
         self.offline_startbox()
 
         #self.engine.offline.iterative_max_pixels = float(self.it_stop.text())/2.0 * 1000 / self.engine.ccd_pixel
         while self.iterative_size_pixels < self.iterative_max_pixels:
             self.iterative_step_good()
-            self.parent.ui.update_ui()
-            self.parent.ui.repaint()
 
             s="Frame %02d/%02d; %04d boxes. %04d zern terms. Pupil: %02.2f/%02.2f"%(self.parent.ui.offline_curr, self.max_frame,
                                                                                     self.parent.num_boxes, self.parent.zterms_full.shape[0], self.iterative_size, self.iterative_max )

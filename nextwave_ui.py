@@ -5,6 +5,7 @@ from PyQt5.QtWidgets import (QMainWindow, QLabel, QSizePolicy, QApplication, QPu
 from PyQt5.QtGui import QPixmap, QImage, QPainter, QPen, QFont
 from PyQt5.QtCore import Qt, QTimer, QEvent, QLineF, QPointF, pyqtSignal 
 from PyQt5.QtCore import QSettings
+import PyQt5.QtWidgets as QtWidgets
 import PyQt5.QtGui as QtGui
 import PyQt5.QtCore as QtCore
 
@@ -42,6 +43,36 @@ def clear_widget_list(layout1,nkeep=0):
    widget1 = layout1.itemAt(idx).widget()
    widget1.setParent(None) # Removes the widget
 
+
+class OfflineWorker(QtCore.QObject):
+    finished = QtCore.pyqtSignal()
+    progress = QtCore.pyqtSignal(int)
+    
+    def __init__(self,ui_parent):
+        super().__init__(parent=None)
+        self.ui = ui_parent
+        self.running = False
+        self.cancel = False
+
+    def do_finished(self):
+        # Move ourselves back to the main thread (main will delete on finished signal handler)
+        mainThread = self.ui.app.instance().thread()
+        self.moveToThread(mainThread)
+        self.finished.emit() 
+
+    def do_auto(self):
+        self.running = True
+        self.engine = self.ui.engine
+        
+        for nframe in np.arange(self.engine.offline.max_frame):
+            self.progress.emit( nframe )
+            if self.cancel:
+                self.do_finished()
+                return
+            self.engine.offline.offline_auto1(nframe)
+        self.engine.offline.saver.serialize()
+        self.do_finished()
+        
 class NextWaveMainWindow(QMainWindow):
  def __init__(self):
     super().__init__(parent=None)
@@ -85,6 +116,9 @@ class NextWaveMainWindow(QMainWindow):
     self.it_stop_dirty=False
     self.center_dirty=False
 
+    self.worker = OfflineWorker(self)
+
+
  def params_json(self):
     f=open("./config.json")
     self.json_data = json.load(f)
@@ -97,7 +131,7 @@ class NextWaveMainWindow(QMainWindow):
 
     self.params = [
         {'name': 'UI', 'type': 'group', 'title':'User interface', 'children': [
-            {'name': 'update_rate', 'type': 'int', 'value': 500, 'title':'Display update rate (ms)', 'limits':[50,2000]},
+            {'name': 'update_rate', 'type': 'int', 'value': 200, 'title':'Display update rate (ms)', 'limits':[50,2000]},
             {'name': 'update_rate_dm', 'type': 'int', 'value': 100, 'title':'DM Display update rate (ms)', 'limits':[50,2000]},
             {'name': 'show_boxes', 'type': 'bool', 'value': True, 'title':'Show search boxes'}
         ]},
@@ -159,6 +193,48 @@ class NextWaveMainWindow(QMainWindow):
         self.mode_offline = True
         self.chkOfflineAlgorithm.setChecked(True)
         self.center_dirty = False
+        
+        self.offline_move(0) # Updates UI, etc.
+
+
+ def offline_finished(self):
+    self.worker.running = False
+    self.worker.cancel = False
+
+    self.thread.quit() # New thread for next time
+
+    self.btn_processing.setText("Auto process all frames")
+    self.btn_processing.setStyleSheet("background-color: none;")
+    self.btn_processing.setEnabled(True)
+    
+    self.progress_bar.setValue( 0 )
+               
+ def update_progress(self, value):
+    self.progress_bar.setValue(int(value/self.engine.offline.max_frame * 100))
+    self.btn_processing.setText("Processing: %d/%d (Click to CANCEL)"%(value+1, self.engine.offline.max_frame ) );
+    self.btn_processing.setStyleSheet("background-color: green;")
+    
+ def offline_autoall(self):
+    if self.worker.running:
+        self.worker.cancel = True # This will start a shutdown of current auto at next frame
+        
+        self.btn_processing.setText("CANCELING..");
+        self.btn_processing.setStyleSheet("background-color: yellow;")
+        self.btn_processing.setEnabled(False)
+        return
+        
+    self.thread = QtCore.QThread()
+    self.worker.moveToThread(self.thread)
+
+    self.thread.started.connect(self.worker.do_auto)
+    self.worker.finished.connect(self.offline_finished)
+    #self.worker.finished.connect(self.thread.quit)
+    #self.worker.finished.connect(self.worker.deleteLater) # Worker stays alive forever
+    self.thread.finished.connect(self.thread.deleteLater)
+    self.worker.progress.connect(self.update_progress)
+    
+    self.progress_bar.setValue(0)
+    self.thread.start() # Will start the OfflineWorker
 
  def offline_load_background(self):
     #ffilt='Movies (*.avi);; Binary files (*.bin);; BMP Images (*.bmp);; files (*.*)'
@@ -259,10 +335,10 @@ class NextWaveMainWindow(QMainWindow):
     #if self.get_param("UI","show_boxes"):
 
         searchbox_color = QtGui.QColor.fromRgb( *defaults.ui_searchbox_color)
-
         pen = QPen(searchbox_color, defaults.ui_searchbox_width, Qt.DotLine)
         painter.setPen(pen)
         BOX_BORDER=2
+        
         box_size_pixel = self.engine.box_size_pixel
         boxes1=[QLineF(self.engine.box_x[n]-box_size_pixel//2+BOX_BORDER, # top
                        self.engine.box_y[n]-box_size_pixel//2+BOX_BORDER,
@@ -359,8 +435,8 @@ class NextWaveMainWindow(QMainWindow):
         #for ncen,cen in enumerate(self.centroids_x):
             #if np.isnan(cen):
                 #print(ncen,end=' ')
-
-        pen = QPen(Qt.red, 1.0)
+        centroid_color = QtGui.QColor.fromRgb( *defaults.ui_centroid_color)
+        pen = QPen(centroid_color, defaults.ui_centroid_size)
         painter.setPen(pen)
         points_centroids=[QPointF(self.engine.centroids_x[n],self.engine.centroids_y[n]) for n in np.arange(self.engine.num_boxes)]
         painter.drawPoints(points_centroids)
@@ -722,10 +798,10 @@ class NextWaveMainWindow(QMainWindow):
   if self.offline_curr >= self.offline_nframes:
    self.offline_curr = self.offline_nframes-1
 
-  print("Offline move %d, curr=%d:/%d"%(n,self.offline_curr,self.offline_nframes) )
+  #print("Offline move %d, curr=%d:/%d"%(n,self.offline_curr,self.offline_nframes) )
   self.engine.offline_frame(self.offline_curr)
 
-  self.lbl_frame_curr.setText("%d/%d"%(self.offline_curr,self.offline_nframes-1) )
+  self.lbl_frame_curr.setText("Frame %d/%d"%(self.offline_curr,self.offline_nframes-1) )
 
   if restore_mode:
    self.engine.offline.offline_navigate()
@@ -773,17 +849,18 @@ class NextWaveMainWindow(QMainWindow):
      layout.addWidget(self.bar_plot,5)
      self.widget_centrals.setLayout(layout)
 
-     self.widget_displays = QWidget()
-     layout=QVBoxLayout(self.widget_displays)
-     layout.addWidget(QGroupBox('Pupil'))
-     #layout.addWidget(QGroupBox('DM'))
-     self.actuator_plot = ActuatorPlot(self)
-     self.actuator_plot.resize(200,200)
-     #layout.addWidget(QGroupBox('Wavefront'))
-     #layout.addWidget(QGroupBox('PSF'))
-     #self.ap = pg.plot()
-     #self.ap.addItem( self.actuator_plot )
-     layout.addWidget(self.actuator_plot)
+     if False: # Skip extra display windows
+         self.widget_displays = QWidget()
+         layout=QVBoxLayout(self.widget_displays)
+         layout.addWidget(QGroupBox('Pupil'))
+         #layout.addWidget(QGroupBox('DM'))
+         self.actuator_plot = ActuatorPlot(self)
+         self.actuator_plot.resize(200,200)
+         #layout.addWidget(QGroupBox('Wavefront'))
+         #layout.addWidget(QGroupBox('PSF'))
+         #self.ap = pg.plot()
+         #self.ap.addItem( self.actuator_plot )
+         layout.addWidget(self.actuator_plot)
 
      self.widget_controls = QWidget()
      layout=QVBoxLayout()
@@ -798,14 +875,19 @@ class NextWaveMainWindow(QMainWindow):
      layout_op = QVBoxLayout()
      self.ops_pupil = QGroupBox('Pupil')
      self.ops_pupil.setStyleSheet(":title {font-weight: bold}") # Doesn't work
+     
      layout_op.addWidget(self.ops_pupil)
      self.ops_source = QGroupBox('Camera/Source')
-     layout_op.addWidget(self.ops_source)
      self.ops_dm = QGroupBox('DM')
-     layout_op.addWidget(self.ops_dm)
+     self.ops_offline = QGroupBox('Offline')
+     if not self.offline_only:     
+        layout_op.addWidget(self.ops_source)
+        layout_op.addWidget(self.ops_dm)
+     else:
+        layout_op.addWidget(self.ops_offline)
      self.widget_op.setLayout(layout_op)
 
-     panel_names = ["Operation", "Settings", "Config", "Offline"]
+     panel_names = ["Operation", "Settings", "Config"] #, "Offline"]
      pages = [QWidget(tabs) for nam in panel_names]
      for n, tabnames in enumerate(panel_names):
          tabs.addTab(pages[n], tabnames)
@@ -879,45 +961,6 @@ class NextWaveMainWindow(QMainWindow):
      layout1.addWidget(btn,4,6)
      btn.clicked.connect(lambda: self.iterative_reset() )
 
-     btn = QPushButton("\u2190") # left arrow
-     layout1.addWidget(btn,5,1)
-     btn.clicked.connect(lambda: self.offline_move(-1,True) )
-
-     self.lbl_frame_curr = QLabel()
-     layout1.addWidget(self.lbl_frame_curr,5,0)
-
-     btn = QPushButton("\u2192") # right arrow
-     layout1.addWidget(btn,5,2)
-     btn.clicked.connect(lambda: self.offline_move (1,True) )
-
-     btn = QPushButton("Autoall")
-     layout1.addWidget(btn,5,5)
-     btn.clicked.connect(lambda: self.engine.offline.offline_autoall() )
-
-     btn = QPushButton("Manual1")
-     layout1.addWidget(btn,5,4)
-     btn.clicked.connect(lambda: self.engine.offline.offline_manual1() )
-
-     btn = QPushButton("Save")
-     layout1.addWidget(btn,5,6)
-     btn.clicked.connect(lambda: self.engine.offline.offline_serialize() )
-
-     btn = QPushButton("Dialog")
-     layout1.addWidget(btn,5,3)
-     btn.clicked.connect(lambda: self.engine.offline.show_dialog() )
-
-    # Dumb: Don't expand and shrink. Best for e.g. calibration images
-     btn = QPushButton("Auto simple")
-     layout1.addWidget(btn,6,5)
-     btn.clicked.connect(lambda: self.engine.offline.offline_auto_dumb() )
-
-     btn = QPushButton("Auto shrink")
-     layout1.addWidget(btn,6,4)
-     btn.clicked.connect(lambda: self.engine.offline.offline_auto_shrink() )
-
-     btn = QPushButton("Auto shrink1")
-     layout1.addWidget(btn,6,3)
-     btn.clicked.connect(lambda: self.engine.offline.offline_auto_shrink1() )
 
 #     btn = QPushButton("Dialog2")
      #layout1.addWidget(btn,6,3)
@@ -1100,7 +1143,7 @@ class NextWaveMainWindow(QMainWindow):
      layout.addWidget(self.text_stats)
 
      # OFFLINE
-     layout1 = QGridLayout(pages[3])
+     layout1 = QGridLayout(self.ops_offline) #pages[3])
      #btn1 = QPushButton("Load spot image")
      #btn1.setStyleSheet("color : orange")
      #layout1.addWidget(btn1,3,0,0,-1)
@@ -1118,6 +1161,48 @@ class NextWaveMainWindow(QMainWindow):
      self.btn_off_back.clicked.connect(self.offline_load_background)
      layout1.addWidget(self.btn_off_back, 2,0)
 
+     # OFfline iteration offline_next prev.
+     btn = QPushButton("\u2190") # left arrow
+     layout1.addWidget(btn,3,1)
+     btn.clicked.connect(lambda: self.offline_move(-1,True) )
+     self.lbl_frame_curr = QLabel()
+     layout1.addWidget(self.lbl_frame_curr,3,2)
+     btn = QPushButton("\u2192") # right arrow
+     layout1.addWidget(btn,3,3)
+     btn.clicked.connect(lambda: self.offline_move (1,True) )
+     
+     self.progress_bar = QtWidgets.QProgressBar(self)
+     layout1.addWidget(self.progress_bar,3,0)
+    
+     self.btn_processing = QPushButton("Auto process all frames")
+     layout1.addWidget(self.btn_processing,4,0)
+     self.btn_processing.clicked.connect(lambda: self.offline_autoall() )
+
+     btn = QPushButton("Process this frame")
+     layout1.addWidget(btn,4,1)
+     btn.clicked.connect(lambda: self.engine.offline.offline_manual1() )
+
+     btn = QPushButton("Save this frame")
+     layout1.addWidget(btn,4,2)
+     btn.clicked.connect(lambda: self.engine.offline.offline_serialize() )
+
+     btn = QPushButton("Dialog all frames")
+     layout1.addWidget(btn,5,0)
+     btn.clicked.connect(lambda: self.engine.offline.show_dialog() )
+
+    # Dumb: Don't expand and shrink. Best for e.g. calibration images
+     btn = QPushButton("Auto simple")
+     layout1.addWidget(btn,6,0)
+     btn.clicked.connect(lambda: self.engine.offline.offline_auto_dumb() )
+
+     btn = QPushButton("Auto shrink")
+     layout1.addWidget(btn,6,1)
+     btn.clicked.connect(lambda: self.engine.offline.offline_auto_shrink() )
+
+     btn = QPushButton("Auto shrink1")
+     layout1.addWidget(btn,6,2)
+     btn.clicked.connect(lambda: self.engine.offline.offline_auto_shrink1() )
+
      # Offline scroll image:
      self.scroll_off = QScrollArea()
      self.layout_off = QGridLayout()
@@ -1131,11 +1216,11 @@ class NextWaveMainWindow(QMainWindow):
      self.scroll_off.setWidget(self.widget_off)
      self.widget_off.setLayout(self.layout_off)
 
-     layout1.addWidget(self.scroll_off,3,0) #,-1,-1)
+     layout1.addWidget(self.scroll_off,7,0) #,-1,-1)
 
      self.chkOfflineAlgorithm = QCheckBox("Use offline algorithm")
      self.chkOfflineAlgorithm.stateChanged.connect(self.offline_algorithm)
-     layout1.addWidget(self.chkOfflineAlgorithm,5,0)
+     layout1.addWidget(self.chkOfflineAlgorithm,8,0)
 
      self.param_tree_offline = ParameterTree()
      self.param_tree_offline.setParameters(self.p_offline, showTop=False)
@@ -1144,7 +1229,7 @@ class NextWaveMainWindow(QMainWindow):
      self.widget_main = QWidget()
      layoutCentral = QHBoxLayout()
      layoutCentral.addWidget(self.widget_centrals, stretch=3)
-     layoutCentral.addWidget(self.widget_displays, stretch=2)
+     #layoutCentral.addWidget(self.widget_displays, stretch=2)
      layoutCentral.addWidget(self.widget_controls, stretch=1)
      self.widget_main.setLayout(layoutCentral)
 
