@@ -21,7 +21,7 @@ from scipy.optimize import minimize
 from skimage import filters
 
 # Rotation fix:
-import cv2 as cv
+#import cv2 as cv
 from numpy import fft
 from scipy.signal import find_peaks
 
