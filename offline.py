@@ -14,16 +14,13 @@ from scipy import ndimage
 
 import numpy.random as random
 
+from image_helpers import detect_rotation
+
 # Image processing:
 from scipy.ndimage import gaussian_filter
 from scipy.spatial import ConvexHull, convex_hull_plot_2d
 from scipy.optimize import minimize
 from skimage import filters
-
-# Rotation fix:
-#import cv2 as cv
-from numpy import fft
-from scipy.signal import find_peaks
 
 from fit_circle import circle_fitter
 import mmap
@@ -59,6 +56,7 @@ class info_saver():
             'est_y':self.offline.est_y,
             'cx':self.ui.cx,
             'cy':self.ui.cy,
+            'rotation':self.offline.rotations[nframe],
             'pupil_diam':self.engine.pupil_diam / self.engine.pupil_mag, # In pupil coords, not sensor
             'zernikes':self.engine.zernikes}
         self.data[nframe]=data_record
@@ -144,7 +142,9 @@ class NextwaveOffline():
         ssq=np.nansum( (self.circle(*p)-self.desired) **2 )
         return ssq
 
-    def offline_frame(self,nframe):
+    def offline_frame(self,nframe=None):
+        if nframe is None:
+            nframe = self.parent.ui.offline_curr
         #dims=np.zeros(2,dtype='uint16')
         #dims[0]=self.offline_movie[nframe].shape[0]
         #dims[1]=self.offline_movie[nframe].shape[1]
@@ -305,6 +305,7 @@ class NextwaveOffline():
 
             buf_movie = buf_movie[0:nf]
             self.fnames = self.fnames[0:nf]
+            self.rotations = [None]*nf
             
             print(pathname, self.condition, self.scan_dir, self.sub_id)
             print("Read %d frames of %dx%d"%(nf,f1.shape[0],f1.shape[1]) )
@@ -379,7 +380,9 @@ class NextwaveOffline():
             print("Read %d frames of %dx%d"%(nf,f1.shape[0],f1.shape[1]) )
             buf_movie=buf_movie[0:nf,:,:] # Trim to correct
             self.fnames = self.fnames[0:nf]
-            
+            self.rotations = [None]*nf
+
+            # Threshold anything too bright
             buf_movie[buf_movie >= defaults.SATURATION_MINIMUM] = 0
             
             self.offline_movie = buf_movie
@@ -940,8 +943,8 @@ class NextwaveOffline():
        #     self.parent.ui.mode_init() # Call init if needed
 
         self.iterative_size = float(self.parent.ui.it_start.text()) * self.parent.pupil_mag
-        self.iterative_size_pixels = self.iterative_size/2.0 * 1000 / self.parent.ccd_pixel
 
+        self.iterative_size_pixels = self.iterative_size/2.0 * 1000 / self.parent.ccd_pixel
         if not self.parent.ui.center_dirty:
             self.autocenter()
             # Is this circular? Where to get box centers from?
@@ -949,7 +952,7 @@ class NextwaveOffline():
             #self.parent.make_searchboxes() 
 
         if defaults.do_auto_rotation_fix:
-            self.offline_rotation_fix(self.im)
+            self.offline_rotation_fix()
 
         # Show the computed max in the box:
         if not self.parent.ui.it_stop_dirty:
@@ -990,52 +993,15 @@ class NextwaveOffline():
         self.good_idx=int(len(self.good_template)*0.6) # TODO
         #print("Goodbox", nbox,nframe,self.good_idx, patch.shape, self.box_size_pixel)
 
-    def offline_rotation_fix(self,img):
-        angls=defaults.rotation_fix_angles
-        powers=np.zeros( (2,len(angls)))
-
-        height,width=img.shape
-        # Find the largest term at 0 degrees to use as freq of interest
-        M = cv.getRotationMatrix2D((width/2,height/2),0,1)
-        res = cv.warpAffine(img,M, (width,height) )
-        sig=np.sum(res,0)
-        ft=fft.fft(sig)
-        smallest_candidate=10 # Can't be lower than this (large low Freq terms)
-        idx_good = np.argmax(ft[smallest_candidate:len(ft)//2])+smallest_candidate
-
-        # Get the right freq from dimensional component 
-        for nangle,angl1 in enumerate(angls):
-            M = cv.getRotationMatrix2D((width/2,height/2),angl1,1)
-            res = cv.warpAffine(img,M, (width,height) )
-            for dim in [0]:
-                margin_sum=np.sum(res,dim)
-                ft=fft.fft(margin_sum);
-                powers[dim,nangle] = np.abs(ft[idx_good])
-
-        # For now check horizontal only
-        for dim in [0]:
-            power1=powers[dim]
-            max_loc = np.argmax(power1)
-            max_peak = power1[max_loc]
-            angl1=angls[max_loc]
-            pks=find_peaks(power1)[0]
-            if len(pks)==1: # Only the one max
-                minor_peaks = power1.min()
-                second_peak = power1.min()
-            else:
-                minor_peaks = np.mean( power1[pks[pks != max_loc ]])
-                second_peak = np.max( power1[pks[pks != max_loc ]] )
-            ratio = max_peak / second_peak
-            if ratio > defaults.rotation_fix_min_peak_ratio:
-                print( "ROTATED ", dim, ratio, angl1 )
-                im1 = self.im
-                M = cv.getRotationMatrix2D((width/2,height/2),angl1,1)
-                rotated = cv.warpAffine(im1,M, (width,height) )
-
-                self.im = rotated
-                self.parent.comm.write_image(self.dims,rotated)
-                self.ui.image_pixels = rotated
-
+    def offline_rotation_fix(self):
+        if self.rotations[self.parent.ui.offline_curr] is None:
+            angle,img_rotated=detect_rotation(self.im, angls=defaults.rotation_fix_angles,
+                ratio_threshold=defaults.rotation_fix_min_peak_ratio)
+            self.rotations[self.parent.ui.offline_curr] = angle
+            if not (angle==0):
+                self.offline_movie[self.parent.ui.offline_curr] = img_rotated # Overwrite
+                self.offline_frame( ) # Updates some necessary local variables
+            
     def show_dialog_debug(self):
         self.parent.ui.offline_dialog.sc.axes.plot( self.box_metrics, 'x-', label='rands')
         self.parent.ui.offline_dialog.sc.axes.axhline( defaults.BOX_THRESH, color='r' )

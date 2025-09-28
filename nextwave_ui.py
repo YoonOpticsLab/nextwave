@@ -132,7 +132,7 @@ class NextWaveMainWindow(QMainWindow):
 
     self.params = [
         {'name': 'UI', 'type': 'group', 'title':'User interface', 'children': [
-            {'name': 'update_rate', 'type': 'int', 'value': 200, 'title':'Display update rate (ms)', 'limits':[50,2000]},
+            {'name': 'update_rate', 'type': 'int', 'value': 50, 'title':'Display update rate (ms)', 'limits':[50,2000]},
             {'name': 'update_rate_dm', 'type': 'int', 'value': 100, 'title':'DM Display update rate (ms)', 'limits':[50,2000]},
             {'name': 'show_boxes', 'type': 'bool', 'value': True, 'title':'Show search boxes'}
         ]},
@@ -196,7 +196,7 @@ class NextWaveMainWindow(QMainWindow):
         self.center_dirty = False
         
         self.offline_move(0) # Updates UI, etc.
-
+        self.btn_off_back.setText("Load Offline Background") # Reset this
 
  def offline_finished(self):
     self.worker.running = False
@@ -209,6 +209,7 @@ class NextWaveMainWindow(QMainWindow):
     self.btn_processing.setEnabled(True)
     
     self.progress_bar.setValue( 0 )
+    self.offline_move(0) # Updates UI 
                
  def update_progress(self, value):
     self.progress_bar.setValue(int(value/self.engine.offline.max_frame * 100))
@@ -235,7 +236,7 @@ class NextWaveMainWindow(QMainWindow):
     self.worker.progress.connect(self.update_progress)
     
     self.progress_bar.setValue(0)
-    self.thread.start() # Will start the OfflineWorker
+    self.thread.start() # Will start the OfflineWorker & call do_auto
 
  def offline_load_background(self):
     #ffilt='Movies (*.avi);; Binary files (*.bin);; BMP Images (*.bmp);; files (*.*)'
