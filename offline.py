@@ -682,17 +682,13 @@ class NextwaveOffline():
 
     def offline_auto1(self,nframe):
         # Load
-        print(nframe, "1")
         self.parent.ui.offline_curr=nframe
         self.parent.offline_frame(self.parent.ui.offline_curr)
-        print(nframe, "2", flush=True)
         #Process
         self.iterative_run_good()
         #self.offline_centroids(conservative_threshold=True) # Now redo, with less conservative
-        print(nframe, "3", flush=True)
         self.offline_auto_shrink()
         #Save
-        print(nframe, "4", flush=True)
         self.saver.save1(nframe)
             
     def offline_autoall(self):
@@ -1014,9 +1010,11 @@ class NextwaveOffline():
         
     def show_dialog(self):
         self.parent.ui.offline_dialog.sc.axes.clear();
+    
+        keys = sorted( self.saver.data.keys() )
 
-        diams=np.array([self.saver.data[key1]['pupil_diam'] for key1 in self.saver.data.keys()])
-        zerns=np.array([self.saver.data[key1]['zernikes'][0:5] for key1 in self.saver.data.keys()])
+        diams=np.array([self.saver.data[key1]['pupil_diam'] for key1 in keys ])
+        zerns=np.array([self.saver.data[key1]['zernikes'][0:5] for key1 in keys ])
 
         diams = diams / self.parent.pupil_mag # Convert to real "pupil space", not "sensor space"
         
@@ -1032,9 +1030,10 @@ class NextwaveOffline():
         cylinder = (4.0 * sqrt6 / radius2) * np.sqrt((z3 * z3) + (z5 * z5))
         sphere = (-4.0 * sqrt3 / radius2) *z4 - 0.5 * cylinder
 
-        self.parent.ui.offline_dialog.sc.axes.plot( J45, 'x-', label='J45')
-        self.parent.ui.offline_dialog.sc.axes.plot( J180, 's-', label='J180')
-        self.parent.ui.offline_dialog.sc.axes.plot( sphere, 'o-', label='Sphere')
+        xvalues = np.array(keys) + 1 # To one-based
+        self.parent.ui.offline_dialog.sc.axes.plot( xvalues, J45, 'x-', label='J45')
+        self.parent.ui.offline_dialog.sc.axes.plot( xvalues, J180, 's-', label='J180')
+        self.parent.ui.offline_dialog.sc.axes.plot( xvalues, sphere, 'o-', label='Sphere')
         self.parent.ui.offline_dialog.sc.axes.legend(loc='best', fontsize=16)
         self.parent.ui.offline_dialog.sc.axes.set_xlabel('Frame #', fontsize=16)
         self.parent.ui.offline_dialog.sc.axes.set_ylabel('Diopters', fontsize=16)
