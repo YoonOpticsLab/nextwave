@@ -924,7 +924,7 @@ class NextWaveMainWindow(QMainWindow):
      layout1.addWidget(self.chkMove,1,5,alignment=Qt.AlignCenter)
      btnD.clicked.connect(lambda: self.move_center(0,1) )
 
-     self.chkMove.clicked.connect(lambda: self.set_m(self.chkMove.isChecked()) )
+     self.chkMove.clicked.connect(lambda: self.set_move_amount(self.chkMove.isChecked()) )
 
      lbl = QLabel("Center X:")
      layout1.addWidget(lbl,0,0)
@@ -1055,7 +1055,6 @@ class NextWaveMainWindow(QMainWindow):
      btn = QPushButton("Do zero")
      btn.clicked.connect(self.zero_do)
      layout1.addWidget(btn, 0,2 )
-
 
      self.widget_mode_buttons = QWidget()
      layoutStatusButtons = QHBoxLayout(self.widget_mode_buttons)
@@ -1206,8 +1205,12 @@ class NextWaveMainWindow(QMainWindow):
      layout1.addWidget(self.btn_processing,4,0)
      self.btn_processing.clicked.connect(lambda: self.offline_autoall() )
 
+     btn = QPushButton("Autorotate this frame")
+     layout1.addWidget(btn,1,2)
+     btn.clicked.connect(lambda: self.engine.offline.offline_rotation_fix() )
+
      btn = QPushButton("Process this frame")
-     layout1.addWidget(btn,4,1)
+     layout1.addWidget(btn,6,1)
      btn.clicked.connect(lambda: self.engine.offline.offline_manual1() )
 
      btn = QPushButton("Save this frame")
@@ -1287,7 +1290,7 @@ class NextWaveMainWindow(QMainWindow):
     self.engine.do_calibration(self.calibration_status)
 
  def boxsize_changed(self):
-    self.engine.init_params( {'box_size_pixel': self.widget_boxsize.value() })
+    self.engine.init_params( {'box_size_pixel': self.widget_boxsize.value(), 'pupil_diam':None })
     #self.engine.make_searchboxes() #cx,cy,pupil_radius_pixel=self.size/2.0*1000/self.ccd_pixel)
     
  def slider_threshold_changed(self):
@@ -1329,9 +1332,9 @@ class NextWaveMainWindow(QMainWindow):
  def autoshift_search_boxes(self):
      self.engine.autoshift_search_boxes()
 
- def set_m(self, doit):
+ def set_move_amount(self, doit):
      if doit:
-         self.m = round( self.engine.box_size_pixel )
+         self.m = round( self.engine.lenslet_size_pixel )
      else:
          self.m=1
 

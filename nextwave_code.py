@@ -85,6 +85,9 @@ class NextwaveEngine():
 
         if overrides:
             self.pupil_diam=overrides.get('pupil_diam',self.pupil_diam)
+            if self.pupil_diam == None: # SEt to None sometimes (e.g. box size change)
+                val=float( self.ui.line_pupil_diam.text() )
+                self.pupil_diam = val            
 
         # New method, not used much yet:
         self.params = OpticsParams(self.ccd_pixel, self.pupil_diam, self.pupil_mag, self.box_um, self.focal)
@@ -96,12 +99,13 @@ class NextwaveEngine():
         self.pupil_radius_mm=self.pupil_diam / 2.0
         self.pupil_radius_pixel=self.pupil_radius_mm * 1000 / self.ccd_pixel
         self.box_size_pixel=self.box_um / self.ccd_pixel
+        self.lenslet_size_pixel=self.box_um / self.ccd_pixel # Never overridden: for UI move!
 
         if overrides:
             self.box_size_pixel=overrides.get('box_size_pixel',self.box_size_pixel)
 
         self.ri_ratio = self.pupil_radius_pixel / self.box_size_pixel
-        #print( "Init:", self.box_size_pixel, self.pupil_radius_pixel, self.ri_ratio )
+        #print( "Init:", self.pupil_diam, self.box_size_pixel, self.pupil_radius_pixel, self.ri_ratio )
 
         bytez =np.array([self.ccd_pixel, self.box_um, self.pupil_radius_mm], dtype='double').tobytes() 
 

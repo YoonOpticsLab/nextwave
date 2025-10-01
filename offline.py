@@ -81,13 +81,18 @@ class info_saver():
         self.engine.zernikes = data_record['zernikes']
 
         self.engine.num_boxes = len( self.engine.centroids_x)
+        
+        # UPDATE UI. TODO. Ambivalent this should be here...
+        self.ui.line_pupil_diam.setText('%2.2f'%(self.engine.pupil_diam / self.engine.pupil_mag ) )
+
         return data_record
 
     def printable1(self,nframe):
         data_record=self.load1(nframe)
         if not data_record is None:
             try:
-                s=("%s,%s,%s,%0.2f,%0.3f,%d,%d,")%(self.offline.sub_id,self.offline.scan_dir,self.offline.fnames[nframe],defaults.scan_frame_to_ecc[self.offline.scan_dir][nframe],data_record['pupil_diam'],data_record['cx'],data_record['cy'])
+                s=("%s,%s,%s,%0.2f,%0.3f,%d,%d,")%(self.offline.sub_id,self.offline.scan_dir,self.offline.fnames[nframe],
+                defaults.scan_frame_to_ecc[self.offline.scan_dir][nframe],data_record['pupil_diam'],data_record['cx'],data_record['cy'])
             except: # without the sub_id params
                 s=("%s,%s,%d,%0.2f,%0.3f,%d,%d,")%("","",nframe,0.0,data_record['pupil_diam'],data_record['cx'],data_record['cy'])
             for nz1,z1 in enumerate(data_record['zernikes']):
@@ -745,10 +750,7 @@ class NextwaveOffline():
         else:
             pass
         self.parent.shift_search_boxes(zs,from_dialog=False) 
-        self.parent.ui.widget_boxsize.setValue(self.parent.box_size_pixel)
-        # Dangerous/maybe doesn't work without new thread
-        #self.parent.ui.update_ui()
-        #self.parent.ui.repaint()  
+        self.parent.ui.widget_boxsize.setValue(self.parent.box_size_pixel) 
 
     def convex_hull_robust(self,dynamic_threshold=False):
         # Try random subsamples to omit outliers
