@@ -11,6 +11,7 @@ struct shmem_log_entry {
   double time2;
 
   uint8_t im[MAX_IMAGE_SIZE];
+  uint8_t centroids_valid[MAX_BOXES];
   double centroid_x[MAX_BOXES];
   double centroid_y[MAX_BOXES];
   double mirrors[MAX_ACTUATORS];

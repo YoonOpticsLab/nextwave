@@ -35,6 +35,8 @@ from threading import Thread
 
 from zernike_functions import calc_rms
 
+import scipy # For scipy.stats.mode: auto background
+
 import xml.etree.ElementTree as ET
 
 WINDOWS=(os.name == 'nt')
@@ -197,7 +199,7 @@ class NextWaveMainWindow(QMainWindow):
  def update_ui(self):
 
     image_pixels = self.engine.receive_image()
-    self.image_pixels = image_pixels
+    self.image_pixels = np.log10(image_pixels) / np.log10(255) * 255
     
     if not self.mode_offline and not self.offline_only: # TODO: Put offline intelligence into engine itself
       self.engine.receive_centroids()
@@ -876,10 +878,12 @@ class NextWaveMainWindow(QMainWindow):
      btnBackSet = QPushButton("Set background")
      layout1.addWidget(btnBackSet,0,1)
      btnBackSet.clicked.connect(self.set_background) 
-
      self.chkReplaceSubtract = QCheckBox("Replace subtracted")
      self.chkReplaceSubtract.stateChanged.connect(self.replace_background)
      layout1.addWidget(self.chkReplaceSubtract,0,2)
+     btn1 = QPushButton("Background AUTO")
+     layout1.addWidget(btn1,0,3)
+     btn1.clicked.connect(self.set_background_auto) 
 
      self.slider_threshold = QSlider(orientation=Qt.Horizontal)
      self.slider_threshold.setMinimum(0) # TODO: Get from camera
@@ -1270,6 +1274,12 @@ class NextWaveMainWindow(QMainWindow):
         self.sockets.centroiding.send(b"B\x00")
     else:
         self.sockets.centroiding.send(b"b\x00")
+        
+ def set_background_auto(self):
+    mode1= scipy.stats.mode( self.engine.image_bytes.flatten() )
+    print( mode1 )
+    self.sockets.centroiding.send(b"s=%d"%mode1[0])
+    
  def set_background(self):
     self.sockets.centroiding.send(b"S\x00")
  def replace_background(self):

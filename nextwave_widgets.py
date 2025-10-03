@@ -130,6 +130,11 @@ class BoxInfoDialog(QDialog):
             line1 += "(%f)"%self.ui_parent.engine.box_metrics[n]
         except:
             pass
+        try:
+            
+            line1 += "(%f)"%(self.ui_parent.engine.centroids_valid[n] )
+        except:
+            pass
         self.text_num.setText(line1)
         self.text_box.setText("box center=(%0.3f,%0.3f)"%(box_x,box_y))
         self.text_centroid.setText("centroid=(%0.3f,%0.3f) {%+0.3f,%+0.3f}"%(centroid_x_abs,centroid_y_abs,

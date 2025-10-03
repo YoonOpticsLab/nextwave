@@ -427,14 +427,12 @@ class NextwaveEngine():
 
         # DRC: x and y were switched here 2025/05/29. Hmm, Not so sure 9/14/25
         slope = np.concatenate( (spot_displace_y, spot_displace_x)) * (self.ccd_pixel/self.focal);
+        coeff=np.matmul(self.zterms_full,slope)
+        self.zernikes=coeff[zernike_functions.CVS_to_OSA_map[0:len(coeff)]] # Return value will is OSA
 
         self.spot_displace_x = spot_displace_x # debugging
         self.spot_displace_y = spot_displace_y
         self.slope = slope
-
-        coeff=np.matmul(self.zterms_full,slope)
-        self.zernikes=coeff[zernike_functions.CVS_to_OSA_map[0:len(coeff)]] # Return value will is OSA
-
         #print ("CompZ spot means:",np.mean(self.spot_displace_x), np.mean(self.spot_displace_y))
 
     def autoshift_searchboxes(self):

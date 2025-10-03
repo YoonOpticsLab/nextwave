@@ -39,6 +39,8 @@ uint8_t bDoReplaceSubtracted=0;
 uint8_t bDoThreshold=0;
 uint8_t bBackgroundSet=0; // First time
 
+int16_t autoBack=-1;
+
 float fThreshold=0.0;
 float fGain=1.0;
 
@@ -183,7 +185,8 @@ void init_buffers(int width, int height, int box_size, int nboxes) {
 	};
 }
 
-#define EXTENT 8
+#define EXTENT 6
+// Submask will comprise up to (extent*2+1) on each side  ( -EXTENT to middle pixel to +EXTENT )
 
 void rcv_boxes(int width) {
 
@@ -307,6 +310,9 @@ PLUGIN_API(centroiding,init,char *params)
 	  }
   }
 
+  af::info();
+  //af::deviceInfo();
+	
   plugin_access_shmem();
   pShmem = (struct shmem_header*) shmem_region1.get_address();
   
@@ -323,6 +329,7 @@ PLUGIN_API(centroiding,init,char *params)
 // https://github.com/arrayfire/arrayfire/issues/1405;
 int find_centroids_af(unsigned char *buffer, int width, int height) {
 	
+	// Image is a 64-bit float (0-1.0)
 	gaf->im = af::array(width, height, buffer).as(f64);
 	gaf->im = af::transpose( gaf->im );
 	gaf->im /= 255.0;
@@ -337,10 +344,17 @@ int find_centroids_af(unsigned char *buffer, int width, int height) {
     gaf->im_background/= 255.0;
     bDoSetBackground=0;
   }
+  if (autoBack>=0) {
+	// Setting a mean singleton for the entire image (e.g. mode of any spot image)
+    gaf->im_background = af::array(width, height, buffer).as(f64);
+    gaf->im_background = gaf->im_background * 0 + autoBack;
+    gaf->im_background/= 255.0;
+    autoBack = -1;
+  }
 
   if (bDoSubtractBackground) {
     gaf->im -= gaf->im_background;
-	// Some may go negative, which should get thresholded below
+    gaf->im(gaf->im<0) = 0;
   }
   
   // Threshold pixels: (could also binarize )
@@ -353,6 +367,10 @@ int find_centroids_af(unsigned char *buffer, int width, int height) {
   gaf->im_subtracted_u8 *= 255.0;
   gaf->im_subtracted_u8 = af::transpose(gaf->im_subtracted_u8).as(u8);
 
+  // Sorry, need to zero out the zeroth entry, since we might use that with in the mask
+  // to get rid of unwanted pixels.
+  gaf->im(0) = 0;
+  
   uint8_t *host_im_subtracted_u8 = gaf->im_subtracted_u8.host<uint8_t>();
 
   if (bDoReplaceSubtracted) {
@@ -411,7 +429,7 @@ int find_centroids_af(unsigned char *buffer, int width, int height) {
     //spdlog::info("max0={}", idx0 );
     //af_print(max_indices(af::seq(2))); 
 	
-	// Submax for each box will comprise the appropriate mask for its Max pixel
+	// Submask for each box will comprise the appropriate mask for its Max pixel
 	box_masks = gaf->submask(af::span, max_indices );
 	
 	// Disable MAX sub-boxing: (Make all full-mask masks.)
@@ -431,7 +449,7 @@ int find_centroids_af(unsigned char *buffer, int width, int height) {
 #endif //0	
 	
 	gaf->sums = af::sum( gaf->im2 * box_masks, 0);
-
+	
 	// Sum all pixels divide by total to get center of mass
 	gaf->sums_x = af::sum( gaf->x_reshape * box_masks, 0) / gaf->sums;
 	gaf->sums_y = af::sum( gaf->y_reshape * box_masks, 0) / gaf->sums;
@@ -439,8 +457,6 @@ int find_centroids_af(unsigned char *buffer, int width, int height) {
   gaf->sums_x(afOmits) = af::NaN;
   gaf->sums_y(afOmits) = af::NaN; 
 
-  CALC_TYPE *host_x = gaf->sums_x.host<CALC_TYPE>();
-  CALC_TYPE *host_y = gaf->sums_y.host<CALC_TYPE>();
 
   // Compute deltas and write to shmem
   gaf->delta_x = gaf->sums_x - gaf->ref_x;
@@ -449,15 +465,27 @@ int find_centroids_af(unsigned char *buffer, int width, int height) {
   // TODO: Might this be slow?
   memcpy(gpShmemLog[gpShmemHeader->log_index].im, host_im_subtracted_u8, sizeof(uint8_t)*width*height);
 
-  // Indexes of box numbers that are okay
-  af::array valids = !af::isNaN (gaf->sums_x) && !af::isInf (gaf->sums_x) ; // BOOL array
+  af::array metrics = gaf->sums / af::sum( gaf->im2, 0);
+
+  // Indexes of box numbers that are okay ; // BOOL array
+  //af::array valids = !af::isNaN (gaf->sums_x) && !af::isInf (gaf->sums_x) &&
+  af::array valids2;
+  af::array minimum_thresh = gaf->sums / (EXTENT*EXTENT*2*2);
+  af::array valids = (metrics >= 0.5) && (minimum_thresh>0.04) && !af::isNaN (gaf->sums_x) && !af::isInf (gaf->sums_x); 
   af::array idx_valid=af::where(valids); // Array of non-zeros
-  af::array valids2; // Later, stacking valid (x,y)s for recon matrix
+  
+  //uint8_t *host_valids = (af::mean( gaf->im2, 0)*255).as(u8).host<uint8_t>(); // To see the metric
+  uint8_t *host_valids = (valids*100.0).as(u8).host<uint8_t>(); // To see the metric
+  memcpy(pShmemBoxes->centroid_valid, host_valids, sizeof(uint8_t)*num_boxes); // 8 bits per box
+
+  gaf->sums_x( af::where(!valids) ) = af::NaN;
+  CALC_TYPE *host_x = gaf->sums_x.host<CALC_TYPE>();
+  CALC_TYPE *host_y = gaf->sums_y.host<CALC_TYPE>();
 
   af::dim4 dims=idx_valid.dims();
   if (dims[0]==0 ) {
-	spdlog::info("{} {}",dims[0], dims[1]);
-	  goto free_afterwards;
+	spdlog::info("No valid. Skipping. {} {}",dims[0], dims[1]);
+	goto free_afterwards;
   }
  // Check that valids are okay
  
@@ -469,15 +497,18 @@ int find_centroids_af(unsigned char *buffer, int width, int height) {
   //gaf->delta_x(nans) = 0.0;
   //gaf->delta_y(nans) = 0.0;
 
+
   CALC_TYPE *host_delta_x = gaf->delta_x.host<CALC_TYPE>();
   CALC_TYPE *host_delta_y = gaf->delta_y.host<CALC_TYPE>();
   //memcpy(pShmemBoxes->delta_x, host_delta_x, sizeof(CALC_TYPE)*num_boxes);
   //memcpy(pShmemBoxes->delta_y, host_delta_y, sizeof(CALC_TYPE)*num_boxes);
 
+  if (0) {
   // If want to log deltas:
   memcpy(gpShmemLog[gpShmemHeader->log_index].centroid_x, host_delta_x, sizeof(CALC_TYPE)*num_boxes);
   memcpy(gpShmemLog[gpShmemHeader->log_index].centroid_y, host_delta_y, sizeof(CALC_TYPE)*num_boxes);
-
+  }
+  
   // Interleave x and y slopes. Stack them side-by-side, transpose then flatten.
   // This is correct because they are arrays with dimensions (1,x)
   gaf->slopes = af::join(0, gaf->delta_x, gaf->delta_y); 
@@ -494,7 +525,7 @@ int find_centroids_af(unsigned char *buffer, int width, int height) {
 	//spdlog::info("{} {} {}",(float)af::max<float>(gaf->mirror_voltages), (float)af::max<float>(gaf->slopes(valids2)), idx_valid.dims(0) );
   }
   //gaf->mirror_voltages = af::matmul(gaf->slopes, (gaf->influence_inv) );
-
+  
 
 // DEBUGGING
   //af::array idx_double;
@@ -594,6 +625,11 @@ void process_ui_commands(void) {
       spdlog::info("S!");
       bDoSetBackground=1;
       break;
+	case 's':
+      autoBack = atoi(msg+2);
+      spdlog::info("s={}",autoBack);
+      break;
+	
     case 'R':
       spdlog::info("R!");
       bDoReplaceSubtracted=1;

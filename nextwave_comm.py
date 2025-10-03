@@ -293,6 +293,8 @@ class NextwaveEngineComm():
         buf=self.shmem_boxes.read(self.parent.nActuators*SIZEOF_DOUBLE)
         self.mirror_voltages=np.array( struct.unpack_from(''.join((['d']*self.parent.nActuators)), buf) )
 
+        self.parent.centroids_valid = np.frombuffer(self.shmem_boxes, dtype=np.uint8, offset=fields['centroid_valid']['bytenum_current'], count=num_boxes)
+
         # Debugging
         self.shmem_boxes.seek(fields['box_x_normalized']['bytenum_current'])
         buf=self.shmem_boxes.read(num_boxes*SIZEOF_DOUBLE)

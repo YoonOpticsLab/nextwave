@@ -295,9 +295,17 @@ int main(int argc, char** argv)
 
   pShmem1->frames_left=-1; // Since unsigned, this will actually be a huge number
 
+#define START_TIMEOUT 10 // Automatically stop if we don't start within 10 seconds
+  boost::chrono::high_resolution_clock::time_point time_wait_sync = boost::chrono::high_resolution_clock::now();
   while ( pShmem1->mode==MODE_OFF || pShmemBoxes->num_boxes==0 ) {
     // sleep until the UI is ready to tell us to do something
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    boost::chrono::high_resolution_clock::time_point time_now = boost::chrono::high_resolution_clock::now();
+	boost::chrono::duration<double>time_waiting = (time_now - time_wait_sync);
+	if (time_waiting.count() > START_TIMEOUT) {
+		spdlog::error("Timeout waiting for UI" );
+		goto exit;
+	}
   }
 
   // TODO: Call proper init here somehow?
@@ -453,6 +461,7 @@ int main(int argc, char** argv)
       //}
     }
 
+exit:
   // iterate the array
   for (struct module it: listModules) {
 	char str_nothing[64] = ""; //.c_str();
