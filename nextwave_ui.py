@@ -954,6 +954,10 @@ class NextWaveMainWindow(QMainWindow):
      btn.clicked.connect(lambda: self.show_zernike_dialog("Shift references", self.engine.shift_references ) )
      layout1.addWidget(btn, 2,0 )
 
+     btn = QPushButton("Activate Metric")
+     btn.clicked.connect(self.activate_metric)
+     layout1.addWidget(btn, 3,0 )
+
      self.chkFollow = QCheckBox("Boxes follow centroids")
      self.chkFollow.stateChanged.connect(lambda:self.set_follow(self.chkFollow.isChecked()))
      layout1.addWidget(self.chkFollow, 1,3 )
@@ -1268,7 +1272,19 @@ class NextWaveMainWindow(QMainWindow):
          self.m = round( self.engine.box_size_pixel )
      else:
          self.m=1
-
+         
+ def activate_metric(self):
+    try:
+        self.metric_active = not self.metric_active
+    except:
+        self.metric_active = True
+        
+    # TODO: Don't allow subtract if it hasn't been set once
+    if self.metric_active:
+        self.sockets.centroiding.send(b"M\x00")
+    else:
+        self.sockets.centroiding.send(b"m\x00")
+ 
  def sub_background(self):
     # TODO: Don't allow subtract if it hasn't been set once
     if (self.chkBackSubtract.isChecked()):

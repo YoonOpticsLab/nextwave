@@ -38,6 +38,7 @@ uint8_t bDoSetBackground=0;
 uint8_t bDoReplaceSubtracted=0;
 uint8_t bDoThreshold=0;
 uint8_t bBackgroundSet=0; // First time
+uint8_t bUseMetric=0;
 
 int16_t autoBack=-1;
 
@@ -471,7 +472,12 @@ int find_centroids_af(unsigned char *buffer, int width, int height) {
   //af::array valids = !af::isNaN (gaf->sums_x) && !af::isInf (gaf->sums_x) &&
   af::array valids2;
   af::array minimum_thresh = gaf->sums / (EXTENT*EXTENT*2*2);
-  af::array valids = (metrics >= 0.5) && (minimum_thresh>0.04) && !af::isNaN (gaf->sums_x) && !af::isInf (gaf->sums_x); 
+  af::array valids;
+  if (bUseMetric)
+	valids = (metrics > 0.4) && (minimum_thresh>0.04) && !af::isNaN (gaf->sums_x) && !af::isInf (gaf->sums_x); 
+  else
+	valids = (metrics > 0.0) && (minimum_thresh>0.04) && !af::isNaN (gaf->sums_x) && !af::isInf (gaf->sums_x); 
+
   af::array idx_valid=af::where(valids); // Array of non-zeros
   
   //uint8_t *host_valids = (af::mean( gaf->im2, 0)*255).as(u8).host<uint8_t>(); // To see the metric
@@ -621,6 +627,7 @@ void process_ui_commands(void) {
       spdlog::info("b!");
       bDoSubtractBackground=0;
       break;
+	  
     case 'S':
       spdlog::info("S!");
       bDoSetBackground=1;
@@ -628,6 +635,13 @@ void process_ui_commands(void) {
 	case 's':
       autoBack = atoi(msg+2);
       spdlog::info("s={}",autoBack);
+      break;
+	
+    case 'M':
+      bUseMetric=1;
+      break;
+	case 'm':
+      bUseMetric=0;
       break;
 	
     case 'R':

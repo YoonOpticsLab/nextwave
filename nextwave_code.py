@@ -29,7 +29,7 @@ from PIL import Image, TiffImagePlugin
 WINDOWS=(os.name == 'nt')
 
 
-NACT_PER_NZERN=4
+NACT_PER_NZERN=0.5
 
 GAUSS_SD=3
 BOX_THRESH=2.5
