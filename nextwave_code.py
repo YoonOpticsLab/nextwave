@@ -396,7 +396,10 @@ class NextwaveEngine():
         self.ui.offline_dialog.sc.axes.clear();
         self.ui.offline_dialog.sc.axes.plot(np.arange(len(s))+1, s[0]/s, 'o-')
         self.ui.offline_dialog.sc.axes.axvline( self.modes, color='r' )
+        self.ui.offline_dialog.sc.axes.set_yscale('log')  # Set x-axis to logarithmic scale
+        
         self.ui.offline_dialog.sc.axes.set_ylim(0, s[0]/s[s>1e-10][-1]*1.25 )
+        
         self.ui.offline_dialog.sc.draw()
         self.ui.offline_dialog.show()
 

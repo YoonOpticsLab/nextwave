@@ -509,12 +509,13 @@ class NextWaveMainWindow(QMainWindow):
             itm=pg.ScatterPlotItem([ntrunc],[minval],symbol="arrow_down",size=40)
             self.bar_plot.addItem(itm)
 
-    if self.bar_plot.ylim_manual is None:
-        if not np.isnan(maxval):
-            lim = np.max( (np.abs(minval), np.abs(maxval)) )
-            self.bar_plot.setYRange(-lim, lim)
-    else:
-        self.bar_plot.setYRange(-self.bar_plot.ylim_manual, self.bar_plot.ylim_manual)
+    if False:
+        if self.bar_plot.ylim_manual is None:
+            if not np.isnan(maxval):
+                lim = np.max( (np.abs(minval), np.abs(maxval)) )
+                self.bar_plot.setYRange(-lim, lim)
+        else:
+            self.bar_plot.setYRange(-self.bar_plot.ylim_manual, self.bar_plot.ylim_manual)
 
     #self.bar_plot.getAxis('left').setTickSpacing(1, 0.1)
     #self.bar_plot.getAxis('left').setTickDensity(2)
