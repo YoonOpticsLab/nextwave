@@ -343,6 +343,36 @@ class NextwaveEngine():
         np.save('zpoly_20.npy',zpoly_20)
         np.save('zpoly_full.npy',zpoly_full)
 
+    def apply_zernikes(self,zs,from_dialog=True):
+        #print( zs )
+        if False:
+            dx,dy = self.get_deltas(np.array(zs),from_dialog)
+            slopes_desired = np.vstack( (-dx,dy) ).T.flatten()
+            slopes_desired *= (self.ccd_pixel/self.focal) # To undo whatever get_deltas is doing
+            slopes_desired /= (self.focal*1000/self.ccd_pixel) # This seems correct
+            act_new = np.matmul( self.influence_inv.T, slopes_desired )
+            self.comm.write_mirrors(act_new)
+        
+        if True:
+            # This is more like the static defocus that was working before:
+            dx,dy = self.get_deltas(np.array(zs),False)        
+            #dx -= np.mean(dx)
+            #dy -= np.mean(dy)
+            deltas1 = np.vstack( (dx,dy) ).T.flatten()
+            #deltas1 = np.hstack( (-dy,dx) )
+            #deltas1 *= (self.ccd_pixel/self.focal) # To undo whatever get_deltas is doing
+            deltas1 /= (self.focal*1000/self.ccd_pixel)
+            act_new = np.matmul ( deltas1, self.influence_inv )
+            self.comm.write_mirrors(-act_new)
+        
+#        self.comm.write_mirrors_offsets(-mirs)        
+        print( act_new )
+        #print( self.ui.zs_for_apply.value() )
+        # Displacements that would be expected from the current Zs (for ALL actuators)
+        #slopes_desired = np.matmul( zterms_inv, Zs )
+        
+        return
+        
     def update_influence(self):
         # if False: # Load Miniwave's inverse directly
             # influence = np.loadtxt(self.ui.json_data["params"]["influence_file"], skiprows=0)

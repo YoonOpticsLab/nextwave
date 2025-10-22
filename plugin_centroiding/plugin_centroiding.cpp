@@ -470,7 +470,7 @@ int find_centroids_af(unsigned char *buffer, int width, int height) {
   // Indexes of box numbers that are okay ; // BOOL array
   //af::array valids = !af::isNaN (gaf->sums_x) && !af::isInf (gaf->sums_x) &&
   af::array valids2;
-  af::array minimum_thresh = gaf->sums / (EXTENT*EXTENT*2*2);
+  af::array minimum_thresh = gaf->sums / ((EXTENT*2+1) * (EXTENT*2+1));
   af::array valids = (metrics >= 0.5) && (minimum_thresh>0.04) && !af::isNaN (gaf->sums_x) && !af::isInf (gaf->sums_x); 
   af::array idx_valid=af::where(valids); // Array of non-zeros
   

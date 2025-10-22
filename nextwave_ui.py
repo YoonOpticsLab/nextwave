@@ -1022,8 +1022,18 @@ class NextWaveMainWindow(QMainWindow):
      #btn = QPushButton("Defocus start")
      #btn.clicked.connect(self.engine.defocus_start )
      #layout1.addWidget(btn, 3,2 )
-     
 
+     btn1 = QPushButton("Apply Zs.")
+     layout1.addWidget(btn1,6,3)     
+#     btn1.clicked.connect(self.engine.apply_zernikes)
+     btn1.clicked.connect(lambda: self.show_zernike_dialog("Apply Zs", self.engine.apply_zernikes ) )
+     
+     self.zs_for_apply = QDoubleSpinBox()
+     self.zs_for_apply.setMinimum(1)
+     self.zs_for_apply.setMaximum(65)
+     self.zs_for_apply.setValue(20)     
+     layout1.addWidget(self.zs_for_apply,6,2)
+     
      self.widget_mode_buttons = QWidget()
      layoutStatusButtons = QHBoxLayout(self.widget_mode_buttons)
 

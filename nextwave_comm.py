@@ -230,7 +230,9 @@ class NextwaveEngineComm():
         self.shmem_boxes.seek(fields['mirror_voltages']['bytenum_current'])
         self.shmem_boxes.write(bytez)
         self.shmem_boxes.flush()
-
+        self.set_mode( 
+            self.read_mode() | 0x20 )  # MODE_FORCE_AO_START TODO. Possible race condition.
+            
     def write_mirrors_offsets(self,data):
         bytez =np.array(data, dtype="double").tobytes() 
         fields=self.layout_boxes[1] # TODO: fix
@@ -240,13 +242,9 @@ class NextwaveEngineComm():
 
     def zero_do(self):
         self.write_mirrors( np.zeros(97) ) # TODO: # of mirrors
-        self.set_mode( 
-            self.read_mode() | 0x20 )  # MODE_FORCE_AO_START TODO. Possible race condition.
 
     def flat_do(self):
         self.write_mirrors( self.mirror_state_flat )
-        self.set_mode( 
-            self.read_mode() | 0x20 )  # MODE_FORCE_AO_START TODO. Possible race condition.
         
     def flat_save(self):
         self.mirror_state_flat = np.copy(self.mirror_voltages)
