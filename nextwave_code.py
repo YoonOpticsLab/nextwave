@@ -29,7 +29,7 @@ from PIL import Image, TiffImagePlugin
 WINDOWS=(os.name == 'nt')
 
 
-NACT_PER_NZERN=4
+NACT_PER_NZERN=0.5
 
 GAUSS_SD=3
 BOX_THRESH=2.5
@@ -336,6 +336,7 @@ class NextwaveEngine():
         # DBG:
         self.lenslet_dx=lenslet_dx # Debugging
         self.lenslet_dy=lenslet_dy
+        print(f"Resave zterms. shape={self.zterms_full.shape}")
         np.save('zterms_full.npy',self.zterms_full)
         np.save('zterms_full_inv.npy',self.zterms_full_inv)
         np.save('zterms_20.npy',self.zterms_20)
@@ -381,7 +382,7 @@ class NextwaveEngine():
             # self.influence = pinv( self.influence_inv ) # New way: read the interaction
         # except:
 
-            # influence = np.random.normal ( loc=0, scale=0.01, size=(97, self.num_boxes * 2)  )
+        # influence = np.random.normal ( loc=0, scale=0.01, size=(97, self.num_boxes * 2)  )
         filename_influence =self.ui.get_param_xml("MIRROR1_MirrorInfluenceMatrix") # TODO: Don't reload every time
         self.influence_full = np.loadtxt(filename_influence, skiprows=1)
         #nonzero_idxs = np.sum(influence_full**2,0)>0 

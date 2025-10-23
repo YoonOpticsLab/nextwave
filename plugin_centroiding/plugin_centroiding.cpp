@@ -38,6 +38,7 @@ uint8_t bDoSetBackground=0;
 uint8_t bDoReplaceSubtracted=0;
 uint8_t bDoThreshold=0;
 uint8_t bBackgroundSet=0; // First time
+uint8_t bUseMetric=0;
 
 int16_t autoBack=-1;
 
@@ -185,7 +186,7 @@ void init_buffers(int width, int height, int box_size, int nboxes) {
 	};
 }
 
-#define EXTENT 6
+#define EXTENT 5
 // Submask will comprise up to (extent*2+1) on each side  ( -EXTENT to middle pixel to +EXTENT )
 
 void rcv_boxes(int width) {
@@ -470,18 +471,19 @@ int find_centroids_af(unsigned char *buffer, int width, int height) {
   // Indexes of box numbers that are okay ; // BOOL array
   //af::array valids = !af::isNaN (gaf->sums_x) && !af::isInf (gaf->sums_x) &&
   af::array valids2;
+
   af::array minimum_thresh = gaf->sums / ((EXTENT*2+1) * (EXTENT*2+1));
-  af::array valids = (metrics >= 0.5) && (minimum_thresh>0.04) && !af::isNaN (gaf->sums_x) && !af::isInf (gaf->sums_x); 
+  af::array valids;
+  if (bUseMetric)
+	valids = (metrics > 0.5) && (minimum_thresh>0.04) && !af::isNaN (gaf->sums_x) && !af::isInf (gaf->sums_x); 
+  else
+	valids = (metrics > 0.0) && (minimum_thresh>0.04) && !af::isNaN (gaf->sums_x) && !af::isInf (gaf->sums_x); 
+
   af::array idx_valid=af::where(valids); // Array of non-zeros
   
+  gaf->delta_x( af::where(!valids) ) = af::NaN;
   //uint8_t *host_valids = (af::mean( gaf->im2, 0)*255).as(u8).host<uint8_t>(); // To see the metric
-  uint8_t *host_valids = (valids*100.0).as(u8).host<uint8_t>(); // To see the metric
-  memcpy(pShmemBoxes->centroid_valid, host_valids, sizeof(uint8_t)*num_boxes); // 8 bits per box
-
-  gaf->sums_x( af::where(!valids) ) = af::NaN;
-  CALC_TYPE *host_x = gaf->sums_x.host<CALC_TYPE>();
-  CALC_TYPE *host_y = gaf->sums_y.host<CALC_TYPE>();
-
+  
   af::dim4 dims=idx_valid.dims();
   if (dims[0]==0 ) {
 	spdlog::info("No valid. Skipping. {} {}",dims[0], dims[1]);
@@ -497,17 +499,6 @@ int find_centroids_af(unsigned char *buffer, int width, int height) {
   //gaf->delta_x(nans) = 0.0;
   //gaf->delta_y(nans) = 0.0;
 
-
-  CALC_TYPE *host_delta_x = gaf->delta_x.host<CALC_TYPE>();
-  CALC_TYPE *host_delta_y = gaf->delta_y.host<CALC_TYPE>();
-  //memcpy(pShmemBoxes->delta_x, host_delta_x, sizeof(CALC_TYPE)*num_boxes);
-  //memcpy(pShmemBoxes->delta_y, host_delta_y, sizeof(CALC_TYPE)*num_boxes);
-
-  if (0) {
-  // If want to log deltas:
-  memcpy(gpShmemLog[gpShmemHeader->log_index].centroid_x, host_delta_x, sizeof(CALC_TYPE)*num_boxes);
-  memcpy(gpShmemLog[gpShmemHeader->log_index].centroid_y, host_delta_y, sizeof(CALC_TYPE)*num_boxes);
-  }
   
   // Interleave x and y slopes. Stack them side-by-side, transpose then flatten.
   // This is correct because they are arrays with dimensions (1,x)
@@ -527,7 +518,23 @@ int find_centroids_af(unsigned char *buffer, int width, int height) {
   //gaf->mirror_voltages = af::matmul(gaf->slopes, (gaf->influence_inv) );
   
 
-// DEBUGGING
+// DEBUGGING/logging
+
+  if (0) {
+  CALC_TYPE *host_delta_x = gaf->delta_x.host<CALC_TYPE>();
+  CALC_TYPE *host_delta_y = gaf->delta_y.host<CALC_TYPE>();
+  //memcpy(pShmemBoxes->delta_x, host_delta_x, sizeof(CALC_TYPE)*num_boxes);
+  //memcpy(pShmemBoxes->delta_y, host_delta_y, sizeof(CALC_TYPE)*num_boxes);
+
+  // If want to log deltas:
+  memcpy(gpShmemLog[gpShmemHeader->log_index].centroid_x, host_delta_x, sizeof(CALC_TYPE)*num_boxes);
+  memcpy(gpShmemLog[gpShmemHeader->log_index].centroid_y, host_delta_y, sizeof(CALC_TYPE)*num_boxes);
+  }
+  uint8_t *host_valids = (valids*100.0).as(u8).host<uint8_t>(); // To see the metric
+  memcpy(pShmemBoxes->centroid_valid, host_valids, sizeof(uint8_t)*num_boxes); // 8 bits per box
+  CALC_TYPE *host_x = gaf->sums_x.host<CALC_TYPE>();
+  CALC_TYPE *host_y = gaf->sums_y.host<CALC_TYPE>();
+
   //af::array idx_double;
   CALC_TYPE *host_slopes = gaf->slopes.host<CALC_TYPE>(); // as(f64).
   memcpy(pShmemBoxes->box_x_normalized, host_slopes, sizeof(CALC_TYPE)*num_boxes*2); // Slopes have X and Y
@@ -586,11 +593,11 @@ int find_centroids_af(unsigned char *buffer, int width, int height) {
 
 	} // if closed loop
   af::freeHost(host_mirror_voltages);
+  af::freeHost(host_x);
+  af::freeHost(host_y);
 
 free_afterwards:
   af::freeHost(host_im_subtracted_u8);
-  af::freeHost(host_x);
-  af::freeHost(host_y);
   
   //spdlog::info("ZZZ");
   
@@ -621,6 +628,7 @@ void process_ui_commands(void) {
       spdlog::info("b!");
       bDoSubtractBackground=0;
       break;
+	  
     case 'S':
       spdlog::info("S!");
       bDoSetBackground=1;
@@ -628,6 +636,13 @@ void process_ui_commands(void) {
 	case 's':
       autoBack = atoi(msg+2);
       spdlog::info("s={}",autoBack);
+      break;
+	
+    case 'M':
+      bUseMetric=1;
+      break;
+	case 'm':
+      bUseMetric=0;
       break;
 	
     case 'R':

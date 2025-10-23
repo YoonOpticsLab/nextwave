@@ -132,7 +132,7 @@ class BoxInfoDialog(QDialog):
             pass
         try:
             
-            line1 += "(%f)"%(self.ui_parent.engine.centroids_valid[n] )
+            line1 += "(%f)"%(self.ui_parent.engine.centroid_valid[n] )
         except:
             pass
         self.text_num.setText(line1)
@@ -323,7 +323,7 @@ class MyBarWidget(pg.PlotWidget):
         return
 
 import matplotlib
-matplotlib.use('Qt5Agg')
+matplotlib.use('Qt5Agg') # TODO: Better/more central place for ?
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
 

@@ -317,12 +317,6 @@ class NextWaveMainWindow(QMainWindow):
         points_centroids=[QPointF(self.engine.centroids_x[n],self.engine.centroids_y[n]) for n in np.arange(self.engine.num_boxes)]
         painter.drawPoints(points_centroids)
 
-    if self.draw_predicted: # and self.engine.mode>1:
-         pen = QPen(Qt.green, 1.0)
-         painter.setPen(pen)
-         points_centroids=[QPointF(self.engine.offline.est_x[n],self.engine.offline.est_y[n]) for n in np.arange(self.engine.num_boxes)]
-         painter.drawPoints(points_centroids)
-
     if self.draw_crosshair:
         pen = QPen(Qt.red, 1.5)
         painter.setPen(pen)
@@ -339,7 +333,19 @@ class NextWaveMainWindow(QMainWindow):
 
         painter.drawLines(xlines)
 
+    # OFFLINE:
+    if self.draw_predicted: # and self.engine.mode>1:
+         pen = QPen(Qt.green, 1.0)
+         painter.setPen(pen)
+         points_centroids=[QPointF(self.engine.offline.est_x[n],self.engine.offline.est_y[n]) for n in np.arange(self.engine.num_boxes)]
+         painter.drawPoints(points_centroids)
+
     if self.draw_pupil:
+        pen = QPen(Qt.red, 1.5)
+        painter.setPen(pen)
+        painter.drawEllipse( QPoint(self.cx,self.cy),  self.engine.pupil_radius_pixel, self.engine.pupil_radius_pixel ) 
+       
+    if self.draw_pupil and False: # OLD CODE.. Offline prediction?
         pen = QPen(Qt.green, 1.5)
         painter.setPen(pen)
         CROSSHAIR_SIZE=50
@@ -366,7 +372,7 @@ class NextWaveMainWindow(QMainWindow):
                        cy-rx/2**0.5)
                 ]
                 
-    painter.drawLines(xlines)
+        painter.drawLines(xlines)
 
     painter.setFont( QFont("Arial",40) );
     painter.drawText( QPoint(10, 60), "%03d"%np.max( self.engine.image_bytes) );
@@ -954,6 +960,16 @@ class NextWaveMainWindow(QMainWindow):
      btn.clicked.connect(lambda: self.show_zernike_dialog("Shift references", self.engine.shift_references ) )
      layout1.addWidget(btn, 2,0 )
 
+     self.chkActivateMetric = QCheckBox("Activate Metric")
+     self.chkActivateMetric.stateChanged.connect(self.activate_metric)
+     layout1.addWidget(self.chkActivateMetric, 3,0 )
+     
+#     self.chkBackSubtract = QCheckBox("Subtract background")
+     #btn.clicked.connect(self.activate_metric)
+#     self.chkBackSubtract.stateChanged.connect(self.sub_background)
+#     layout1.addWidget(self.chkBackSubtract,0,0)
+     
+
      self.chkFollow = QCheckBox("Boxes follow centroids")
      self.chkFollow.stateChanged.connect(lambda:self.set_follow(self.chkFollow.isChecked()))
      layout1.addWidget(self.chkFollow, 1,3 )
@@ -1027,6 +1043,11 @@ class NextWaveMainWindow(QMainWindow):
      layout1.addWidget(btn1,6,3)     
 #     btn1.clicked.connect(self.engine.apply_zernikes)
      btn1.clicked.connect(lambda: self.show_zernike_dialog("Apply Zs", self.engine.apply_zernikes ) )
+     
+     self.chkZonal = QCheckBox("Zonal Correction")
+     #self.chkFollow.stateChanged.connect(lambda:self.set_follow(self.chkFollow.isChecked()))
+     layout1.addWidget(self.chkZonal, 7,3 )
+
      
      self.zs_for_apply = QDoubleSpinBox()
      self.zs_for_apply.setMinimum(1)
@@ -1278,7 +1299,19 @@ class NextWaveMainWindow(QMainWindow):
          self.m = round( self.engine.box_size_pixel )
      else:
          self.m=1
-
+         
+ def activate_metric(self):
+    try:
+        self.metric_active = not self.metric_active
+    except:
+        self.metric_active = True
+        
+    # TODO: Don't allow subtract if it hasn't been set once
+    if self.metric_active:
+        self.sockets.centroiding.send(b"M\x00")
+    else:
+        self.sockets.centroiding.send(b"m\x00")
+ 
  def sub_background(self):
     # TODO: Don't allow subtract if it hasn't been set once
     if (self.chkBackSubtract.isChecked()):
