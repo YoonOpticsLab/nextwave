@@ -254,6 +254,32 @@ class NextwaveEngine():
         
         return self.ref_x,self.ref_y,self.norm_x,self.norm_y
 
+    def do_zonal(self, num_modes, num_zern ):
+        # This matches what is shown on the screen
+        spot_displace_x = self.centroids_x - self.ref_x  
+        spot_displace_y = self.centroids_y - self.ref_y
+        
+        spot_displace_y -= spot_displace_y.mean()
+        spot_displace_x -= spot_displace_x.mean()
+        spot_displace_y = -spot_displace_y
+
+        slope = np.concatenate( (spot_displace_y, spot_displace_x)) * (
+            self.pupil_radius_mm /  self.focal)
+        coeff=np.matmul(self.zterms_full,slope)
+        zernikes=coeff[zernike_functions.CVS_to_OSA_map[0:len(coeff)]] # Return value will is OSA
+        
+        zt_inv2 = pinv(self.zterms_full[0:num_zern] )
+        slopes_est =np.matmul( zt_inv2, zernikes[zernike_functions.OSA_to_CVS_map[0:num_zern]] )
+                
+        halfway = slopes_est.shape[0]//2
+        slope_reshape = np.vstack( (slopes_est[halfway:],slopes_est[:halfway]) ).T.flatten()
+        mirs_delta = np.matmul(self.zonal_influence_inv.T, slope_reshape/1000.0)
+        
+        zonal_gain = 0.2
+        print( mirs_delta )        
+        self.comm.write_mirrors_offsets ( -zonal_gain * mirs_delta )
+        
+
     def dump_vars(self):
         fil=open("dump_vars.py","wt")
         fil.writelines("from numpy import array\n")
@@ -375,14 +401,6 @@ class NextwaveEngine():
         return
         
     def update_influence(self):
-        # if False: # Load Miniwave's inverse directly
-            # influence = np.loadtxt(self.ui.json_data["params"]["influence_file"], skiprows=0)
-            # self.influence[ 0:influence.shape[0] ] = influence
-            # self.influence_inv = self.influence.T
-            # self.influence = pinv( self.influence_inv ) # New way: read the interaction
-        # except:
-
-        # influence = np.random.normal ( loc=0, scale=0.01, size=(97, self.num_boxes * 2)  )
         filename_influence =self.ui.get_param_xml("MIRROR1_MirrorInfluenceMatrix") # TODO: Don't reload every time
         self.influence_full = np.loadtxt(filename_influence, skiprows=1)
         #nonzero_idxs = np.sum(influence_full**2,0)>0 
@@ -403,6 +421,19 @@ class NextwaveEngine():
         valid_indices = np.vstack( (valid_boxes*2, valid_boxes*2+1) ).T.flatten()       
         self.influence = self.influence_full[:,valid_indices]
         np.save('infl', self.influence )
+
+        if True:
+            zonal_modes = 85
+            U, s, V = np.linalg.svd(self.influence, full_matrices=True)
+            s_recip = 1/s
+            s_recip[ s<1e-10 ] = 0 # Set any tinies (or 0) to zero
+            print( max_boxes, len(valid_boxes), self.influence.shape, s.max(), valid_boxes[0:10], RR.shape )
+            if zonal_modes < len(s):
+                s_recip[zonal_modes:] = 0 # Clear all the modes from x up
+                
+            self.zonal_condition = s[0]/s[zonal_modes-1]
+            self.zonal_influence_inv = ( (U * s_recip) @ V[0:97,:] ).T
+            np.save('zonal_infl_inv', self.zonal_influence_inv )
         
         if len(self.acts_outside)>0:
             self.influence[self.acts_outside,:] = 0 # Zero them out, if any

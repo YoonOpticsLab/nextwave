@@ -473,6 +473,9 @@ class NextWaveMainWindow(QMainWindow):
      if len(self.engine.zernikes)>0:
       self.show_zernike_plot()
 
+    if self.chkZonal.isChecked():
+        self.engine.do_zonal( int(self.zonal_modes.value()), int(self.zs_for_apply.value()) )
+        
  def show_zernike_plot(self):
     # TODO: Perhaps move all this code into the bar_plot object itself??
     self.bar_plot.clear()
@@ -1048,12 +1051,17 @@ class NextWaveMainWindow(QMainWindow):
      #self.chkFollow.stateChanged.connect(lambda:self.set_follow(self.chkFollow.isChecked()))
      layout1.addWidget(self.chkZonal, 7,3 )
 
-     
      self.zs_for_apply = QDoubleSpinBox()
      self.zs_for_apply.setMinimum(1)
      self.zs_for_apply.setMaximum(65)
-     self.zs_for_apply.setValue(20)     
+     self.zs_for_apply.setValue(25)     
      layout1.addWidget(self.zs_for_apply,6,2)
+
+     self.zonal_modes = QDoubleSpinBox()
+     self.zonal_modes.setMinimum(1)
+     self.zonal_modes.setMaximum(97)
+     self.zonal_modes.setValue(85)     
+     layout1.addWidget(self.zonal_modes,7,2)
      
      self.widget_mode_buttons = QWidget()
      layoutStatusButtons = QHBoxLayout(self.widget_mode_buttons)
