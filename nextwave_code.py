@@ -66,6 +66,7 @@ class NextwaveEngine():
         self.offline = NextwaveOffline(self)
         self.num_boxes = 0
         self.zernikes = None
+        self.omits = np.zeros( 0, dtype='uint8' ) # Need to do early
 
     def init(self):
         if not self.ui.offline_only:
@@ -213,6 +214,7 @@ class NextwaveEngine():
             distances = (self.box_x - self.box_x[nidx])**2 + (self.box_y - self.box_y[nidx])**2
             self.neighbors[nidx]=np.argsort( distances)[1:5] # Take 4 nearest, excluding self (which will be 0)
 
+        self.omits = np.zeros( num_boxes, dtype='uint8' )
         self.update_searchboxes()
 
         return self.ref_x,self.ref_y,self.norm_x,self.norm_y

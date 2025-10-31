@@ -371,7 +371,7 @@ class NextWaveMainWindow(QMainWindow):
                        self.engine.box_y[n]-box_size_pixel//2+BOX_BORDER,
                        self.engine.box_x[n]+box_size_pixel//2-BOX_BORDER,
                        self.engine.box_y[n]+box_size_pixel//2-BOX_BORDER) for n in idx_bads]
-        painter.drawLines(bad_boxes)
+        painter.drawLines(bad_boxes)        
         bad_boxes=[QLineF(self.engine.box_x[n]-box_size_pixel//2-BOX_BORDER,
                        self.engine.box_y[n]+box_size_pixel//2+BOX_BORDER,
                        self.engine.box_x[n]+box_size_pixel//2-BOX_BORDER,
@@ -1205,7 +1205,11 @@ class NextWaveMainWindow(QMainWindow):
      layout1.addWidget(self.btn_processing,4,0)
      self.btn_processing.clicked.connect(lambda: self.offline_autoall() )
 
-     btn = QPushButton("Autorotate this frame")
+     #self.chkAutorotate = QPushButton("Autorotate each")
+     #layout1.addWidget(self.chkAutorotate,1,1)
+    # btn.clicked.connect(lambda: self.engine.offline.offline_rotation_fix() )
+
+     btn = QPushButton("Rotate this frame")
      layout1.addWidget(btn,1,2)
      btn.clicked.connect(lambda: self.engine.offline.offline_rotation_fix() )
 

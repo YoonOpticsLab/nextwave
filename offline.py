@@ -81,6 +81,7 @@ class info_saver():
         self.engine.zernikes = data_record['zernikes']
 
         self.engine.num_boxes = len( self.engine.centroids_x)
+        #self.offline.rotations[self.ui.offline_curr]=data_record['rotation']
         
         # UPDATE UI. TODO. Ambivalent this should be here...
         self.ui.line_pupil_diam.setText('%2.2f'%(self.engine.pupil_diam / self.engine.pupil_mag ) )
@@ -472,7 +473,7 @@ class NextwaveOffline():
         local_pix=box_pix[ind_max[0]-sizo:ind_max[0]+sizo+1,ind_max[1]-sizo:ind_max[1]+sizo+1]
 
         if conservative_threshold:
-            if np.max(box_pix) - np.mean(box_pix) < 10:
+            if np.max(box_pix) - np.mean(box_pix) < defaults.threshold_max_minus_mean:
                 return np.nan, np.nan, -989     
 
             # When expanding, use old heuristic that bails (makes NaN) if centroids are too close to the edge to do Gaussian fit.
@@ -592,7 +593,7 @@ class NextwaveOffline():
                 self.box_metrics[nbox] = centroids[2] # gof
 
             # Want to keep dark (but in-range) patches for proper optimization
-            if (centroids[2] < defaults.BOX_THRESH) and (dark_as_nan):
+            if ((centroids[2] < defaults.BOX_THRESH) and (dark_as_nan)) or (self.parent.omits[nbox]):
                 cenx[nbox] = np.nan
                 ceny[nbox] = np.nan
 
@@ -941,8 +942,9 @@ class NextwaveOffline():
        #     self.parent.ui.mode_init() # Call init if needed
 
         self.iterative_size = float(self.parent.ui.it_start.text()) * self.parent.pupil_mag
-
         self.iterative_size_pixels = self.iterative_size/2.0 * 1000 / self.parent.ccd_pixel
+        
+        
         if not self.parent.ui.center_dirty:
             self.autocenter()
             # Is this circular? Where to get box centers from?
@@ -967,6 +969,10 @@ class NextwaveOffline():
         self.parent.ui.line_pupil_diam.setText('%2.2f'%(self.iterative_size / self.parent.pupil_mag) ) #+step) )
         
     def iterative_run_good(self):
+        # Size on the sensor, max pixel radius in the image
+        self.iterative_max =  float(self.parent.ui.it_stop.text() )
+        self.iterative_max_pixels = self.iterative_max/2.0 * 1000 / self.parent.ccd_pixel
+
         self.offline_startbox()
 
         #self.engine.offline.iterative_max_pixels = float(self.it_stop.text())/2.0 * 1000 / self.engine.ccd_pixel

@@ -43,6 +43,8 @@ SUBSET_FIT_SIZE=5  # Size of pixel subset to fit a Gaussian to for centroiding
 SHRINK_MIN=20 # DEtermined empirically for Chloe's movies TODO
 SHRINK_PIXELS=2 # Num. pixels to shrink search boxes by each iteration
 
+threshold_max_minus_mean=-10 # If box max - mean is less than this, make box NaN
+
 scan_frame_to_ecc={'H': np.linspace(-35,35,37),'V': np.linspace(-20,20,27),'D': np.linspace(-28.28,28.28,27),'D2': np.linspace(-28.28,28.28,27)}
   
 SATURATION_MINIMUM=255
