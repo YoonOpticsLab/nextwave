@@ -24,6 +24,8 @@ using json=nlohmann::json;
 
 #define VERBOSE 0
 
+#define SLOW 1
+
 // Globals
 #define BUF_SIZE (2048*2048*16)
 
@@ -39,11 +41,18 @@ uint8_t bDoReplaceSubtracted=0;
 uint8_t bDoThreshold=0;
 uint8_t bBackgroundSet=0; // First time
 uint8_t bUseMetric=0;
+uint8_t bDoRemoveTipTilt=1; // Default to yes, subtract off tip/tilt
 
 int16_t autoBack=-1;
 
 float fThreshold=0.0;
 float fGain=1.0;
+float fMetricThreshold=0.5;
+float fBleed=0.0;
+
+int nDelay=1;
+double f_tiptilt_x=0;
+double f_tiptilt_y=0;
 
 unsigned int nCurrRing=0;
 //LARGE_INTEGER t2, t1;
@@ -115,6 +124,8 @@ public:
   
   af::array submask;
 
+  af::array omits;
+  
  // af::array influence;
   af::array influence_inv;
   af::array mirror_voltages;
@@ -286,6 +297,10 @@ void rcv_boxes(int width) {
 	memcpy(local_buf, pShmemBoxes->influence_inv, sizeof(CALC_TYPE) * nActuators*nTerms);
 	gaf->influence_inv = af::array(nTerms, nActuators, local_buf );
 
+	// Also receive which boxes to omit
+	memcpy(omit_boxes, pShmemBoxes->centroid_omit, sizeof(pShmemBoxes->centroid_omit[0])*num_boxes);
+	gaf->omits = af::array( num_boxes, omit_boxes).as(b8);
+
 	spdlog::info("CEN rcv: {} {} {} {} {} {} {}x{} infl:{}x{} {}",
 		num_boxes, pixel_um, box_size, box_size_float, pupil_radius_um, pupil_radius_pixels,
 		width, height, nTerms, nActuators, (float)af::max<float>(gaf->influence_inv) );
@@ -336,8 +351,6 @@ int find_centroids_af(unsigned char *buffer, int width, int height) {
 	gaf->im /= 255.0;
 	
     struct shmem_boxes_header* pShmemBoxes = (struct shmem_boxes_header*) shmem_region3.get_address();
-	memcpy(omit_boxes, pShmemBoxes->centroid_omit, sizeof(pShmemBoxes->centroid_omit[0])*num_boxes);
-	auto afOmits = af::array( num_boxes, omit_boxes).as(b8);
 	
   if (bDoSetBackground) {
     gaf->im_background = af::array(width, height, buffer).as(f64);
@@ -380,6 +393,12 @@ int find_centroids_af(unsigned char *buffer, int width, int height) {
            height*width);
   }
 
+  // Do centroiding etc. every "nDelay" frames
+  if ((gpShmemHeader->log_index % nDelay ) > 0 ) {
+	  af::freeHost(host_im_subtracted_u8);
+	  return 0;
+  }
+	  
 #if VERBOSE
   spdlog::info("mean={} min={} max={}",(float)af::mean<float>(im),
          (float)af::min<float>(im),
@@ -423,6 +442,7 @@ int find_centroids_af(unsigned char *buffer, int width, int height) {
 	
     af::array max_vals, max_indices, box_masks;
     af::max(max_vals, max_indices, gaf->im2, 0); // 0=within each box. Find max pixel in each box, put idxs into max_indices
+	
 	//max_indices = af::reorder(max_indices, 1, 0);
     //spdlog::info("mean={}",(float)af::mean<float>(max_indices) );
 
@@ -450,54 +470,59 @@ int find_centroids_af(unsigned char *buffer, int width, int height) {
 #endif //0	
 	
 	gaf->sums = af::sum( gaf->im2 * box_masks, 0);
+    af::array metrics = gaf->sums / af::sum( gaf->im2, 0); // BurnsLab metric:  ratio of entire box to sub-box
 	
 	// Sum all pixels divide by total to get center of mass
 	gaf->sums_x = af::sum( gaf->x_reshape * box_masks, 0) / gaf->sums;
 	gaf->sums_y = af::sum( gaf->y_reshape * box_masks, 0) / gaf->sums;
 
-  gaf->sums_x(afOmits) = af::NaN;
-  gaf->sums_y(afOmits) = af::NaN; 
-
+  gaf->sums_x(gaf->omits) = af::NaN;
+  gaf->sums_y(gaf->omits) = af::NaN; 
 
   // Compute deltas and write to shmem
   gaf->delta_x = gaf->sums_x - gaf->ref_x;
   gaf->delta_y = gaf->sums_y - gaf->ref_y;
 
-  // TODO: Might this be slow?
+#if 1
+  // TODO: Might this be slow? # TODO: Move this later, to where everything is logged together? Run afterwards, asynch/overlapped ?
   memcpy(gpShmemLog[gpShmemHeader->log_index].im, host_im_subtracted_u8, sizeof(uint8_t)*width*height);
-
-  af::array metrics = gaf->sums / af::sum( gaf->im2, 0);
+#endif
 
   // Indexes of box numbers that are okay ; // BOOL array
   //af::array valids = !af::isNaN (gaf->sums_x) && !af::isInf (gaf->sums_x) &&
   af::array valids2;
 
-  af::array minimum_thresh = gaf->sums / ((EXTENT*2+1) * (EXTENT*2+1));
+  af::array minimum_thresh = gaf->sums / ((EXTENT*2+1) * (EXTENT*2+1)); // Mean sub-box sub also has a minimum of 0.04 (
   af::array valids;
   if (bUseMetric)
-	valids = (metrics > 0.5) && (minimum_thresh>0.04) && !af::isNaN (gaf->sums_x) && !af::isInf (gaf->sums_x); 
+	valids = (metrics >= fMetricThreshold) && (minimum_thresh>0.04) && !af::isNaN (gaf->sums_x) && !af::isInf (gaf->sums_x); 
   else
-	valids = (metrics > 0.0) && (minimum_thresh>0.04) && !af::isNaN (gaf->sums_x) && !af::isInf (gaf->sums_x); 
+	valids = (metrics >= 0.0) && (minimum_thresh>0.04) && !af::isNaN (gaf->sums_x) && !af::isInf (gaf->sums_x); 
 
-  af::array idx_valid=af::where(valids); // Array of non-zeros
+  af::array idx_valid=af::where(valids); // Array of non-zeros\
   
-  gaf->delta_x( af::where(!valids) ) = af::NaN;
-  //uint8_t *host_valids = (af::mean( gaf->im2, 0)*255).as(u8).host<uint8_t>(); // To see the metric
-  
+  //gaf->delta_x( af::where(valids==0) ) = af::NaN;
+
   af::dim4 dims=idx_valid.dims();
+  //spdlog::info("Valids={} {}",dims[0], dims[1]);
   if (dims[0]==0 ) {
 	spdlog::info("No valid. Skipping. {} {}",dims[0], dims[1]);
+	// TODO: Maybe NaN all of them ?
 	goto free_afterwards;
   }
  // Check that valids are okay
  
   // Remove tip and tilt
-  gaf->delta_x -= (CALC_TYPE)af::mean<CALC_TYPE>(gaf->delta_x(valids) ); // weighted mean, 0 for NaNs
-  gaf->delta_y -= (CALC_TYPE)af::mean<CALC_TYPE>(gaf->delta_y(valids) );
+  if (bDoRemoveTipTilt) {
+	  gaf->delta_x -= (CALC_TYPE)af::mean<CALC_TYPE>(gaf->delta_x(valids) ); // weighted mean, 0 for NaNs
+	  gaf->delta_y -= (CALC_TYPE)af::mean<CALC_TYPE>(gaf->delta_y(valids) );
+  };
+  
+  // Add the induced tip/tilt (usually zero)
+  gaf->delta_x += f_tiptilt_x;
+  gaf->delta_y += f_tiptilt_y;
+  
   gaf->delta_y = -gaf->delta_y; // Negate y (coord system)
-
-  //gaf->delta_x(nans) = 0.0;
-  //gaf->delta_y(nans) = 0.0;
 
   
   // Interleave x and y slopes. Stack them side-by-side, transpose then flatten.
@@ -517,39 +542,54 @@ int find_centroids_af(unsigned char *buffer, int width, int height) {
   }
   //gaf->mirror_voltages = af::matmul(gaf->slopes, (gaf->influence_inv) );
   
-
-// DEBUGGING/logging
-
-  if (0) {
-  CALC_TYPE *host_delta_x = gaf->delta_x.host<CALC_TYPE>();
-  CALC_TYPE *host_delta_y = gaf->delta_y.host<CALC_TYPE>();
-  //memcpy(pShmemBoxes->delta_x, host_delta_x, sizeof(CALC_TYPE)*num_boxes);
-  //memcpy(pShmemBoxes->delta_y, host_delta_y, sizeof(CALC_TYPE)*num_boxes);
-
-  // If want to log deltas:
-  memcpy(gpShmemLog[gpShmemHeader->log_index].centroid_x, host_delta_x, sizeof(CALC_TYPE)*num_boxes);
-  memcpy(gpShmemLog[gpShmemHeader->log_index].centroid_y, host_delta_y, sizeof(CALC_TYPE)*num_boxes);
-  }
-  uint8_t *host_valids = (valids*100.0).as(u8).host<uint8_t>(); // To see the metric
-  memcpy(pShmemBoxes->centroid_valid, host_valids, sizeof(uint8_t)*num_boxes); // 8 bits per box
-  CALC_TYPE *host_x = gaf->sums_x.host<CALC_TYPE>();
-  CALC_TYPE *host_y = gaf->sums_y.host<CALC_TYPE>();
-
-  //af::array idx_double;
-  CALC_TYPE *host_slopes = gaf->slopes.host<CALC_TYPE>(); // as(f64).
-  memcpy(pShmemBoxes->box_x_normalized, host_slopes, sizeof(CALC_TYPE)*num_boxes*2); // Slopes have X and Y
-  af::freeHost(host_slopes);
-  
 #if 0
-  if (pShmemBoxes->header_version & 2) //Follow // TODO
+  if (pShmemBoxes->header_version & 2) // Boxes follow centroids // TODO
   {
     memcpy(pShmemBoxes->box_x, host_x, sizeof(float)*num_boxes);
     memcpy(pShmemBoxes->box_y, host_y, sizeof(float)*num_boxes);
   }
 #endif //0
+
+// DEBUGGING/logging
+
+  // To pass back up tothe UI : Make NaNs
+  //gaf->delta_x( af::where(!valids) ) = 0;
+  //gaf->delta_y( af::where(!valids) ) = 0;
+  //gaf->delta_x( af::where(valids==0) ) = gaf->delta_x( af::where(valids==0) ) / 0.0;
+  af::replace(gaf->delta_x, !valids, 0.0);
+  af::replace(gaf->delta_y, !valids, 0.0);
+
+#if SLOW
+  if (1) {
+  CALC_TYPE *host_delta_x = gaf->delta_x.host<CALC_TYPE>();
+  CALC_TYPE *host_delta_y = gaf->delta_y.host<CALC_TYPE>();
+  //memcpy(pShmemBoxes->delta_x, host_delta_x, sizeof(CALC_TYPE)*num_boxes);
+  //memcpy(pShmemBoxes->delta_y, host_delta_y, sizeof(CALC_TYPE)*num_boxes);
+  // If want to log deltas:
+  memcpy(gpShmemLog[gpShmemHeader->log_index].centroid_x, host_delta_x, sizeof(CALC_TYPE)*num_boxes);
+  memcpy(gpShmemLog[gpShmemHeader->log_index].centroid_y, host_delta_y, sizeof(CALC_TYPE)*num_boxes);
+  }
   
+  uint8_t *host_metric = (metrics*100.0).as(u8).host<uint8_t>(); // To see the metric
+  memcpy(pShmemBoxes->centroid_metric, host_metric, sizeof(uint8_t)*num_boxes); // 8 bits per box
+
+  uint8_t *host_valids = (valids).as(u8).host<uint8_t>(); // To see the metric
+  memcpy(pShmemBoxes->centroid_valid, host_valids, sizeof(uint8_t)*num_boxes); // 8 bits per box
+  //uint8_t *host_valids = (af::mean( gaf->im2, 0)*255).as(u8).host<uint8_t>(); // To see the metric
+
+  //af::array idx_double;
+  CALC_TYPE *host_slopes = gaf->slopes.host<CALC_TYPE>(); // as(f64).
+  memcpy(pShmemBoxes->box_x_normalized, host_slopes, sizeof(CALC_TYPE)*num_boxes*2); // Slopes have X and Y
+  af::freeHost(host_slopes);
+
+  // TODO: must we recompute host pointers all the time?
+  CALC_TYPE *host_x = gaf->sums_x.host<CALC_TYPE>();
+  CALC_TYPE *host_y = gaf->sums_y.host<CALC_TYPE>();  
   memcpy(pShmemBoxes->centroid_x, host_x, sizeof(CALC_TYPE)*num_boxes);
   memcpy(pShmemBoxes->centroid_y, host_y, sizeof(CALC_TYPE)*num_boxes);
+  af::freeHost(host_x);
+  af::freeHost(host_y);
+#endif
 
   //memcpy(pShmemBoxes->mirror_voltages, host_mirror_voltages, sizeof(double)*nActuators); // Added for debugging 2025/26/02 -- see realtime voltage calcs
 
@@ -563,7 +603,7 @@ int find_centroids_af(unsigned char *buffer, int width, int height) {
 
 			if (pShmem->mode & MODE_AO ) {
 			  // If closed loop, add new voltages to old
-			  pShmemBoxes->mirror_voltages[i] = pShmemBoxes->mirror_voltages[i] - host_mirror_voltages[i]*fGain;
+			  pShmemBoxes->mirror_voltages[i] = pShmemBoxes->mirror_voltages[i]*(1.0-fBleed) - host_mirror_voltages[i]*fGain;
 			}
 			// CLAMP
 			if (pShmemBoxes->mirror_voltages[i] > CLIPVAL)
@@ -593,8 +633,6 @@ int find_centroids_af(unsigned char *buffer, int width, int height) {
 
 	} // if closed loop
   af::freeHost(host_mirror_voltages);
-  af::freeHost(host_x);
-  af::freeHost(host_y);
 
 free_afterwards:
   af::freeHost(host_im_subtracted_u8);
@@ -644,7 +682,16 @@ void process_ui_commands(void) {
 	case 'm':
       bUseMetric=0;
       break;
-	
+	  
+   case 'W':
+      fMetricThreshold=atof(msg+1);
+      spdlog::info("W(MT)={}",fMetricThreshold);
+      break;
+	  
+	case 'L':
+      fBleed=atof(msg+1);
+      break;
+	  
     case 'R':
       spdlog::info("R!");
       bDoReplaceSubtracted=1;
@@ -662,6 +709,29 @@ void process_ui_commands(void) {
       fGain=atof(msg+1);
       spdlog::info("G={}",fGain);
       break;
+    case 'D':
+      nDelay=atoi(msg+1);
+      spdlog::info("D={}",nDelay);
+      break;
+    case 'x':
+      f_tiptilt_x += atof(msg+1);
+      spdlog::info("x={}",f_tiptilt_x);
+      break;
+    case 'y':
+      f_tiptilt_y += atof(msg+1);
+      spdlog::info("y={}",f_tiptilt_y);
+      break;	  
+
+    case 'P':
+      spdlog::info("P!");
+      bDoRemoveTipTilt=1;
+      break;
+    case 'p':
+      spdlog::info("p!");
+      bDoRemoveTipTilt=0;
+      break;
+
+	
     case 'E': {
       int xpos=atoi(msg+1);
       int ypos=atoi(msg+6);
@@ -693,9 +763,6 @@ PLUGIN_API(centroiding,process,char *params)
 	memcpy((void*)buffer,
          ((const char *)(shmem_region2.get_address()))+height*width*nCurrRing, height*width);
 
-  //double total=0;
-  //for (int n=0; n<1000; n++)
-	//  total += buffer[n]; 
   //spdlog::info("Centroiding_process ring: {} {}",nCurrRing,total/1000.0);
 
   if (params[0]=='I') {
