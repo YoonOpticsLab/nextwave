@@ -286,6 +286,9 @@ int main(int argc, char** argv)
  
   // Clear this before start anything since use as a sentinel
   pShmemBoxes->num_boxes=0;
+  pShmem1->log_index=0;
+  pShmem1->total_frames=0;
+  pShmem1->recording=0;
 
 #define REP_LOG 10
 
@@ -375,35 +378,39 @@ int main(int argc, char** argv)
       uint16_t ms_times_100;
       double times_before[4]; //TODO
       for (struct module it: listModules) {
-          //spdlog::info("Before {} {} {}", pShmem1->total_frames, modnum, it.name );
-          boost::chrono::high_resolution_clock::time_point time_before = boost::chrono::high_resolution_clock::now();
+			//spdlog::info("Before {} {} {}", pShmem1->total_frames, modnum, it.name );
+			boost::chrono::high_resolution_clock::time_point time_before = boost::chrono::high_resolution_clock::now();
 
-          int result=(*it.fp_do_process)((const char*)str_message);
+			int result=0;
+			
+			result=(*it.fp_do_process)((const char*)str_message);
 
-          boost::chrono::high_resolution_clock::time_point time_after = boost::chrono::high_resolution_clock::now();
-          boost::chrono::duration<double>micros = time_after - time_before;
+			boost::chrono::high_resolution_clock::time_point time_after = boost::chrono::high_resolution_clock::now();
+			boost::chrono::duration<double>micros = time_after - time_before;
 
-          dur = micros.count();
-          ms_times_100 = (uint16_t)(dur*CLOCK_MULT);
+			dur = micros.count();
+			ms_times_100 = (uint16_t)(dur*CLOCK_MULT);
 
-          ns[logidx*3+modnum] = ms_times_100;
-          times_local[modnum] = ms_times_100;
+			ns[logidx*3+modnum] = ms_times_100;
+			times_local[modnum] = ms_times_100;
 
-          boost::chrono::duration<double>time_since_start = time_before - time_start;
-          times_before[modnum] = time_since_start.count();
+			boost::chrono::duration<double>time_since_start = time_before - time_start;
+			times_before[modnum] = time_since_start.count();
 
-          //spdlog::info("After {} {} {}", pShmem1->total_frames, modnum, it.name );
+			//spdlog::info("After {} {} {}", pShmem1->total_frames, modnum, it.name );
 
-          modnum++;
+			modnum++;
         }
 
-        int logidx_g = pShmem1->total_frames % SHMEM_LOG_MAX;
-        pShmem1->log_index = logidx_g;
-        pShmemLog[logidx_g].frame_number=pShmem1->current_frame;
-        pShmemLog[logidx_g].total_frame_number=pShmem1->total_frames;
-        pShmemLog[logidx_g].time0=times_before[0];
-        pShmemLog[logidx_g].time1=times_before[1];
-        pShmemLog[logidx_g].time2=times_before[2];
+		int logidx = pShmem1->log_index;
+        pShmemLog[logidx].frame_number=pShmem1->current_frame;
+        pShmemLog[logidx].total_frame_number=pShmem1->total_frames;
+        pShmemLog[logidx].time0=times_before[0];
+        pShmemLog[logidx].time1=times_before[1];
+        pShmemLog[logidx].time2=times_before[2];
+  		if ( pShmem1->recording) {
+			pShmem1->log_index = (pShmem1->log_index + 1 ) % SHMEM_LOG_MAX;
+		};	
 
         boost::chrono::high_resolution_clock::time_point time_now = boost::chrono::high_resolution_clock::now();
         //boost::chrono::duration<double> time_span = duration_cast<duration<double>>(time_now - time_total_before);
