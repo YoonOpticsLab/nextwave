@@ -28,6 +28,7 @@ struct shmem_header
 	uint8_t lock=0;
 	uint8_t header_version=NW_HEADER_VERSION;
 	uint8_t mode=MODE_OFF;
+	uint8_t recording=0;	
 	uint16_t manager_port_num;
 	uint16_t dimensions[4];
 	uint16_t datatype_code;

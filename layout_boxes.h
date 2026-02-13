@@ -26,6 +26,7 @@ struct shmem_boxes_header
 	CALC_TYPE centroid_y[MAX_BOXES];
 	uint8_t centroid_omit[MAX_BOXES];
 	uint8_t centroid_valid[MAX_BOXES];
+	uint8_t centroid_metric[MAX_BOXES];
 	CALC_TYPE box_x_normalized[MAX_BOXES];
 	CALC_TYPE box_y_normalized[MAX_BOXES];
 
@@ -39,5 +40,5 @@ struct shmem_boxes_header
   CALC_TYPE mirror_voltages_offsets[MAX_MIRROR_VOLTAGES];
 };
 
-#define SHMEM_BUFFER_SIZE_BOXES 1+1+2+sizeof(CALC_TYPE)*3+4+MAX_BOXES*sizeof(CALC_TYPE)*10+2*MAX_BOXES+sizeof(CALC_TYPE)*MAX_TERMS*2+2*MAX_MIRROR_VOLTAGES*sizeof(CALC_TYPE)
+#define SHMEM_BUFFER_SIZE_BOXES 1+1+2+sizeof(CALC_TYPE)*3+4+MAX_BOXES*sizeof(CALC_TYPE)*10+3*MAX_BOXES+sizeof(CALC_TYPE)*MAX_TERMS*2+2*MAX_MIRROR_VOLTAGES*sizeof(CALC_TYPE)
 #define SHMEM_BUFFER_NAME_BOXES "NW_BUFFER_BOXES"
