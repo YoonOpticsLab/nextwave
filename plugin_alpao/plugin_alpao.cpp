@@ -38,15 +38,12 @@ DECL init(void)
   spdlog::info("ALPAO DM1 OK");
 
 #if REAL_AO  
-  dm = new acs::DM( "BAX492" );
-  
-  //printf( "valid?: %xl", (void*) dm);
+  dm = new acs::DM( "BAX581" );
   
   if (dm==NULL) { 
 	spdlog::error("ALPAO DM failed");
 	return -1;
 }
-  spdlog::info("ALPAO DM2");
 
   num_act = (int)dm->Get( "NbOfActuator" );
 #else
@@ -58,7 +55,7 @@ DECL init(void)
 	return -1;
   }
 
-  data = new acs::Scalar[num_act]; // TODO: update if num_act changes (smaller pupil, etc.)
+  data = new acs::Scalar[num_act];
 
   for( int i=0; i<num_act; i++) {
 	  data[i] = (acs::Scalar)0;
@@ -92,6 +89,8 @@ DECL process(char *commands)
 	  loop=1;
   else
 	  loop=0;
+  
+  //return 0;
 
   // TODO: is dynamically changing the size allowed?
 	uint16_t nCurrRing = gpShmemHeader->current_frame;
