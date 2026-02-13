@@ -201,6 +201,7 @@ class NextwaveEngineComm():
         self.width=self.parent.width
 
         self.parent.total_frames=extract_memory.get_array_item2(self.layout,self.shmem_hdr,'total_frames',0, False)
+        self.parent.record_frames=extract_memory.get_array_item2(self.layout,self.shmem_hdr,'log_index',0, False)
 
         nwhich_buffer=extract_memory.get_array_item2(self.layout,self.shmem_hdr,'current_frame',0, False)
 
@@ -262,32 +263,46 @@ class NextwaveEngineComm():
         self.shmem_hdr.seek(2) #TODO: get address
         self.shmem_hdr.write(buf)
         self.shmem_hdr.flush()    
-
+        
+    def do_record_toggle(self,state):
+        buf = ByteStream()
+        buf.append(state) # TODO: MODE_CENTROIDING
+        self.shmem_hdr.seek(3) #TODO: get address
+        self.shmem_hdr.write(buf)
+        self.shmem_hdr.flush()    
+        
     def receive_centroids(self):
         SIZEOF_DOUBLE=8
         fields=self.layout_boxes[1]
         num_boxes=self.parent.num_boxes
         self.shmem_boxes.seek(fields['centroid_x']['bytenum_current'])
         buf=self.shmem_boxes.read(num_boxes*SIZEOF_DOUBLE)
-        self.parent.centroids_x=struct.unpack_from(''.join((['d']*num_boxes)), buf)
+        self.parent.centroids_x=np.array( struct.unpack_from(''.join((['d']*num_boxes)), buf) )
 
         self.shmem_boxes.seek(fields['centroid_y']['bytenum_current'])
         buf=self.shmem_boxes.read(num_boxes*SIZEOF_DOUBLE)
-        self.parent.centroids_y=struct.unpack_from(''.join((['d']*num_boxes)), buf)
+        self.parent.centroids_y=np.array( struct.unpack_from(''.join((['d']*num_boxes)), buf) )
 
         self.shmem_boxes.seek(fields['delta_x']['bytenum_current'])
         buf=self.shmem_boxes.read(num_boxes*SIZEOF_DOUBLE)
-        self.parent.delta_x=struct.unpack_from(''.join((['d']*num_boxes)), buf)
+        self.parent.centroids_delta_x=struct.unpack_from(''.join((['d']*num_boxes)), buf)
 
         self.shmem_boxes.seek(fields['delta_y']['bytenum_current'])
         buf=self.shmem_boxes.read(num_boxes*SIZEOF_DOUBLE)
-        self.parent.delta_y=struct.unpack_from(''.join((['d']*num_boxes)), buf)
+        self.parent.centroids_delta_y=struct.unpack_from(''.join((['d']*num_boxes)), buf)
+    
+        self.parent.centroid_valid = np.frombuffer(self.shmem_boxes, dtype=np.uint8,
+            offset=fields['centroid_valid']['bytenum_current'], count=num_boxes)
+
+        self.parent.centroid_metric = np.frombuffer(self.shmem_boxes, dtype=np.uint8,
+            offset=fields['centroid_metric']['bytenum_current'], count=num_boxes)
+    
+        # TODO: For some reason, clearing the invalids (esp. with metric) was hard from C++
+        self.parent.centroids_x[ np.array(self.parent.centroid_valid)==False ] = np.nan
 
         self.shmem_boxes.seek(fields['mirror_voltages']['bytenum_current'])
         buf=self.shmem_boxes.read(self.parent.nActuators*SIZEOF_DOUBLE)
         self.mirror_voltages=np.array( struct.unpack_from(''.join((['d']*self.parent.nActuators)), buf) )
-
-        self.parent.centroid_valid = np.frombuffer(self.shmem_boxes, dtype=np.uint8, offset=fields['centroid_valid']['bytenum_current'], count=num_boxes)
 
         # Debugging
         self.shmem_boxes.seek(fields['box_x_normalized']['bytenum_current'])
