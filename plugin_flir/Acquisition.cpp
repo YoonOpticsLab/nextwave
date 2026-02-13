@@ -742,8 +742,8 @@ DECL init(void)
 		
 		//CIntegerPtr ptrSetter = nodeMap.GetNode("BinningHorizontal");
         //ptrSetter->SetValue(2);
-		CIntegerPtr ptrSetter = nodeMap.GetNode("BinningVertical");
-        ptrSetter->SetValue(2);
+		//CIntegerPtr ptrSetter = nodeMap.GetNode("BinningVertical");
+        //ptrSetter->SetValue(0);
 
 		
         //
