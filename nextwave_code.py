@@ -74,6 +74,8 @@ class NextwaveEngine():
         self.zernikes = None
         self.defocus = 0
         self.aogain = 1.0
+        self.aobleed = 0.0
+        self.aorate = 1.0
         self.dmfill = 1.0
         self.omits = np.zeros( 0, dtype='uint8' ) # Need to do early
         
@@ -237,8 +239,6 @@ class NextwaveEngine():
             distances = (self.box_x - self.box_x[nidx])**2 + (self.box_y - self.box_y[nidx])**2
             self.neighbors[nidx]=np.argsort( distances)[1:5] # Take 4 nearest, excluding self (which will be 0)
 
-        self.update_searchboxes(send_to_engine=True)
-        
         self.omits = np.zeros( num_boxes, dtype='uint8' )
         try:
             #fil=open("omits.txt","rt")
@@ -251,6 +251,7 @@ class NextwaveEngine():
             print()
         except:
             pass
+        self.update_searchboxes(send_to_engine=True)        
         
         return self.ref_x,self.ref_y,self.norm_x,self.norm_y
 
@@ -337,6 +338,11 @@ class NextwaveEngine():
             #  Compute SVD of stacked X and Y
             zpoly = np.hstack( (dx_subset, dy_subset ) ).T
 
+            bads = np.where( np.isnan(zpoly) )
+            print( bads )
+            #zpoly[ bads] = np.random.normal(0,0.0001, bads.shape )
+         
+            
             # Pre-compute&save the zterms that are multiplied with the slopes in realtime
             [uu,ss,vv] = svd(zpoly,False)
 
@@ -402,7 +408,9 @@ class NextwaveEngine():
         
     def update_influence(self):
         filename_influence =self.ui.get_param_xml("MIRROR1_MirrorInfluenceMatrix") # TODO: Don't reload every time
-        self.influence_full = np.loadtxt(filename_influence, skiprows=1)
+        skips = 1 if '.dat' in filename_influence else 0
+        
+        self.influence_full = np.loadtxt(filename_influence, skiprows=skips)
         #nonzero_idxs = np.sum(influence_full**2,0)>0 
         #self.influence = influence_full[:,nonzero_idxs]
 
@@ -453,6 +461,7 @@ class NextwaveEngine():
 
         self.nActuators=self.influence.shape[0]
         self.nTerms=self.influence.shape[1]
+        np.save('infl_reduced', self.influence )
         np.save('influ', self.influence_inv )
 
         self.ui.offline_dialog.sc.axes.clear();
@@ -516,7 +525,9 @@ class NextwaveEngine():
         idxs_remap  = zernike_functions.OSA_to_CVS_map[valid_idxs]
         zern_new=zs[valid_idxs] [idxs_remap ]
         #zern_new[0:2]=0 # Remove tip/tilt TODO: Need to move the pupil center?
-
+        #zern_new[0:2] = [-0.5,0.2] #
+        # DRC: This doesn't work because tip/tilt (meanx/meany) are subtracted as part of centroiding.
+        
         delta=np.matmul(mat1,zern_new)
         num_boxes = self.box_x.shape[0]
         delta_y = delta[0:num_boxes] / (self.ccd_pixel/self.focal)
@@ -593,9 +604,25 @@ class NextwaveEngine():
         self.defocus = val
         self.defocus_do();
 
+    def metric_set(self,val):
+        self.metric = val
+        self.ui.sockets.centroiding.send(b"W%f\x00"%(self.metric) )
+        
+    def aobleed_set(self,val):
+        self.aobleed = val
+        self.ui.sockets.centroiding.send(b"L%f\x00"%(val) )
+    
+    def aogain_do(self):
+        self.ui.sockets.centroiding.send(b"G%f\x00"%(self.aogain) )
     def aogain_set(self,val):
         self.aogain = val
         self.aogain_do();
+
+    def aorate_do(self):
+        self.ui.sockets.centroiding.send(b"D%d\x00"%(self.aorate) )
+    def aorate_set(self,val):
+        self.aorate = val
+        self.aorate_do();
 
     def modes_set(self,val):
         self.modes = int( val )
@@ -610,9 +637,7 @@ class NextwaveEngine():
         r=np.sqrt( act_norm_x**2 + act_norm_y**2)
         self.acts_inside = np.where( r<= val )[0]
         self.acts_outside = np.where( r>val )[0]
-    
-    def aogain_do(self):
-        self.ui.sockets.centroiding.send(b"G%f\x00"%(self.aogain) )
+   
 
     def shift_search_boxes(self,zs,from_dialog=True):
         #print( zs )

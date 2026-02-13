@@ -1,3 +1,5 @@
+import joystickapi
+
 from PyQt5.QtWidgets import (QMainWindow, QLabel, QSizePolicy, QApplication, QPushButton,
                              QHBoxLayout, QVBoxLayout, QGridLayout, QScrollArea, QMessageBox,
                              QWidget, QGroupBox, QTabWidget, QTextEdit, QSpinBox, QDoubleSpinBox, QSlider,
@@ -29,13 +31,14 @@ import matplotlib.cm as cmap
 from nextwave_code import NextwaveEngine
 from nextwave_sockets import NextwaveSocketComm
 
-from nextwave_widgets import ZernikeDialog, BoxInfoDialog, ActuatorPlot, MyBarWidget, OfflineDialog
+from nextwave_widgets import ZernikeDialog, BoxInfoDialog, ActuatorPlot, MyBarWidget, OfflineDialog, IntensityDialogX
 
 from threading import Thread
 
 from zernike_functions import calc_rms
 
 import scipy # For scipy.stats.mode: auto background
+
 
 import xml.etree.ElementTree as ET
 
@@ -104,6 +107,7 @@ class NextWaveMainWindow(QMainWindow):
     self.chkLoop = QCheckBox("Close AO Loop") # This is needed for engine.mode_init, called in our init. Will be replaced by chkbox widget in our InitUI
 
     self.offline_dialog = OfflineDialog(self)
+    #self.dialog_intensityX = IntensityDialogX(self)
 
     self.scale_num=2
     self.scales=[512,768,1024,1536,2048]
@@ -130,7 +134,7 @@ class NextWaveMainWindow(QMainWindow):
     self.params = [
         {'name': 'UI', 'type': 'group', 'title':'User interface', 'children': [
             {'name': 'update_rate', 'type': 'int', 'value': 200, 'title':'Display update rate (ms)', 'limits':[50,2000]},
-            {'name': 'update_rate_dm', 'type': 'int', 'value': 100, 'title':'DM Display update rate (ms)', 'limits':[50,2000]},
+            {'name': 'update_rate_dm', 'type': 'int', 'value': 80, 'title':'DM Display update rate (ms)', 'limits':[50,2000]},
             {'name': 'show_boxes', 'type': 'bool', 'value': True, 'title':'Show search boxes'}
         ]},
         {'name': 'WF Camera', 'type': 'group', 'children': [
@@ -198,6 +202,14 @@ class NextWaveMainWindow(QMainWindow):
 
  def update_ui(self):
 
+    ret, info = joystickapi.joyGetPosEx(id)
+    if ret:
+        btns = [(1 << i) & info.dwButtons != 0 for i in range(caps.wNumButtons)]
+        if btns[1]:
+            #chkLoop.setChecked( False )
+            chkActivateMetric.setChecked( False )
+            print("GOT IT")
+            
     image_pixels = self.engine.receive_image()
     self.image_pixels = np.log10(image_pixels) / np.log10(255) * 255
     
@@ -264,7 +276,9 @@ class NextWaveMainWindow(QMainWindow):
                        self.engine.box_y[n]+box_size_pixel//2-BOX_BORDER) for n in np.arange(self.engine.box_x.shape[0])]
         painter.drawLines(boxes1)
 
-        idx_bads=np.where(np.isnan(self.engine.centroids_x))[0]
+        idx_bads=np.where(np.any(
+            (np.isnan(self.engine.centroids_x),
+            self.engine.centroid_valid==0),0) )[0]
         pen = QPen(Qt.red, 1.00, Qt.SolidLine)
         painter.setPen(pen)
         #print( idx_bads, end='')        
@@ -416,15 +430,15 @@ class NextWaveMainWindow(QMainWindow):
     if not self.engine.zernikes is None:
         rms,rms5p,cylinder,sphere,axis=calc_rms(self.engine.zernikes, self.engine.pupil_radius_mm)
         left_chars=15
-        str_stats=f"{'RMS':<15}= {rms:3.2f}\n"
+        str_stats=f"{'RMS':<15}= {rms:3.4f}\n"
         str_stats+=f"{'HORMS':<15}= {rms5p:3.2f}\n"
         str_stats+=f"{'Sphere(+cyl)':<15}= {sphere:3.2f}\n"
         #str_stats+=f"{'Sphere(-cyl)':<15}= {sphere:3.2f}\n"
-        str_stats+=f"{'Cylinder':<15}= {cylinder:3.2f}\n"
-        str_stats+=f"{'Axis(-cyl)':<15}= {axis:3.2f}\n"
+        #str_stats+=f"{'Cylinder':<15}= {cylinder:3.2f}\n"
+        #str_stats+=f"{'Axis(-cyl)':<15}= {axis:3.2f}\n"
         
-        str_stats += f"Mean (x,y): {self.engine.mean_displacements[0]:4.2f},{self.engine.mean_displacements[1]:4.2f}" 
-        str_stats += f" Zs: {self.engine.zernikes[0]:4.2f},{self.engine.zernikes[1]:4.2f}" 
+        str_stats += f"Mean (x,y): {self.engine.mean_displacements[0]:4.2f},{self.engine.mean_displacements[1]:4.2f}\n" 
+        str_stats += f" Zs: {self.engine.zernikes[0]:4.3f},{self.engine.zernikes[1]:4.3f}" 
         
         self.text_stats.setText(str_stats)
         #self.text_stats.setHtml(str_stats) # TODO: To get other colors, can embed <font color="red">TEXT</font><br>, etc.
@@ -445,7 +459,7 @@ class NextWaveMainWindow(QMainWindow):
           if self.chkLoop.isChecked():
               s += "(AO) "
           s+="%3.2f FPS (%04.2f ms: %04.1f+%04.2f ms)"%(1000/self.engine.fps0,self.engine.fps0, float(self.engine.fps1), float(self.engine.fps2)  )
-          s+="\nFrames: %d"%self.engine.total_frames
+          s+="\nFrames: %d %d "%( self.engine.total_frames, self.engine.record_frames )
       else:
           s="Offline. %d boxes. %d zern terms"%(self.engine.num_boxes, self.engine.zterms_full.shape[0] )
     else:
@@ -464,6 +478,8 @@ class NextWaveMainWindow(QMainWindow):
     # TODO: Is this the right place for these? They could be in our setters/slider callback
     self.label_defocus.setText( 'Defocus: %0.3f'%self.engine.defocus )
     self.label_aogain.setText(  'AO Gain: %0.3f'%self.engine.aogain )
+    self.label_aorate.setText(  'AO Delay: %d'%self.engine.aorate )
+    self.label_aobleed.setText(  'AO Bleed: %0.3f'%self.engine.aobleed )
     self.label_dmfill.setText(  'DM Fill: %0.3f'%self.engine.dmfill )
     self.label_condition.setText(  'Cond #: %0.3f'%self.engine.condition )
 
@@ -535,8 +551,8 @@ class NextWaveMainWindow(QMainWindow):
     self.bar_plot.showGrid(x=False,y=True)
 
  def update_ui_dm(self):
-    if self.chkLoop.isChecked():
-        self.actuator_plot.paintEvent_manual()
+    #if self.chkLoop.isChecked():
+    self.actuator_plot.paintEvent_manual()
 
     # New method is to send the command somewhere else
     if False:
@@ -805,6 +821,9 @@ class NextWaveMainWindow(QMainWindow):
 
      self.chkMove.clicked.connect(lambda: self.set_m(self.chkMove.isChecked()) )
 
+     self.chkMoveTipTilt = QCheckBox("TT")
+     layout1.addWidget(self.chkMoveTipTilt,0,6,alignment=Qt.AlignCenter)
+     
      lbl = QLabel("Center X:")
      layout1.addWidget(lbl,0,0)
      lbl = QLabel("Center Y:")
@@ -825,6 +844,10 @@ class NextWaveMainWindow(QMainWindow):
      #btnFind = QPushButton("Find center")
      #btnFind.setStyleSheet("color : orange")
      #layout1.addWidget(btnFind,2,1)
+
+     self.chkRecord = QCheckBox("Rec")
+     layout1.addWidget(self.chkRecord,0,4,alignment=Qt.AlignCenter)
+     self.chkRecord.clicked.connect( self.toggle_record )
 
      self.it_start = QLineEdit("3.5")
      layout1.addWidget(self.it_start,4,0)
@@ -965,7 +988,13 @@ class NextWaveMainWindow(QMainWindow):
 
      self.chkActivateMetric = QCheckBox("Activate Metric")
      self.chkActivateMetric.stateChanged.connect(self.activate_metric)
-     layout1.addWidget(self.chkActivateMetric, 3,0 )
+     layout1.addWidget(self.chkActivateMetric, 8,2 )
+
+     self.chkRemoveTipTilt = QCheckBox("Remove tiptilt")
+     self.chkRemoveTipTilt.setChecked(True)
+     self.chkRemoveTipTilt.stateChanged.connect(self.do_remove_tiptilt)
+     layout1.addWidget(self.chkRemoveTipTilt, 8,3 )
+
      
 #     self.chkBackSubtract = QCheckBox("Subtract background")
      #btn.clicked.connect(self.activate_metric)
@@ -1004,7 +1033,17 @@ class NextWaveMainWindow(QMainWindow):
      self.slider_defocus.setMaximum(1000)
      self.slider_defocus.setValue(500) 
      layout1.addWidget(self.slider_defocus,3,2)
-     self.slider_defocus.valueChanged.connect(self.slider_defocus_changed) # TODO
+     self.slider_defocus.valueChanged.connect(self.slider_defocus_changed)
+
+     self.label_aobleed = QLabel("AO Bleed: ")
+     layout1.addWidget(self.label_aobleed, 4,0)
+     self.slider_aobleed = QSlider(orientation=Qt.Horizontal)
+     self.slider_aobleed.setMinimum(0)
+     self.slider_aobleed.setMaximum(20)
+     self.slider_aobleed.setValue(0) 
+     layout1.addWidget(self.slider_aobleed,4,1)
+     self.slider_aobleed.valueChanged.connect(self.slider_aobleed_changed)
+
 
      self.label_aogain = QLabel("AO Gain: ")
      layout1.addWidget(self.label_aogain, 4,3)
@@ -1012,8 +1051,16 @@ class NextWaveMainWindow(QMainWindow):
      self.slider_aogain.setMinimum(0)
      self.slider_aogain.setMaximum(100)
      layout1.addWidget(self.slider_aogain,4,2)
-     self.slider_aogain.valueChanged.connect(self.slider_aogain_changed) # TODO
+     self.slider_aogain.valueChanged.connect(self.slider_aogain_changed)
 
+     self.label_aorate = QLabel("AO Delay: ")
+     layout1.addWidget(self.label_aorate, 3,0)
+     self.slider_aorate = QSlider(orientation=Qt.Horizontal)
+     self.slider_aorate.setMinimum(1)
+     self.slider_aorate.setMaximum(100)
+     layout1.addWidget(self.slider_aorate,3,1)
+     self.slider_aorate.valueChanged.connect(self.slider_aorate_changed)
+     
      self.label_dmfill = QLabel("DM Fill: ")
      layout1.addWidget(self.label_dmfill, 5,3)
      self.slider_dmfill = QSlider(orientation=Qt.Horizontal)
@@ -1047,7 +1094,7 @@ class NextWaveMainWindow(QMainWindow):
 #     btn1.clicked.connect(self.engine.apply_zernikes)
      btn1.clicked.connect(lambda: self.show_zernike_dialog("Apply Zs", self.engine.apply_zernikes ) )
      
-     self.chkZonal = QCheckBox("Zonal Correction")
+     self.chkZonal = QCheckBox("Modal Correction")
      #self.chkFollow.stateChanged.connect(lambda:self.set_follow(self.chkFollow.isChecked()))
      layout1.addWidget(self.chkZonal, 7,3 )
 
@@ -1062,6 +1109,15 @@ class NextWaveMainWindow(QMainWindow):
      self.zonal_modes.setMaximum(97)
      self.zonal_modes.setValue(85)     
      layout1.addWidget(self.zonal_modes,7,2)
+     
+     self.label_metric = QLabel("Metric Threshold: ")
+     layout1.addWidget(self.label_metric, 8,0)
+     self.slider_metric = QSlider(orientation=Qt.Horizontal)
+     self.slider_metric.setMinimum(1)
+     self.slider_metric.setMaximum(100)
+     self.slider_metric.setValue(50)     
+     layout1.addWidget(self.slider_metric,8,1)
+     self.slider_metric.valueChanged.connect(self.slider_metric_changed)
      
      self.widget_mode_buttons = QWidget()
      layoutStatusButtons = QHBoxLayout(self.widget_mode_buttons)
@@ -1086,7 +1142,7 @@ class NextWaveMainWindow(QMainWindow):
      layoutStatusButtons.addWidget(self.mode_btn4)
      self.mode_btn4.clicked.connect(self.mode_stop)
 
-     self.edit_num_runs = QLineEdit("9999")
+     self.edit_num_runs = QLineEdit("999999")
      self.edit_num_runs.setMaxLength(6)
      layoutStatusButtons.addWidget(self.edit_num_runs)
 
@@ -1248,8 +1304,19 @@ class NextWaveMainWindow(QMainWindow):
     #msgBox.update()
     self.engine.do_calibration(self.calibration_status)
  
+ def slider_metric_changed(self):
+    val=self.slider_metric.value()/100.0
+    self.label_metric.setText('Metric (%0.2f): '%val)
+    self.engine.metric_set( val  )
+
+ def slider_aobleed_changed(self):
+    self.engine.aobleed_set( self.slider_aobleed.value()/100.0 )
+
  def slider_aogain_changed(self):
     self.engine.aogain_set( self.slider_aogain.value()/100.0 )
+
+ def slider_aorate_changed(self):
+    self.engine.aorate_set( self.slider_aorate.value() )
     
  def slider_defocus_changed(self):
      scaled = (self.slider_defocus.value()-500)/100.0
@@ -1302,6 +1369,9 @@ class NextWaveMainWindow(QMainWindow):
  def autoshift_search_boxes(self):
      self.engine.autoshift_search_boxes()
 
+ def toggle_record(self):
+    self.engine.comm.do_record_toggle( self.chkRecord.isChecked() )
+
  def set_m(self, doit):
      if doit:
          self.m = round( self.engine.box_size_pixel )
@@ -1320,6 +1390,12 @@ class NextWaveMainWindow(QMainWindow):
     else:
         self.sockets.centroiding.send(b"m\x00")
  
+ def do_remove_tiptilt(self):
+    if self.chkRemoveTipTilt.isChecked():
+        self.sockets.centroiding.send(b"P\x00")
+    else:
+        self.sockets.centroiding.send(b"p\x00")
+        
  def sub_background(self):
     # TODO: Don't allow subtract if it hasn't been set once
     if (self.chkBackSubtract.isChecked()):
@@ -1347,6 +1423,18 @@ class NextWaveMainWindow(QMainWindow):
         self.sockets.centroiding.send(b"t\x00")
 
  def move_center(self, dx, dy, m=1, do_update=True):
+     
+    if ( self.chkMoveTipTilt.isChecked() ):
+        if (dx<0):
+            self.sockets.centroiding.send(b"x-0.01\x00");
+        if (dx>0):
+            self.sockets.centroiding.send(b"x+0.01\x00");
+        if (dy<0):
+            self.sockets.centroiding.send(b"y-0.01\x00");
+        if (dy>0):
+            self.sockets.centroiding.send(b"y+0.01\x00");
+        return;
+            
     m = self.m
     self.cx += (dx * m)
     self.cy += (dy * m)
@@ -1574,6 +1662,18 @@ def start_backdoor(win):
     t.start()
 
 def main():
+  num = joystickapi.joyGetNumDevs()
+  ret, caps, startinfo = False, None, None
+  for idj in range(num):
+    ret, caps = joystickapi.joyGetDevCaps(id)
+    if ret:
+        print("gamepad detected: " + caps.szPname)
+        print("ID: " + idj)
+        ret, startinfo = joystickapi.joyGetPosEx(id)
+        break
+    else:
+      print("no gamepad detected")
+        
   app = QApplication(sys.argv)
   win = NextWaveMainWindow()
   win.app = app

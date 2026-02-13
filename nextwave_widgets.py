@@ -132,7 +132,8 @@ class BoxInfoDialog(QDialog):
             pass
         try:
             
-            line1 += "(%f)"%(self.ui_parent.engine.centroid_valid[n] )
+            line1 += "(V=%f) (M=%f)"%(
+                self.ui_parent.engine.centroid_valid[n],self.ui_parent.engine.centroid_metric[n] )
         except:
             pass
         self.text_num.setText(line1)
@@ -351,4 +352,17 @@ class OfflineDialog(QDialog):
         # Set the layout for the dialog
         self.setLayout(layout)
 
+class IntensityDialogX(QDialog):
+    def __init__(self,parent):
+        super().__init__(parent)
 
+        self.setWindowTitle("IntensityX")
+
+        self.sc = MplCanvas(self, width=8, height=1, dpi=100)
+
+        # Create a layout for the dialog
+        layout = QVBoxLayout()
+        layout.addWidget(self.sc)
+
+        # Set the layout for the dialog
+        self.setLayout(layout)
