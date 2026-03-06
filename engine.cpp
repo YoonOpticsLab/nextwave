@@ -371,7 +371,7 @@ int main(int argc, char** argv)
       boost::chrono::high_resolution_clock::time_point time_start_frame = boost::chrono::high_resolution_clock::now();
 
       int modnum=0;
-      int logidx=pipeline_count % REP_LOG;
+      int logidx_ns=pipeline_count % REP_LOG;
 
       uint16_t times_local[4]; //TODO
       double dur;
@@ -391,7 +391,7 @@ int main(int argc, char** argv)
 			dur = micros.count();
 			ms_times_100 = (uint16_t)(dur*CLOCK_MULT);
 
-			ns[logidx*3+modnum] = ms_times_100;
+			ns[logidx_ns*3+modnum] = ms_times_100;
 			times_local[modnum] = ms_times_100;
 
 			boost::chrono::duration<double>time_since_start = time_before - time_start;
