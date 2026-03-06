@@ -480,8 +480,10 @@ class NextwaveEngine():
         spot_displace_y = -(self.ref_y - self.centroids_y)
 
         # Not sure whether should do this:
-        #spot_displace_x -= spot_displace_x.mean()
-        #spot_displace_y -= spot_displace_y.mean()
+        # DRC: I am restoring this on 2026/03/06 (!) Breaking?
+        spot_displace_x -= spot_displace_x.nanmean()
+        spot_displace_y -= spot_displace_y.nanmean()
+        
         #print( spot_displace_y.mean(), spot_displace_x.mean() )
         self.mean_displacements = [np.nanmean(spot_displace_x), np.nanmean(spot_displace_y) ]
 

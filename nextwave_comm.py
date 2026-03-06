@@ -275,10 +275,10 @@ class NextwaveEngineComm():
         SIZEOF_DOUBLE=8
         fields=self.layout_boxes[1]
         num_boxes=self.parent.num_boxes
+        
         self.shmem_boxes.seek(fields['centroid_x']['bytenum_current'])
         buf=self.shmem_boxes.read(num_boxes*SIZEOF_DOUBLE)
         self.parent.centroids_x=np.array( struct.unpack_from(''.join((['d']*num_boxes)), buf) )
-
         self.shmem_boxes.seek(fields['centroid_y']['bytenum_current'])
         buf=self.shmem_boxes.read(num_boxes*SIZEOF_DOUBLE)
         self.parent.centroids_y=np.array( struct.unpack_from(''.join((['d']*num_boxes)), buf) )
@@ -286,7 +286,6 @@ class NextwaveEngineComm():
         self.shmem_boxes.seek(fields['delta_x']['bytenum_current'])
         buf=self.shmem_boxes.read(num_boxes*SIZEOF_DOUBLE)
         self.parent.centroids_delta_x=struct.unpack_from(''.join((['d']*num_boxes)), buf)
-
         self.shmem_boxes.seek(fields['delta_y']['bytenum_current'])
         buf=self.shmem_boxes.read(num_boxes*SIZEOF_DOUBLE)
         self.parent.centroids_delta_y=struct.unpack_from(''.join((['d']*num_boxes)), buf)

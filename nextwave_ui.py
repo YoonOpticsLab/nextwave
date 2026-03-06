@@ -952,7 +952,7 @@ class NextWaveMainWindow(QMainWindow):
 
      self.slider_gain = QSlider(orientation=Qt.Horizontal)
      self.slider_gain.setMinimum(0) # TODO: Get from camera
-     self.slider_gain.setMaximum(100) # TODO: Get from camera
+     self.slider_gain.setMaximum(95) # TODO: Get from camera
      layout1.addWidget(self.slider_gain,3,1)
      self.slider_gain.valueChanged.connect(self.slider_gain_changed)
 
@@ -995,6 +995,10 @@ class NextWaveMainWindow(QMainWindow):
      self.chkRemoveTipTilt.stateChanged.connect(self.do_remove_tiptilt)
      layout1.addWidget(self.chkRemoveTipTilt, 8,3 )
 
+     self.chkModalEdges = QCheckBox("Modal edges")
+     self.chkModalEdges.setChecked(False)
+     self.chkModalEdges.stateChanged.connect(self.do_modal_edges)
+     layout1.addWidget(self.chkModalEdges, 9,3 )
      
 #     self.chkBackSubtract = QCheckBox("Subtract background")
      #btn.clicked.connect(self.activate_metric)
@@ -1395,6 +1399,12 @@ class NextWaveMainWindow(QMainWindow):
         self.sockets.centroiding.send(b"P\x00")
     else:
         self.sockets.centroiding.send(b"p\x00")
+
+ def do_modal_edges(self):
+    if self.chkModalEdges.isChecked():
+        self.sockets.centroiding.send(b"O\x00")
+    else:
+        self.sockets.centroiding.send(b"o\x00")
         
  def sub_background(self):
     # TODO: Don't allow subtract if it hasn't been set once
