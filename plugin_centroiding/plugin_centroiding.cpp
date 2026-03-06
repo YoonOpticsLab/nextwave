@@ -42,6 +42,7 @@ uint8_t bDoThreshold=0;
 uint8_t bBackgroundSet=0; // First time
 uint8_t bUseMetric=0;
 uint8_t bDoRemoveTipTilt=1; // Default to yes, subtract off tip/tilt
+uint8_t bDoModalEdges=0;
 
 int16_t autoBack=-1;
 
@@ -129,6 +130,9 @@ public:
  // af::array influence;
   af::array influence_inv;
   af::array mirror_voltages;
+  
+  af::array x_est;
+  af::array y_est;
   
   af::array dummy; // To try to prevent crash
 };
@@ -479,9 +483,8 @@ int find_centroids_af(unsigned char *buffer, int width, int height) {
   gaf->sums_x(gaf->omits) = af::NaN;
   gaf->sums_y(gaf->omits) = af::NaN; 
 
-  // Compute deltas and write to shmem
-  gaf->delta_x = gaf->sums_x - gaf->ref_x;
-  gaf->delta_y = gaf->sums_y - gaf->ref_y;
+  gaf->delta_x = (gaf->sums_x - gaf->ref_x);
+  gaf->delta_y = (gaf->sums_y - gaf->ref_y);
 
 #if 1
   // TODO: Might this be slow? # TODO: Move this later, to where everything is logged together? Run afterwards, asynch/overlapped ?
@@ -499,8 +502,22 @@ int find_centroids_af(unsigned char *buffer, int width, int height) {
   else
 	valids = (metrics >= 0.0) && (minimum_thresh>0.04) && !af::isNaN (gaf->sums_x) && !af::isInf (gaf->sums_x); 
 
-  af::array idx_valid=af::where(valids); // Array of non-zeros\
+  af::array idx_valid=af::where(valids); // Array of non-zeros
   
+	// Use recent modal for invalid boxes
+	if (bDoRemoveTipTilt* 0) { //TODO FIXME
+	  af::array idx_invalid=af::where(!valids); 
+	  memcpy(local_buf, pShmemBoxes->box_x_normalized, sizeof(CALC_TYPE) * num_boxes);
+	  gaf->x_est = af::array(1, num_boxes, local_buf);
+	  memcpy(local_buf, pShmemBoxes->box_y_normalized, sizeof(CALC_TYPE) * num_boxes);
+	  gaf->y_est = af::array(1, num_boxes, local_buf);
+	  
+	  gaf->delta_x( idx_invalid ) = 0; //gaf->x_est( invalids ) * 0 ;
+	  gaf->delta_y( idx_invalid ) = 0; //gaf->y_est( invalids ) * 0 ;
+	  valids = valids*0 + 1;
+	  idx_valid=af::where(valids); // Array of non-zeros
+	}
+ 
   //gaf->delta_x( af::where(valids==0) ) = af::NaN;
 
   af::dim4 dims=idx_valid.dims();
@@ -513,7 +530,7 @@ int find_centroids_af(unsigned char *buffer, int width, int height) {
  // Check that valids are okay
  
   // Remove tip and tilt
-  if (bDoRemoveTipTilt) {
+  if (bDoRemoveTipTilt) { //TODO FIXME
 	  gaf->delta_x -= (CALC_TYPE)af::mean<CALC_TYPE>(gaf->delta_x(valids) ); // weighted mean, 0 for NaNs
 	  gaf->delta_y -= (CALC_TYPE)af::mean<CALC_TYPE>(gaf->delta_y(valids) );
   };
@@ -523,7 +540,6 @@ int find_centroids_af(unsigned char *buffer, int width, int height) {
   gaf->delta_y += f_tiptilt_y;
   
   gaf->delta_y = -gaf->delta_y; // Negate y (coord system)
-
   
   // Interleave x and y slopes. Stack them side-by-side, transpose then flatten.
   // This is correct because they are arrays with dimensions (1,x)
@@ -556,15 +572,15 @@ int find_centroids_af(unsigned char *buffer, int width, int height) {
   //gaf->delta_x( af::where(!valids) ) = 0;
   //gaf->delta_y( af::where(!valids) ) = 0;
   //gaf->delta_x( af::where(valids==0) ) = gaf->delta_x( af::where(valids==0) ) / 0.0;
-  af::replace(gaf->delta_x, !valids, 0.0);
-  af::replace(gaf->delta_y, !valids, 0.0);
+  //af::replace(gaf->delta_x, !valids, 0.0);
+  //af::replace(gaf->delta_y, !valids, 0.0);
 
 #if SLOW
   if (1) {
   CALC_TYPE *host_delta_x = gaf->delta_x.host<CALC_TYPE>();
   CALC_TYPE *host_delta_y = gaf->delta_y.host<CALC_TYPE>();
-  //memcpy(pShmemBoxes->delta_x, host_delta_x, sizeof(CALC_TYPE)*num_boxes);
-  //memcpy(pShmemBoxes->delta_y, host_delta_y, sizeof(CALC_TYPE)*num_boxes);
+  memcpy(pShmemBoxes->delta_x, host_delta_x, sizeof(CALC_TYPE)*num_boxes);
+  memcpy(pShmemBoxes->delta_y, host_delta_y, sizeof(CALC_TYPE)*num_boxes);
   // If want to log deltas:
   memcpy(gpShmemLog[gpShmemHeader->log_index].centroid_x, host_delta_x, sizeof(CALC_TYPE)*num_boxes);
   memcpy(gpShmemLog[gpShmemHeader->log_index].centroid_y, host_delta_y, sizeof(CALC_TYPE)*num_boxes);
@@ -579,7 +595,7 @@ int find_centroids_af(unsigned char *buffer, int width, int height) {
 
   //af::array idx_double;
   CALC_TYPE *host_slopes = gaf->slopes.host<CALC_TYPE>(); // as(f64).
-  memcpy(pShmemBoxes->box_x_normalized, host_slopes, sizeof(CALC_TYPE)*num_boxes*2); // Slopes have X and Y
+  //memcpy(pShmemBoxes->box_x_normalized, host_slopes, sizeof(CALC_TYPE)*num_boxes*2); // Slopes have X and Y
   af::freeHost(host_slopes);
 
   // TODO: must we recompute host pointers all the time?
@@ -731,6 +747,14 @@ void process_ui_commands(void) {
       bDoRemoveTipTilt=0;
       break;
 
+    case 'O':
+      spdlog::info("O!");
+      bDoModalEdges=1;
+      break;
+    case 'o':
+      spdlog::info("o!");
+      bDoModalEdges=0;
+      break;
 	
     case 'E': {
       int xpos=atoi(msg+1);
