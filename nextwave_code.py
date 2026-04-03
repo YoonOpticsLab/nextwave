@@ -239,7 +239,14 @@ class NextwaveEngine():
             distances = (self.box_x - self.box_x[nidx])**2 + (self.box_y - self.box_y[nidx])**2
             self.neighbors[nidx]=np.argsort( distances)[1:5] # Take 4 nearest, excluding self (which will be 0)
 
+        self.a = np.zeros( num_boxes, dtype='uint8' )
         self.omits = np.zeros( num_boxes, dtype='uint8' )
+        self.load_omits()
+        self.update_searchboxes(send_to_engine=True)        
+        
+        return self.ref_x,self.ref_y,self.norm_x,self.norm_y
+
+    def load_omits(self):
         try:
             #fil=open("omits.txt","rt")
             #lins=fil.readlines();
@@ -251,9 +258,6 @@ class NextwaveEngine():
             print()
         except:
             pass
-        self.update_searchboxes(send_to_engine=True)        
-        
-        return self.ref_x,self.ref_y,self.norm_x,self.norm_y
 
     def do_zonal(self, num_modes, num_zern ):
         # This matches what is shown on the screen
@@ -457,13 +461,18 @@ class NextwaveEngine():
         self.condition = s[0]/s[self.modes-1]
             
         self.influence_inv = ( (U * s_recip) @ V[0:97,:] ).T
+        np.save('influ_nextwave', self.influence_inv )
+        
+        self.influence_inv = np.load( "inverse.npy")
+        self.influence_inv = self.influence_inv.T
+        np.save('influ_loaded', self.influence_inv )
+        
         self.influence_inv[:,self.acts_outside] = 0
 
         self.nActuators=self.influence.shape[0]
         self.nTerms=self.influence.shape[1]
         np.save('infl_reduced', self.influence )
-        np.save('influ', self.influence_inv )
-
+       
         self.ui.offline_dialog.sc.axes.clear();
         self.ui.offline_dialog.sc.axes.plot(np.arange(len(s))+1, s[0]/s, 'o-')
         self.ui.offline_dialog.sc.axes.axvline( self.modes, color='r' )
@@ -477,12 +486,14 @@ class NextwaveEngine():
     def compute_zernikes(self):
         # find slope
         spot_displace_x =   self.ref_x - self.centroids_x
-        spot_displace_y = -(self.ref_y - self.centroids_y)
+        spot_displace_y = (self.ref_y - self.centroids_y)
 
         # Not sure whether should do this:
         # DRC: I am restoring this on 2026/03/06 (!) Breaking?
-        spot_displace_x -= spot_displace_x.nanmean()
-        spot_displace_y -= spot_displace_y.nanmean()
+        spot_displace_x -= np.nanmean( spot_displace_x )
+        spot_displace_y -= np.nanmean( spot_displace_y )
+        
+        spot_displace_y = -spot_displace_y;
         
         #print( spot_displace_y.mean(), spot_displace_x.mean() )
         self.mean_displacements = [np.nanmean(spot_displace_x), np.nanmean(spot_displace_y) ]
@@ -699,6 +710,7 @@ class NextwaveEngine():
     def mode_init(self):
         self.mode=1
         self.init_params(False)
+        self.load_omits()
         self.mode_snap()
         #time.sleep(0.1)
 
@@ -755,6 +767,7 @@ class NextwaveEngine():
         np.savetxt('dx',self.spot_displace_x)
         np.savetxt('dy',self.spot_displace_y)
         np.save('slope',self.slope)
+        np.savetxt('image',self.image_bytes,fmt='%d')
         #np.save('zterms_full',self.zterms_full)
         #np.save('zterms_inv',self.zterms_inv)
 
