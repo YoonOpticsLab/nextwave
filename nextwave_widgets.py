@@ -138,11 +138,13 @@ class BoxInfoDialog(QDialog):
             pass
         self.text_num.setText(line1)
         self.text_box.setText("box center=(%0.3f,%0.3f)"%(box_x,box_y))
-        self.text_centroid.setText("centroid=(%0.3f,%0.3f)\n{%+0.3f,%+0.3f}\n{%+0.3f,%+0.3f}"%(
+        self.text_centroid.setText("centroid=(%0.3f,%0.3f)\n{%+0.3f,%+0.3f}\ndx,dy={%+0.3f,%+0.3f}dif={%+0.3f,%+0.3f}"%(
             centroid_x_abs,centroid_y_abs,
+            centroid_x_abs - self.engine.ref_x[n], centroid_y_abs - self.engine.ref_y[n],
             self.engine.centroids_delta_x[n], self.engine.centroids_delta_y[n],
-            centroid_x_abs - self.engine.ref_x[n],
-            centroid_y_abs - self.engine.ref_y[n]) )
+            centroid_x_abs - self.engine.ref_x[n]-self.engine.centroids_delta_x[n],
+            centroid_y_abs - self.engine.ref_y[n]-self.engine.centroids_delta_y[n]
+            ))
         self.box_pix=box_pix
         self.cent_x=cent_x
         self.cent_y=cent_y

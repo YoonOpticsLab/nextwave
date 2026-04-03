@@ -504,20 +504,6 @@ int find_centroids_af(unsigned char *buffer, int width, int height) {
 
   af::array idx_valid=af::where(valids); // Array of non-zeros
   
-	// Use recent modal for invalid boxes
-	if (bDoRemoveTipTilt* 0) { //TODO FIXME
-	  af::array idx_invalid=af::where(!valids); 
-	  memcpy(local_buf, pShmemBoxes->box_x_normalized, sizeof(CALC_TYPE) * num_boxes);
-	  gaf->x_est = af::array(1, num_boxes, local_buf);
-	  memcpy(local_buf, pShmemBoxes->box_y_normalized, sizeof(CALC_TYPE) * num_boxes);
-	  gaf->y_est = af::array(1, num_boxes, local_buf);
-	  
-	  gaf->delta_x( idx_invalid ) = 0; //gaf->x_est( invalids ) * 0 ;
-	  gaf->delta_y( idx_invalid ) = 0; //gaf->y_est( invalids ) * 0 ;
-	  valids = valids*0 + 1;
-	  idx_valid=af::where(valids); // Array of non-zeros
-	}
- 
   //gaf->delta_x( af::where(valids==0) ) = af::NaN;
 
   af::dim4 dims=idx_valid.dims();
@@ -528,9 +514,27 @@ int find_centroids_af(unsigned char *buffer, int width, int height) {
 	goto free_afterwards;
   }
  // Check that valids are okay
- 
+
+	// Use recent modal for invalid boxes
+	if (bDoModalEdges) {
+	  af::array idx_invalid=af::where(!valids); 
+	  memcpy(local_buf, pShmemBoxes->box_x_normalized, sizeof(CALC_TYPE) * num_boxes);
+	  gaf->x_est = af::array(1, num_boxes, local_buf);
+	  memcpy(local_buf, pShmemBoxes->box_y_normalized, sizeof(CALC_TYPE) * num_boxes);
+	  gaf->y_est = af::array(1, num_boxes, local_buf);
+	  
+	  gaf->delta_x( valids==0 ) = gaf->x_est( valids==0 ) ;
+	  gaf->delta_y( valids==0 ) = gaf->y_est( valids==0 ) ;
+	  //valids = valids*0 + 1;
+	  //idx_valid=af::where(valids); // Array of non-zeros
+	  
+	  // Now say that eveything is valid
+	  valids = gaf->delta_x < 999999;
+	  idx_valid=af::where(valids); // Array of non-zeros
+	}
+	
   // Remove tip and tilt
-  if (bDoRemoveTipTilt) { //TODO FIXME
+  if (bDoRemoveTipTilt) {
 	  gaf->delta_x -= (CALC_TYPE)af::mean<CALC_TYPE>(gaf->delta_x(valids) ); // weighted mean, 0 for NaNs
 	  gaf->delta_y -= (CALC_TYPE)af::mean<CALC_TYPE>(gaf->delta_y(valids) );
   };
@@ -538,9 +542,9 @@ int find_centroids_af(unsigned char *buffer, int width, int height) {
   // Add the induced tip/tilt (usually zero)
   gaf->delta_x += f_tiptilt_x;
   gaf->delta_y += f_tiptilt_y;
-  
+
   gaf->delta_y = -gaf->delta_y; // Negate y (coord system)
-  
+	
   // Interleave x and y slopes. Stack them side-by-side, transpose then flatten.
   // This is correct because they are arrays with dimensions (1,x)
   gaf->slopes = af::join(0, gaf->delta_x, gaf->delta_y); 
