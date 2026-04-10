@@ -18,6 +18,7 @@ import extract_memory
 
 import zernike_functions
 import iterative
+import functions_grid
 
 from nextwave_comm import NextwaveEngineComm
 from offline import NextwaveOffline
@@ -83,6 +84,8 @@ class NextwaveEngine():
         self.acts_outside = np.array([],dtype='int')
         self.modes = 97
         self.condition = 9999
+        
+        self.ao_precondition = True # Fancy Tikhanov preconditioning
         
     def init(self):
         if not self.ui.offline_only:
@@ -434,7 +437,7 @@ class NextwaveEngine():
         self.influence = self.influence_full[:,valid_indices]
         np.save('infl', self.influence )
 
-        if True:
+        if True: # This is all for zonal, which we may not use
             zonal_modes = 85
             U, s, V = np.linalg.svd(self.influence, full_matrices=True)
             s_recip = 1/s
@@ -449,21 +452,45 @@ class NextwaveEngine():
         
         if len(self.acts_outside)>0:
             self.influence[self.acts_outside,:] = 0 # Zero them out, if any
-        U, s, V = np.linalg.svd(self.influence, full_matrices=True)
-        s_recip = 1/s
-        s_recip[ s<1e-10 ] = 0 # Set any tinies (or 0) to zero
-        
-        print( max_boxes, len(valid_boxes), self.influence.shape, s.max(), valid_boxes[0:10], RR.shape )
+            
+            
+        if self.ao_precondition:
+            # New method using Tikhanov preconditioning, etc.
+            grid_act=functions_grid.sparse_grid(97)
+            L=grid_act.build_laplacian_sparse()
 
-        if self.modes < len(s):
-            s_recip[self.modes:] = 0 # Clear all the modes from x up
+            D=self.influence.T
+            R=L
+            R_ridge = R + 1e-6 * np.eye(R.shape[0] )
+            QR,S=np.linalg.qr(R_ridge,mode='reduced')
+            S_inv=np.linalg.pinv(S)
+            D_w = D @ S_inv
+
+            U,sv,Vt = np.linalg.svd(D_w,full_matrices=False)
+            alpha=0.01
+            ff=sv/(sv**2+alpha)
+
+            ff[self.modes:] = 0
+            C_w = Vt.T @ np.diag(ff) @ U.T
+
+            self.influence_inv=S_inv @ C_w
+            self.influence_inv=self.influence_inv.T
+   
+            self.condition = sv[0]/sv[self.modes-1]
             
-        self.condition = s[0]/s[self.modes-1]
+        else:
+            U, s, V = np.linalg.svd(self.influence, full_matrices=True)
+            s_recip = 1/s
+            s_recip[ s<1e-10 ] = 0 # Set any tinies (or 0) to zero
             
-        self.influence_inv = ( (U * s_recip) @ V[0:97,:] ).T
-        np.save('influ_nextwave', self.influence_inv )
-        
-        self.influence_inv = np.load( "inverse.npy")
+            print( max_boxes, len(valid_boxes), self.influence.shape, s.max(), valid_boxes[0:10], RR.shape )
+
+            if self.modes < len(s):
+                s_recip[self.modes:] = 0 # Clear all the modes from x up
+                
+            self.condition = s[0]/s[self.modes-1]
+            self.influence_inv = ( (U * s_recip) @ V[0:97,:] ).T
+            
         self.influence_inv = self.influence_inv.T
         np.save('influ_loaded', self.influence_inv )
         

@@ -405,6 +405,13 @@ def createUI(self):
     layout1.addWidget(self.chkModalEdges, y_curr,3)
     y_curr += 1
 
+    ### Tikhanov correction
+    self.chkAOPrecondition = QCheckBox("AO Tikhanov Precondition")
+    self.chkAOPrecondition.setChecked(True)
+    self.chkAOPrecondition.stateChanged.connect(self.do_ao_precondition)
+    layout1.addWidget(self.chkAOPrecondition, y_curr,3)
+    y_curr += 1
+    
     self.widget_mode_buttons = QWidget()
     layoutStatusButtons = QHBoxLayout(self.widget_mode_buttons)
 

@@ -830,6 +830,9 @@ class NextWaveMainWindow(QMainWindow):
     else:
         self.sockets.centroiding.send(b"o\x00")
         
+ def do_ao_precondition(self):
+    self.engine.ao_precondition = self.chkAOPrecondition.isChecked()
+        
  def sub_background(self):
     # TODO: Don't allow subtract if it hasn't been set once
     if (self.chkBackSubtract.isChecked()):
