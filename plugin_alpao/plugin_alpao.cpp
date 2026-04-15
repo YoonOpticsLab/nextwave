@@ -71,9 +71,9 @@ DECL init(void)
   	for (auto i=0; i<num_act; i++) {
 	  gpShmemBoxes->mirror_voltages[i]=0;
 	  gpShmemBoxes->mirror_voltages_offsets[i]=0;
+	  gpShmemBoxes->mirror_relax[i]=0;
 	}
 
-	
   return 0;
 }
 
