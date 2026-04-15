@@ -85,7 +85,7 @@ class NextwaveEngine():
         self.modes = 97
         self.condition = 9999
         
-        self.ao_precondition = True # Fancy Tikhanov preconditioning
+        self.ao_precondition = True # Fancy Tikhonov preconditioning
         
     def init(self):
         if not self.ui.offline_only:
@@ -453,9 +453,8 @@ class NextwaveEngine():
         if len(self.acts_outside)>0:
             self.influence[self.acts_outside,:] = 0 # Zero them out, if any
             
-            
         if self.ao_precondition:
-            # New method using Tikhanov preconditioning, etc.
+            # New method using Tikhonov preconditioning, etc.
             grid_act=functions_grid.sparse_grid(97)
             L=grid_act.build_laplacian_sparse()
 
@@ -491,8 +490,8 @@ class NextwaveEngine():
             self.condition = s[0]/s[self.modes-1]
             self.influence_inv = ( (U * s_recip) @ V[0:97,:] ).T
             
-        self.influence_inv = self.influence_inv.T
-        np.save('influ_loaded', self.influence_inv )
+        #self.influence_inv = self.influence_inv.T
+        np.save('command', self.influence_inv )
         
         self.influence_inv[:,self.acts_outside] = 0
 

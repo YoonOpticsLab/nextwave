@@ -24,7 +24,6 @@ CAM_GAIN_MAX = 9.83
 
 
 def createUI(self):
-
     self.key_control = False
 
     self.setWindowIcon(QtGui.QIcon("./resources/wave_icon.png"))
@@ -406,10 +405,17 @@ def createUI(self):
     y_curr += 1
 
     ### Tikhanov correction
-    self.chkAOPrecondition = QCheckBox("AO Tikhanov Precondition")
+    self.chkAOPrecondition = QCheckBox("AO Tikhonov Precondition")
     self.chkAOPrecondition.setChecked(True)
     self.chkAOPrecondition.stateChanged.connect(self.do_ao_precondition)
     layout1.addWidget(self.chkAOPrecondition, y_curr,3)
+    
+    self.chkMidi = QCheckBox("MIDI")
+    self.chkMidi.setChecked(False)
+    self.chkMidi.stateChanged.connect(self.do_midi)
+    layout1.addWidget(self.chkMidi, y_curr,2)
+    
+    
     y_curr += 1
     
     self.widget_mode_buttons = QWidget()

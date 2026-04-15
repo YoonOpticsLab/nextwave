@@ -42,6 +42,7 @@ from zernike_functions import calc_rms
 
 import scipy # For scipy.stats.mode: auto background
 
+import midi
 
 import xml.etree.ElementTree as ET
 
@@ -80,6 +81,8 @@ class NextWaveMainWindow(QMainWindow):
 
     self.updater_dm = QTimer(self);
     self.updater_dm.timeout.connect(self.update_ui_dm)
+
+    self.midi1 = None
 
     self.draw_refs = False
     self.draw_boxes = True
@@ -200,7 +203,7 @@ class NextWaveMainWindow(QMainWindow):
             #chkLoop.setChecked( False )
             chkActivateMetric.setChecked( False )
             print("GOT IT")
-            
+
     image_pixels = self.engine.receive_image()
     self.image_pixels = np.log10(image_pixels) / np.log10(255) * 255
     
@@ -379,10 +382,11 @@ class NextWaveMainWindow(QMainWindow):
                 
         painter.drawLines(xlines)
 
-    painter.setFont( QFont("Arial",40) );
-    painter.drawText( QPoint(10, 60), "%03d"%np.max( self.engine.image_bytes) );
+    painter.setFont( QFont("Arial",80) );
+    #painter.drawText( QPoint(10, 60), "%03d"%np.max( self.engine.image_bytes) );
+    painter.drawText( QPoint(10, 90), "%0.3f"%( self.engine.defocus) );
 
-        #im_buf=self.shmem_data.read(width*height)
+    #im_buf=self.shmem_data.read(width*height)
     #bytez =np.frombuffer(im_buf, dtype='uint8', count=width*height )
     #ql1=[QLineF(100,100,150,150)]
     #painter.drawLines(ql1)
@@ -542,6 +546,23 @@ class NextWaveMainWindow(QMainWindow):
     self.bar_plot.showGrid(x=False,y=True)
 
  def update_ui_dm(self):
+     
+    if not(self.midi1 is None):
+        msg=self.midi1.poll_knobs()
+        if not (msg is None):
+            #print (msg)
+            #Take 3rd part of message, square it for delta
+            #self.slider_defocus.setValue(self.slider_defocus.getValue() + 1)
+            if (msg[0]==23):
+                value = msg[1]
+            if value > 64:
+                value = 64 - value
+                value = - (2**abs(value)) + 1
+            else:
+                value =   (2**abs(value)) - 1
+                
+            self.slider_defocus.setValue( self.slider_defocus.value() + value )
+  
     #if self.chkLoop.isChecked():
     self.actuator_plot.paintEvent_manual()
 
@@ -832,7 +853,15 @@ class NextWaveMainWindow(QMainWindow):
         
  def do_ao_precondition(self):
     self.engine.ao_precondition = self.chkAOPrecondition.isChecked()
-        
+
+ def do_midi(self):
+     if self.chkMidi.isChecked():
+        self.midi1=midi.midi_control()
+        self.midi1.init_midi(0)
+     else:
+        self.midi1.close()
+        self.midi1 = None
+         
  def sub_background(self):
     # TODO: Don't allow subtract if it hasn't been set once
     if (self.chkBackSubtract.isChecked()):
@@ -1024,6 +1053,9 @@ class NextWaveMainWindow(QMainWindow):
     self.engine.offline.export_all_zernikes()
 
  def close(self):
+    if not( self.midi1 is None):
+        self.midi1.close()
+        self.midi=None
     self.engine.send_quit() # Send stop command to engine
     self.app.exit()
 
@@ -1101,7 +1133,7 @@ def start_backdoor(win):
 def main():
   num = joystickapi.joyGetNumDevs()
   ret, caps, startinfo = False, None, None
-  for idj in range(num):
+  for idj in range(num*0):
     ret, caps = joystickapi.joyGetDevCaps(id)
     if ret:
         print("gamepad detected: " + caps.szPname)
@@ -1110,7 +1142,8 @@ def main():
         break
     else:
       print("no gamepad detected")
-        
+      
+     
   app = QApplication(sys.argv)
   win = NextWaveMainWindow()
   win.app = app
@@ -1137,6 +1170,7 @@ def main():
 #  print( expo, sliderval )
   
   start_backdoor(win)
+
 
   sys.exit(app.exec_())
 
