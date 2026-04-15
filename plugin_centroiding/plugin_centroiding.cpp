@@ -623,8 +623,10 @@ int find_centroids_af(unsigned char *buffer, int width, int height) {
 
 			if (pShmem->mode & MODE_AO ) {
 			  // If closed loop, add new voltages to old
-			  pShmemBoxes->mirror_voltages[i] = pShmemBoxes->mirror_voltages[i]*(1.0-fBleed) - host_mirror_voltages[i]*fGain;
-			}
+			  pShmemBoxes->mirror_voltages[i] = pShmemBoxes->mirror_voltages[i]*(1.0)
+			  - (pShmemBoxes->mirror_voltages[i] - pShmemBoxes->mirror_relax[i]) * fBleed
+			  - host_mirror_voltages[i]*fGain;
+			};
 			// CLAMP
 			if (pShmemBoxes->mirror_voltages[i] > CLIPVAL)
 				pShmemBoxes->mirror_voltages[i]=CLIPVAL;
