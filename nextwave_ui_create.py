@@ -415,8 +415,17 @@ def createUI(self):
     self.chkMidi.stateChanged.connect(self.do_midi)
     layout1.addWidget(self.chkMidi, y_curr,2)
     
-    
     y_curr += 1
+    
+    btn1 = QPushButton("Set defocus pos0")
+    layout1.addWidget(btn1, y_curr,1)
+    btn1.clicked.connect(self.set_defocus_pos0) 
+    
+    btn1 = QPushButton("Set defocus pos1")
+    layout1.addWidget(btn1, y_curr,2)
+    btn1.clicked.connect(self.set_defocus_pos1) 
+     
+    y_curr = 0
     
     self.widget_mode_buttons = QWidget()
     layoutStatusButtons = QHBoxLayout(self.widget_mode_buttons)

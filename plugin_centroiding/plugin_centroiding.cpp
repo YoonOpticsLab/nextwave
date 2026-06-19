@@ -562,6 +562,10 @@ int find_centroids_af(unsigned char *buffer, int width, int height) {
   }
   //gaf->mirror_voltages = af::matmul(gaf->slopes, (gaf->influence_inv) );
   
+  // Subtract the mean voltage change (piston)
+  // Possibly it should be done below (after applying bleed, etc.) but let's try here.
+  gaf->mirror_voltages -= af::mean<double>(gaf->mirror_voltages);
+  
 #if 0
   if (pShmemBoxes->header_version & 2) // Boxes follow centroids // TODO
   {

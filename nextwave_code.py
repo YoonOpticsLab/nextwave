@@ -348,8 +348,7 @@ class NextwaveEngine():
             bads = np.where( np.isnan(zpoly) )
             print( bads )
             #zpoly[ bads] = np.random.normal(0,0.0001, bads.shape )
-         
-            
+                
             # Pre-compute&save the zterms that are multiplied with the slopes in realtime
             [uu,ss,vv] = svd(zpoly,False)
 
@@ -548,6 +547,31 @@ class NextwaveEngine():
         self.slope = slope
         #print ("CompZ spot means:",np.mean(self.spot_displace_x), np.mean(self.spot_displace_y))
 
+    def apply_static_mirror(self,zerns_new,Z_TERMS=65):
+        # TODO: see also apply_zernikes
+        
+        slopes = self.slope * 0
+        #coeff=np.matmul(self.zterms_full,slopes)
+        #zernikes=coeff[zernike_functions.CVS_to_OSA_map[0:len(coeff)]]
+        
+        zernikes = np.zeros(Z_TERMS)
+        zernikes += zerns_new
+    
+        # TODO: get_deltas might already do this:
+        #slopes_est2 =np.matmul( self.zterms_full_inv, zernikes[zernike_functions.OSA_to_CVS_map[0:Z_TERMS]] )
+        dx,dy = self.get_deltas(zerns_new,False)
+        
+        # Want to convert back to numerical units (not microns)
+        dx *=  (self.ccd_pixel/self.focal)
+        dy *=  (self.ccd_pixel/self.focal)
+        
+        slope_reshape = np.vstack( (dx,dy) ).T.flatten()
+        #print( np.max( slope_reshape )/1000.0 )
+        #mirs_new = np.matmul(slope_reshape/1000.0, self.influence_inv )
+        mirs_new = np.matmul( self.influence_inv.T, slope_reshape/1000.0 )        
+        mirs_new -= mirs_new.mean()
+        self.comm.write_mirrors(mirs_new)
+        
     def autoshift_searchboxes(self):
         #shift_search_boxes(self,zs,from_dialog=True):
         pass

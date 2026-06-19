@@ -103,6 +103,14 @@ class NextWaveMainWindow(QMainWindow):
     self.offline_dialog = OfflineDialog(self)
     #self.dialog_intensityX = IntensityDialogX(self)
 
+    self.static = 0;
+    self.static2= 0;
+    self.static4= 0;
+    self.static12= 0;
+    
+    self.defocus_pos0=0;
+    self.defocus_pos1=0;
+    
     self.scale_num=2
     self.scales=[512,768,1024,1536,2048]
 
@@ -382,9 +390,14 @@ class NextWaveMainWindow(QMainWindow):
                 
         painter.drawLines(xlines)
 
-    painter.setFont( QFont("Arial",80) );
+
+    painter.setFont( QFont("Arial",70) );
     #painter.drawText( QPoint(10, 60), "%03d"%np.max( self.engine.image_bytes) );
-    painter.drawText( QPoint(10, 90), "%0.3f"%( self.engine.defocus) );
+    painter.drawText( QPoint(10, 80), "%0.3f"%( self.static2) );
+    painter.drawText( QPoint(10, 160), "%0.3f"%( self.static) );
+    painter.drawText( QPoint(10, 240), "%0.3f"%( self.static4) );
+
+    painter.drawText( QPoint(10, 350), "%0.3f"%( self.engine.defocus) );
 
     #im_buf=self.shmem_data.read(width*height)
     #bytez =np.frombuffer(im_buf, dtype='uint8', count=width*height )
@@ -550,18 +563,48 @@ class NextWaveMainWindow(QMainWindow):
     if not(self.midi1 is None):
         msg=self.midi1.poll_knobs()
         if not (msg is None):
+            which_control = msg[0]
             #print (msg)
             #Take 3rd part of message, square it for delta
             #self.slider_defocus.setValue(self.slider_defocus.getValue() + 1)
-            if (msg[0]==23):
+            if (which_control in [16,17,18,19,23,45,95]):
                 value = msg[1]
-            if value > 64:
-                value = 64 - value
-                value = - (2**abs(value)) + 1
+                    
+                if which_control==45 and value==127:
+                    self.slider_defocus.setValue( self.defocus_pos0 )
+                elif which_control==95 and value==127:
+                    self.slider_defocus.setValue( self.defocus_pos1 )
+                    
+                if value > 64:
+                    value = 64 - value
+                    value = - (2**abs(value)) + 1
+                else:
+                    value =   (2**abs(value)) - 1
+
+                    
             else:
-                value =   (2**abs(value)) - 1
+                print ("Unknown msg: ", msg)
                 
-            self.slider_defocus.setValue( self.slider_defocus.value() + value )
+            # Closed loop defocus (ref. shift)
+            if which_control==23:
+                self.slider_defocus.setValue( self.slider_defocus.value() + value )
+            #elif ((which_control==45) and value != 0)
+            
+            # Apply mirror static shape :
+            elif which_control in [16,17,18,19]:
+                if which_control==16:
+                    self.static += value/10.0
+                elif which_control==17:
+                    self.static2 += value/10.0
+                elif which_control==18:
+                    self.static4 += value/10.0
+                elif which_control==19:
+                    self.static12 += value/10.0
+                    
+                zs = np.zeros(65)
+                zs[2:5] = [self.static2, self.static, self.static4]
+                zs[11] = self.static12
+                self.engine.apply_static_mirror(zs)
   
     #if self.chkLoop.isChecked():
     self.actuator_plot.paintEvent_manual()
@@ -850,7 +893,12 @@ class NextWaveMainWindow(QMainWindow):
         self.sockets.centroiding.send(b"O\x00")
     else:
         self.sockets.centroiding.send(b"o\x00")
-        
+
+ def set_defocus_pos0(self):
+    self.defocus_pos0=self.slider_defocus.value()
+ def set_defocus_pos1(self):
+    self.defocus_pos1=self.slider_defocus.value()
+    
  def do_ao_precondition(self):
     self.engine.ao_precondition = self.chkAOPrecondition.isChecked()
 
