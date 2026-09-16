@@ -5,6 +5,8 @@ from PyQt5.QtGui import QPixmap, QImage, QFont, QKeySequence
 from PyQt5.QtCore import Qt
 import PyQt5.QtGui as QtGui
 
+from PyQt5.QtCore import QTimer
+
 import numpy as np
 
 from pyqtgraph.parametertree import ParameterTree
@@ -309,8 +311,8 @@ def createUI(self):
     layout1.addWidget(self.slider_aorate, y_curr,1)
     self.slider_defocus = QSlider(orientation=Qt.Horizontal)
     self.slider_defocus.setMinimum(0)
-    self.slider_defocus.setMaximum(1000)
-    self.slider_defocus.setValue(500)
+    self.slider_defocus.setMaximum(2000)
+    self.slider_defocus.setValue(1000)
     self.slider_defocus.valueChanged.connect(self.slider_defocus_changed)
     layout1.addWidget(self.slider_defocus, y_curr,2)
     self.label_defocus = QLabel("Defocus: ")
@@ -384,8 +386,8 @@ def createUI(self):
     layout1.addWidget(self.label_metric, y_curr,0)
     self.slider_metric = QSlider(orientation=Qt.Horizontal)
     self.slider_metric.setMinimum(1)
-    self.slider_metric.setMaximum(100)
-    self.slider_metric.setValue(50)
+    self.slider_metric.setMaximum(1000)
+    self.slider_metric.setValue(200)
     self.slider_metric.valueChanged.connect(self.slider_metric_changed)
     layout1.addWidget(self.slider_metric, y_curr,1)
     self.chkActivateMetric = QCheckBox("Activate Metric")
@@ -411,7 +413,7 @@ def createUI(self):
     layout1.addWidget(self.chkAOPrecondition, y_curr,3)
     
     self.chkMidi = QCheckBox("MIDI")
-    self.chkMidi.setChecked(False)
+    self.chkMidi.setChecked(True)
     self.chkMidi.stateChanged.connect(self.do_midi)
     layout1.addWidget(self.chkMidi, y_curr,2)
     

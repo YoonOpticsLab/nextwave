@@ -9,13 +9,13 @@ from PyQt5.QtGui import QKeySequence
 from PyQt5.QtWidgets import QShortcut
 
 from PyQt5.QtGui import QPixmap, QImage, QPainter, QPen, QFont
-from PyQt5.QtCore import Qt, QTimer, QEvent, QLineF, QPointF, QPoint, pyqtSignal 
+from PyQt5.QtCore import Qt, QTimer, QEvent, QLineF, QPointF, QPoint, pyqtSignal, pyqtSlot
+
 import PyQt5.QtGui as QtGui
 import PyQt5.QtCore as QtCore
 
 from PyQt5.QtWidgets import QApplication
 from PyQt5.QtCore import Qt
-
 
 import pyqtgraph as pg
 from pyqtgraph.parametertree import Parameter, ParameterTree
@@ -36,13 +36,13 @@ from nextwave_sockets import NextwaveSocketComm
 
 from nextwave_widgets import ZernikeDialog, BoxInfoDialog, ActuatorPlot, MyBarWidget, OfflineDialog, IntensityDialogX
 
+from nextwave_midi import nextwave_midi
+
 from threading import Thread
 
 from zernike_functions import calc_rms
 
 import scipy # For scipy.stats.mode: auto background
-
-import midi
 
 import xml.etree.ElementTree as ET
 
@@ -66,6 +66,11 @@ def clear_widget_list(layout1,nkeep=0):
    widget1.setParent(None) # Removes the widget
 
 class NextWaveMainWindow(QMainWindow):
+ signal_static_set = pyqtSignal(int, float)
+ signal_zero = pyqtSignal()
+ signal_loop_toggle = pyqtSignal()
+ signal_command_record = pyqtSignal()
+
  def __init__(self):
     super().__init__(parent=None)
 
@@ -82,7 +87,7 @@ class NextWaveMainWindow(QMainWindow):
     self.updater_dm = QTimer(self);
     self.updater_dm.timeout.connect(self.update_ui_dm)
 
-    self.midi1 = None
+    self.midi1 = nextwave_midi(self)
 
     self.draw_refs = False
     self.draw_boxes = True
@@ -107,6 +112,7 @@ class NextWaveMainWindow(QMainWindow):
     self.static2= 0;
     self.static4= 0;
     self.static12= 0;
+    self.command_record=False;
     
     self.defocus_pos0=0;
     self.defocus_pos1=0;
@@ -119,6 +125,8 @@ class NextWaveMainWindow(QMainWindow):
     keybinder.init()
     keybinder.register_hotkey(self.winId(), "F7", self.on_hotkey_pressed)
 
+
+    
  def on_hotkey_pressed(self):
      # THIS IS NOT WORKING
      print("Global hotkey activated!")    
@@ -393,11 +401,29 @@ class NextWaveMainWindow(QMainWindow):
 
     painter.setFont( QFont("Arial",70) );
     #painter.drawText( QPoint(10, 60), "%03d"%np.max( self.engine.image_bytes) );
-    painter.drawText( QPoint(10, 80), "%0.3f"%( self.static2) );
-    painter.drawText( QPoint(10, 160), "%0.3f"%( self.static) );
-    painter.drawText( QPoint(10, 240), "%0.3f"%( self.static4) );
+    if not(self.static2==0):
+        painter.drawText( QPoint(10, 80), "2=%0.3f"%( self.static2) );
+    if not(self.static==0):
+        painter.drawText( QPoint(10, 160), "3=%0.3f"%( self.static) );
+    if not(self.static4==0):
+        painter.drawText( QPoint(10, 240), "4=%0.3f"%( self.static4) );
+    if not(self.engine.defocus==0):
+        painter.drawText( QPoint(10, 350), "%0.3f"%( self.engine.defocus) );
 
-    painter.drawText( QPoint(10, 350), "%0.3f"%( self.engine.defocus) );
+    vectors=[np.sqrt( (self.engine.centroids_x[n]-self.engine.ref_x[n])**2 + 
+               (self.engine.centroids_y[n]-self.engine.ref_y[n])**2
+               ) for n in np.arange(0,self.engine.num_boxes)]
+
+    print( np.nanmean( vectors), np.nanstd(vectors) )
+    # HTML INFO PAGE
+    t='<!DOCTYPE html><html lang="en"><body>\n'
+    t += f"Depth:{self.engine.defocus}\n"
+    t += f"RMS:{np.nanmean(vectors)}\n"
+    t += f"do_record:{int(self.command_record)}\n"
+    t += "</body></html>"
+    fil=open("index.html","wt")
+    fil.writelines(t)
+    fil.close()
 
     #im_buf=self.shmem_data.read(width*height)
     #bytez =np.frombuffer(im_buf, dtype='uint8', count=width*height )
@@ -560,53 +586,8 @@ class NextWaveMainWindow(QMainWindow):
 
  def update_ui_dm(self):
      
-    if not(self.midi1 is None):
-        msg=self.midi1.poll_knobs()
-        if not (msg is None):
-            which_control = msg[0]
-            #print (msg)
-            #Take 3rd part of message, square it for delta
-            #self.slider_defocus.setValue(self.slider_defocus.getValue() + 1)
-            if (which_control in [16,17,18,19,23,45,95]):
-                value = msg[1]
-                    
-                if which_control==45 and value==127:
-                    self.slider_defocus.setValue( self.defocus_pos0 )
-                elif which_control==95 and value==127:
-                    self.slider_defocus.setValue( self.defocus_pos1 )
-                    
-                if value > 64:
-                    value = 64 - value
-                    value = - (2**abs(value)) + 1
-                else:
-                    value =   (2**abs(value)) - 1
-
-                    
-            else:
-                print ("Unknown msg: ", msg)
-                
-            # Closed loop defocus (ref. shift)
-            if which_control==23:
-                self.slider_defocus.setValue( self.slider_defocus.value() + value )
-            #elif ((which_control==45) and value != 0)
-            
-            # Apply mirror static shape :
-            elif which_control in [16,17,18,19]:
-                if which_control==16:
-                    self.static += value/10.0
-                elif which_control==17:
-                    self.static2 += value/10.0
-                elif which_control==18:
-                    self.static4 += value/10.0
-                elif which_control==19:
-                    self.static12 += value/10.0
-                    
-                zs = np.zeros(65)
-                zs[2:5] = [self.static2, self.static, self.static4]
-                zs[11] = self.static12
-                self.engine.apply_static_mirror(zs)
-  
-    #if self.chkLoop.isChecked():
+    self.midi1.check_and_process()
+    
     self.actuator_plot.paintEvent_manual()
 
     # New method is to send the command somewhere else
@@ -779,7 +760,8 @@ class NextWaveMainWindow(QMainWindow):
  # PANELS/layouts, etc.
  def initUI(self):
      _createUI(self)
-
+    
+    
  def calibration_status(self,s):
     print( s )
     #  self.label_status0.setText(s)
@@ -797,8 +779,8 @@ class NextWaveMainWindow(QMainWindow):
     self.engine.do_calibration(self.calibration_status)
  
  def slider_metric_changed(self):
-    val=self.slider_metric.value()/100.0
-    self.label_metric.setText('Metric (%0.2f): '%val)
+    val=self.slider_metric.value()/1000.0
+    self.label_metric.setText('Metric (%0.3f): '%val)
     self.engine.metric_set( val  )
 
  def slider_aobleed_changed(self):
@@ -811,7 +793,7 @@ class NextWaveMainWindow(QMainWindow):
     self.engine.aorate_set( self.slider_aorate.value() )
     
  def slider_defocus_changed(self):
-     scaled = (self.slider_defocus.value()-500)/100.0
+     scaled = (self.slider_defocus.value()-1000)/200.0
      self.engine.defocus_set(scaled)
 
  def slider_dmfill_changed(self):
@@ -835,19 +817,60 @@ class NextWaveMainWindow(QMainWindow):
      self.sockets.camera.send( msg ) 
 
  def loop_changed(self,state):
-    self.engine.loop_changed(self.chkLoop.isChecked() )
+     self.engine.loop_changed(self.chkLoop.isChecked() )  
+     
  def flat_save(self):
      self.engine.flat_save()
      return
  def flat_do(self):
      self.engine.flat_do()
+     self.static_clear()
      return
+     
  def zero_do(self):
      self.engine.zero_do()
+     self.static_clear()
      return
+ 
+ def do_static(self):
+    zs = np.zeros(65)
+    zs[2:5] = [self.static2, self.static, self.static4]
+    zs[11] = self.static12
+    self.engine.apply_static_mirror(zs)
+    
+
+ @pyqtSlot(int, float)
+ def set_static(self, which, incr):
+     if which==3:
+         self.static += incr
+     elif which==2:
+         self.static2 += incr
+     elif which==4:
+         self.static4 += incr
+     elif which==12:
+         self.static12 += incr
+         
+     self.do_static()
+
+ @pyqtSlot()
+ def do_loop_toggle(self):
+    chkLoop.setChecked( not chkLoop.getChecked() )
+ @pyqtSlot()
+ def do_command_record(self):
+    self.command_record = True #not self.command_record
+    QTimer.singleShot(2000, self.do_command_record_off) # Set timer to turn off after two seconds
+ 
+ def do_command_record_off(self):
+     self.command_record = False
+ 
+ def static_clear(self):
+    self.static2=0
+    self.static=0
+    self.static4=0
+    self.static12=0
 
  def offline_algorithm(self):
-  self.mode_offline = self.chkOfflineAlgorithm.isChecked()
+    self.mode_offline = self.chkOfflineAlgorithm.isChecked()
 
  def iterative_reset(self):
      self.engine.offline.offline_reset()
@@ -860,6 +883,9 @@ class NextWaveMainWindow(QMainWindow):
 
  def autoshift_search_boxes(self):
      self.engine.autoshift_search_boxes()
+
+ def toggle_record(self):
+    self.engine.comm.do_record_toggle( self.chkRecord.isChecked() )
 
  def toggle_record(self):
     self.engine.comm.do_record_toggle( self.chkRecord.isChecked() )
@@ -903,6 +929,9 @@ class NextWaveMainWindow(QMainWindow):
     self.engine.ao_precondition = self.chkAOPrecondition.isChecked()
 
  def do_midi(self):
+     # TODO: Remove?
+     return
+     
      if self.chkMidi.isChecked():
         self.midi1=midi.midi_control()
         self.midi1.init_midi(0)
@@ -1208,7 +1237,7 @@ def main():
       win.sockets.init()
         
   # Set defaults: TODO: pull from XML
-  win.slider_defocus.setValue(500)
+  win.slider_defocus.setValue(1000)
   win.slider_aogain.setValue(50)
   win.slider_dmfill.setValue(1000)
   
@@ -1217,8 +1246,11 @@ def main():
   win.slider_exposure.setValue(sliderval)
 #  print( expo, sliderval )
   
+  win.signal_static_set.connect(win.set_static)
+  win.signal_zero.connect(win.zero_do)
+  win.signal_loop_toggle.connect(win.do_loop_toggle)
+  win.signal_command_record.connect(win.do_command_record)
   start_backdoor(win)
-
 
   sys.exit(app.exec_())
 
