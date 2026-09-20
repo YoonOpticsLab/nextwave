@@ -17,12 +17,14 @@ import numpy as np
 import sys
 import os
 import json
+import traceback
 
 import matplotlib.cm as cmap
 
 from nextwave_code import NextwaveEngine
 from nextwave_sockets import NextwaveSocketComm
 import defaults
+import offline_parallel
 
 from nextwave_widgets import ZernikeDialog, BoxInfoDialog, ActuatorPlot, MyBarWidget, OfflineDialog
 
@@ -63,16 +65,30 @@ class OfflineWorker(QtCore.QObject):
     def do_auto(self):
         self.running = True
         self.engine = self.ui.engine
-        
+
+        try:
+            n_workers = offline_parallel.default_workers(self.engine.offline.max_frame)
+            if n_workers > 1:
+                completed = offline_parallel.run_parallel(self.engine, n_workers,
+                    progress=self.progress.emit, cancelled=lambda: self.cancel)
+            else:
+                completed = self.do_auto_serial()
+            if completed:
+                self.engine.offline.saver.serialize()
+        except Exception:
+            traceback.print_exc() # Report it, but always finish below, or the UI would stay stuck in "processing"
+        finally:
+            self.do_finished()
+
+    def do_auto_serial(self):
+        """ One frame at a time, in this process. Returns False if cancelled. """
         for nframe in np.arange(self.engine.offline.max_frame):
             self.progress.emit( nframe )
             if self.cancel:
-                self.do_finished()
-                return
+                return False
             self.engine.offline.offline_auto1(nframe)
             self.engine.offline.center_dirty=False # Only true for first frame
-        self.engine.offline.saver.serialize()
-        self.do_finished()
+        return True
         
 class NextWaveMainWindow(QMainWindow):
  def __init__(self):
@@ -234,7 +250,7 @@ class NextWaveMainWindow(QMainWindow):
 
  def update_progress(self, value):
     self.progress_bar.setValue(int(value/self.engine.offline.max_frame * 100))
-    self.btn_processing.setText("Processing: %d/%d (Click to CANCEL)"%(value+1, self.engine.offline.max_frame ) );
+    self.btn_processing.setText("Processing: %d/%d done (Click to CANCEL)"%(value, self.engine.offline.max_frame ) );
     self.btn_processing.setStyleSheet("background-color: green;")
     
  def offline_autoall(self):
@@ -1670,4 +1686,6 @@ def main():
 
 
 if __name__=="__main__":
+  import multiprocessing
+  multiprocessing.freeze_support() # Needed for the frozen .exe: the parallel offline workers are spawned copies of it
   main()

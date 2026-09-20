@@ -97,3 +97,9 @@ LCA_REFERENCE_WAVELENGTH=555
 
 MOVIE_MAX_FRAMES=4096 # Maximum loadable
 AVI_DEBUG_FRAMES=4096 # Set large (or -1) to load all frames
+
+#########
+## Offline processing
+#########
+
+OFFLINE_WORKERS=0 # Processes for "Auto process all frames". 0=automatic (cores-1). 1=one frame at a time, in the UI process (old behavior)

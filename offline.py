@@ -162,6 +162,9 @@ class NextwaveOffline():
         self.center_dirty = False # User has set the center: don't autocenter
 
         self.offline_curr = 0 # Current frame
+
+        # Write debug arrays (ims.npy, etc.) to the current directory. Off in the parallel workers, which would collide.
+        self.debug_dumps = True
         
     def iterative_run(self, cx, cy, step):
         return
@@ -830,8 +833,9 @@ class NextwaveOffline():
             im_nonsat = im_smooth[im_smooth<defaults.NONSAT_MAX_OTSU]
             cutoff = filters.threshold_otsu(im_nonsat)
             im_smooth[im_smooth<cutoff] = 0
-        np.save('ims',im_smooth) # DBG
-        np.save('im_raw',self.im) # DBG
+        if self.debug_dumps:
+            np.save('ims',im_smooth) # DBG
+            np.save('im_raw',self.im) # DBG
 
         points = np.array( np.where( im_smooth ) ).T     # Coords of non-zero points
         hull = ConvexHull(points) # Entire convex hull. Maybe outliers
@@ -927,8 +931,9 @@ class NextwaveOffline():
             cutoff = filters.threshold_otsu(im_nonsat)
             #print( cutoff ) # DBG
             im_smooth[im_smooth<cutoff] = 0
-            np.save('ims',im_smooth) # DBG
-            np.save('im_raw',self.im) # DBG
+            if self.debug_dumps:
+                np.save('ims',im_smooth) # DBG
+                np.save('im_raw',self.im) # DBG
             points = np.array( np.where( im_smooth ) ).T     # Coords of non-zero points
             hull = ConvexHull(points)
             fit1 = circle_fitter(hull.points[hull.vertices,1], hull.points[hull.vertices,0] ) # Note dimensions switched!
@@ -979,7 +984,8 @@ class NextwaveOffline():
             crop_right=int( np.min( (self.dims[1],self.cx_best+r_pix)) )
             crop_bottom=int( np.min( (self.dims[0],self.cy_best+r_pix)) )
             self.im_smooth_cropped = im_smooth[crop_top:crop_bottom,crop_left:crop_right]
-            np.save('im_crop',self.im_smooth_cropped) # DBG
+            if self.debug_dumps:
+                np.save('im_crop',self.im_smooth_cropped) # DBG
 
     def offline_startbox(self):
        # try:
