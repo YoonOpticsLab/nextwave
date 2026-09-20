@@ -36,6 +36,7 @@ ui_normalize_max = 50
 ITERATIVE_PUPIL_START=2.65 # TODO: Maybe should determine based on magnification, etc., pupil for minimum # of boxes
 ITERATIVE_PUPIL_STEP_SIZE=0.25
 ITERATIVE_PUPIL_STOP=8.0
+ITERATIVE_PUPIL_STOP_FORCE=6.0 # mm. If >0, always use this as the max pupil (as if typed into the UI's max box) instead of estimating it from each image. 0=estimate
 
 GAUSS_SD=3
 BOX_THRESH=2.0

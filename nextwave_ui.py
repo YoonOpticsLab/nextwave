@@ -1009,7 +1009,7 @@ class NextWaveMainWindow(QMainWindow):
      layout1.addWidget(self.it_start,4,0)
      self.it_step = QLineEdit(str(defaults.ITERATIVE_PUPIL_STEP_SIZE))
      layout1.addWidget(self.it_step,4,1)
-     self.it_stop = QLineEdit(str(defaults.ITERATIVE_PUPIL_STOP))
+     self.it_stop = QLineEdit(str(self.engine.offline.it_stop)) # (Forced value, if any, else the default)
      layout1.addWidget(self.it_stop,4,2)
      self.it_start.textEdited.connect(self.it_start_edited)
      self.it_step.textEdited.connect(self.it_step_edited)

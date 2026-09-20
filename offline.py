@@ -161,6 +161,11 @@ class NextwaveOffline():
         self.it_stop_dirty = False # User has set it_stop: use it instead of estimating
         self.center_dirty = False # User has set the center: don't autocenter
 
+        forced_stop = float(getattr(defaults, 'ITERATIVE_PUPIL_STOP_FORCE', 0) or 0) # getattr: user's defaults file may predate this
+        if forced_stop > 0: # Same as the user typing a max pupil into the UI
+            self.it_stop = forced_stop
+            self.it_stop_dirty = True
+
         self.offline_curr = 0 # Current frame
 
         # Write debug arrays (ims.npy, etc.) to the current directory. Off in the parallel workers, which would collide.
@@ -1022,8 +1027,9 @@ class NextwaveOffline():
         self.signals.pupil_diam_changed.emit( self.iterative_size / self.parent.pupil_mag ) #+step) )
         
     def iterative_run_good(self):
-        # Size on the sensor, max pixel radius in the image
-        self.iterative_max = self.it_stop
+        # Size on the sensor, max pixel radius in the image. (it_stop is the pupil size, so scale by magnification.
+        # This is the max if autocenter is skipped (user set the center); otherwise autocenter replaces it.)
+        self.iterative_max = self.it_stop * self.parent.pupil_mag
         self.iterative_max_pixels = self.iterative_max/2.0 * 1000 / self.parent.ccd_pixel
 
         self.offline_startbox()
