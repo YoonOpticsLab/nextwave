@@ -163,7 +163,7 @@ class NextwaveEngineComm():
         shmem_boxes.flush()
 
     def receive_image(self):
-        if self.parent.ui.mode_offline or self.parent.ui.offline_only:
+        if self.parent.mode_offline or self.parent.ui.offline_only:
             # Assume it's already been written directly into image_bytes by offline processes
             try:
                 return self.parent.image_bytes

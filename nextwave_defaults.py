@@ -90,3 +90,10 @@ START_ZC=1
 
 DO_CORRECT_LCA=0
 LCA_REFERENCE_WAVELENGTH=555
+
+#########
+## AVIs
+#########
+
+MOVIE_MAX_FRAMES=4096 # Maximum loadable
+AVI_DEBUG_FRAMES=4096 # Set large (or -1) to load all frames

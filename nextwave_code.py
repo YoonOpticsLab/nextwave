@@ -62,6 +62,9 @@ class NextwaveEngine():
         # TODO:
         self.ui = ui
         self.mode = 0
+        self.cx = ui.json_data["params"]["cx"] # Center of the pupil (pixels)
+        self.cy = ui.json_data["params"]["cy"]
+        self.mode_offline = False # True: process images offline, don't get centroids from the C++ engine
         self.comm = NextwaveEngineComm(self)
         self.offline = NextwaveOffline(self)
         self.num_boxes = 0
@@ -145,9 +148,9 @@ class NextwaveEngine():
 
         """
         if cx is None:
-            cx=self.ui.cx
+            cx=self.cx
         if cy is None:
-            cy=self.ui.cy
+            cy=self.cy
 
         if pupil_radius_pixel is None:
             pupil_radius_pixel=self.pupil_radius_pixel
@@ -430,7 +433,7 @@ class NextwaveEngine():
     def receive_image(self):
         return self.comm.receive_image()
     def receive_centroids(self):
-        if self.ui.mode_offline==False: # If in offline, don't keep grabbing centroids from C++ engine
+        if self.mode_offline==False: # If in offline, don't keep grabbing centroids from C++ engine
             return self.comm.receive_centroids()
 
     def zero_do(self):
@@ -452,7 +455,7 @@ class NextwaveEngine():
         #time.sleep(0.1)
 
     def mode_snap(self, reinit=True, allow_AO=True):
-        if self.ui.mode_offline:
+        if self.mode_offline:
             self.offline.offline_centroids()
             return
 
@@ -489,7 +492,7 @@ class NextwaveEngine():
         fil = open(centroids_filename,'wt')
 
         fil.writelines( '[image size = %dx%d]\n'%(self.image_bytes.shape[0],self.image_bytes.shape[1]))
-        fil.writelines( '[pupil = %f,%d,%d]\n'%(self.ui.pupil_diam/self.pupil_diam,self.ui.cx,self.ui.cy))
+        fil.writelines( '[pupil = %f,%d,%d]\n'%(self.ui.pupil_diam/self.pupil_diam,self.cx,self.cy))
         for nbox in np.arange( len(self.ref_x)):
             # TODO: Valid or invalid
             fil.writelines('%d\t%.12f\t%.12f\t%.12f\t%.12f\t\n'%(

@@ -70,7 +70,7 @@ class OfflineWorker(QtCore.QObject):
                 self.do_finished()
                 return
             self.engine.offline.offline_auto1(nframe)
-            self.ui.center_dirty=False # Only true for first frame
+            self.engine.offline.center_dirty=False # Only true for first frame
         self.engine.offline.saver.serialize()
         self.do_finished()
         
@@ -102,9 +102,6 @@ class NextWaveMainWindow(QMainWindow):
     self.box_info = -1
     self.box_info_dlg = BoxInfoDialog("HiINFO",self)
 
-    self.mode_offline = False
-
-    self.offline_curr=0
     self.chkLoop = QCheckBox("Close AO Loop") # This is needed for engine.mode_init, called in our init. Will be replaced by chkbox widget in our InitUI
 
     self.offline_dialog = OfflineDialog()
@@ -112,10 +109,7 @@ class NextWaveMainWindow(QMainWindow):
     self.scale_num=2
     self.scales=[512,768,1024,1536,2048]
 
-    self.image_pixels = np.zeros( (10,10))
-
-    self.it_stop_dirty=False
-    self.center_dirty=False
+    self.image_pixels = np.zeros( (10,10)) # Display copy of current image, updated by offline frame_loaded signal
 
     self.worker = OfflineWorker(self)
 
@@ -125,8 +119,6 @@ class NextWaveMainWindow(QMainWindow):
     self.json_data = json.load(f)
     f.close()
 
-    self.cx=self.json_data["params"]["cx"]
-    self.cy=self.json_data["params"]["cy"]
     self.pupil_diam=self.json_data["params"]["pupil_diam"]
     self.offline_only=self.json_data["params"]["offline_only"]
 
@@ -191,9 +183,9 @@ class NextWaveMainWindow(QMainWindow):
         
         self.btn_off.setText(thedir[0][0])
         self.engine.offline.load_offline(thedir)
-        self.mode_offline = True
+        self.engine.mode_offline = True
         self.chkOfflineAlgorithm.setChecked(True)
-        self.center_dirty = False
+        self.engine.offline.center_dirty = False
         
         self.offline_move(0) # Updates UI, etc.
         self.btn_off_back.setText("Load Offline Background") # Reset this
@@ -211,6 +203,35 @@ class NextWaveMainWindow(QMainWindow):
     self.progress_bar.setValue( 0 )
     self.offline_move(0) # Updates UI 
                
+ def connect_offline_signals(self):
+    # Offline routines (possibly in the worker thread) emit these rather than touching widgets.
+    # The slots are methods of this window, so Qt queues them onto the main thread.
+    signals = self.engine.offline.signals
+    signals.pupil_diam_changed.connect(self.show_pupil_diam)
+    signals.pupil_stop_changed.connect(self.show_pupil_stop)
+    signals.box_size_changed.connect(self.show_box_size)
+    signals.frame_loaded.connect(self.show_frame)
+
+ # These only display what the algorithm reports. They must not change algorithm state.
+ @QtCore.pyqtSlot(float)
+ def show_pupil_diam(self, val):
+    self.line_pupil_diam.setText('%2.2f'%val)
+
+ @QtCore.pyqtSlot(float)
+ def show_pupil_stop(self, val):
+    self.it_stop.setText('%2.2f'%val)
+
+ @QtCore.pyqtSlot(float)
+ def show_box_size(self, val):
+    # Signals blocked: this is display only, and shouldn't fire boxsize_changed (which re-inits the engine)
+    self.widget_boxsize.blockSignals(True)
+    self.widget_boxsize.setValue(val)
+    self.widget_boxsize.blockSignals(False)
+
+ @QtCore.pyqtSlot(object)
+ def show_frame(self, image):
+    self.image_pixels = image
+
  def update_progress(self, value):
     self.progress_bar.setValue(int(value/self.engine.offline.max_frame * 100))
     self.btn_processing.setText("Processing: %d/%d (Click to CANCEL)"%(value+1, self.engine.offline.max_frame ) );
@@ -274,7 +295,7 @@ class NextWaveMainWindow(QMainWindow):
  def update_ui(self):
     image_pixels = self.engine.receive_image()
 
-    if not (self.mode_offline or self.offline_only): # TODO: Put offline intelligence into engine itself
+    if not (self.engine.mode_offline or self.offline_only): # TODO: Put offline intelligence into engine itself
       self.engine.receive_centroids()
       self.engine.compute_zernikes()
 
@@ -455,14 +476,16 @@ class NextWaveMainWindow(QMainWindow):
         pen = QPen(Qt.red, 1.5)
         painter.setPen(pen)
         CROSSHAIR_SIZE=30
-        xlines=[QLineF(self.cx+0, # right
-                       self.cy-CROSSHAIR_SIZE,
-                       self.cx-0, # right
-                       self.cy+CROSSHAIR_SIZE),
-                QLineF(self.cx+CROSSHAIR_SIZE, # right
-                       self.cy+0,
-                       self.cx-CROSSHAIR_SIZE, # right
-                       self.cy-0)
+        cx = self.engine.cx
+        cy = self.engine.cy
+        xlines=[QLineF(cx+0, # right
+                       cy-CROSSHAIR_SIZE,
+                       cx-0, # right
+                       cy+CROSSHAIR_SIZE),
+                QLineF(cx+CROSSHAIR_SIZE, # right
+                       cy+0,
+                       cx-CROSSHAIR_SIZE, # right
+                       cy-0)
                 ]
 
         painter.drawLines(xlines)
@@ -544,9 +567,9 @@ class NextWaveMainWindow(QMainWindow):
         #self.text_stats.setHtml(str_stats) # TODO: To get other colors, can embed <font color="red">TEXT</font><br>, etc.
 
     if not self.line_centerx.isModified():
-      self.line_centerx.setText(str(self.cx) )
+      self.line_centerx.setText(str(self.engine.cx) )
     if not self.line_centery.isModified():
-      self.line_centery.setText(str(self.cy) )
+      self.line_centery.setText(str(self.engine.cy) )
     if not self.line_pupil_diam.isModified():
       self.line_pupil_diam.setText(str(self.engine.pupil_diam / self.engine.pupil_mag) )
 
@@ -614,10 +637,13 @@ class NextWaveMainWindow(QMainWindow):
         colrx=order_colors[norder]
         zterms1=np.arange(first_term,first_term+nterms)
         xr=zterms1
-        bgx = pg.BarGraphItem(x=zterms1+1, height=self.engine.zernikes[zterms1], width=1.0, brush=colrx)
-        first_term += nterms #=first_termzterms1[-1]+1
-        nterms += 1
-        self.bar_plot.addItem(bgx)
+        try:
+            bgx = pg.BarGraphItem(x=zterms1+1, height=self.engine.zernikes[zterms1], width=1.0, brush=colrx)
+            first_term += nterms #=first_termzterms1[-1]+1
+            nterms += 1
+            self.bar_plot.addItem(bgx)
+        except:
+            print("ERROR on BarGraph %d,%d"%(norder,order) )
 
     #print( self.bar_plot.getViewBox().state['limits'] )
     # First_term will now be the first of the next order
@@ -714,7 +740,22 @@ class NextWaveMainWindow(QMainWindow):
         self.params["children"][name_parent]["children"][name]["value"] = newval
 
  def it_stop_changed(self):
-     self.it_stop_dirty=True
+     self.engine.offline.it_stop_dirty=True
+
+ # User edits of the iteration sizes. Hand them to the algorithm (which never reads the widgets).
+ # textEdited (not textChanged): only fires for the user, not for our own setText below.
+ def it_start_edited(self, text):
+     self.set_offline_param('it_start', text)
+ def it_step_edited(self, text):
+     self.set_offline_param('it_step', text)
+ def it_stop_edited(self, text):
+     self.set_offline_param('it_stop', text)
+
+ def set_offline_param(self, name, text):
+     try:
+         setattr(self.engine.offline, name, float(text))
+     except ValueError:
+         pass # Perhaps in the midst of typing. Keep the last valid value
  
  def pupil_changed(self):
    try:
@@ -796,19 +837,20 @@ class NextWaveMainWindow(QMainWindow):
      #self.param_tree.setParameters(self.p, showTop=False)
 
  def offline_move(self,n,restore_mode=False):
+  offline = self.engine.offline
   if not n==0:
-      self.center_dirty = False
+      offline.center_dirty = False
 
-  self.offline_curr += n
-  if self.offline_curr < 0:
-   self.offline_curr = 0
-  if self.offline_curr >= self.offline_nframes:
-   self.offline_curr = self.offline_nframes-1
+  offline.offline_curr += n
+  if offline.offline_curr < 0:
+   offline.offline_curr = 0
+  if offline.offline_curr >= self.offline_nframes:
+   offline.offline_curr = self.offline_nframes-1
 
-  #print("Offline move %d, curr=%d:/%d"%(n,self.offline_curr,self.offline_nframes) )
-  self.engine.offline_frame(self.offline_curr)
+  #print("Offline move %d, curr=%d:/%d"%(n,offline.offline_curr,self.offline_nframes) )
+  self.engine.offline_frame(offline.offline_curr)
 
-  self.lbl_frame_curr.setText("Frame %d/%d"%(self.offline_curr+1,self.offline_nframes) )
+  self.lbl_frame_curr.setText("Frame %d/%d"%(offline.offline_curr+1,self.offline_nframes) )
 
   if restore_mode:
    self.engine.offline.offline_navigate()
@@ -953,6 +995,9 @@ class NextWaveMainWindow(QMainWindow):
      layout1.addWidget(self.it_step,4,1)
      self.it_stop = QLineEdit(str(defaults.ITERATIVE_PUPIL_STOP))
      layout1.addWidget(self.it_stop,4,2)
+     self.it_start.textEdited.connect(self.it_start_edited)
+     self.it_step.textEdited.connect(self.it_step_edited)
+     self.it_stop.textEdited.connect(self.it_stop_edited)
      self.it_stop.editingFinished.connect(self.it_stop_changed)
 
      btn = QPushButton("Start")
@@ -1273,6 +1318,8 @@ class NextWaveMainWindow(QMainWindow):
 
      pixmap_label.setFocus()
 
+     self.connect_offline_signals()
+
      self.setGeometry(2,2,defaults.MAIN_WIDTH_WIN,defaults.MAIN_HEIGHT_WIN)
      self.setWindowFlags(Qt.Window | Qt.WindowTitleHint | Qt.WindowMinimizeButtonHint | Qt.WindowMaximizeButtonHint | Qt.WindowCloseButtonHint)
      self.show()
@@ -1322,7 +1369,7 @@ class NextWaveMainWindow(QMainWindow):
      return
 
  def offline_algorithm(self):
-  self.mode_offline = self.chkOfflineAlgorithm.isChecked()
+  self.engine.mode_offline = self.chkOfflineAlgorithm.isChecked()
 
  def iterative_reset(self):
      self.engine.offline.offline_reset()
@@ -1363,16 +1410,16 @@ class NextWaveMainWindow(QMainWindow):
         self.sockets.centroiding.send(b"t\x00")
 
  def move_center(self, dx, dy, m=1, do_update=True):
-    self.center_dirty = True
+    self.engine.offline.center_dirty = True
     m = self.m
-    self.cx += (dx * m)
-    self.cy += (dy * m)
+    self.engine.cx += (dx * m)
+    self.engine.cy += (dy * m)
     if do_update:
         self.engine.move_searchboxes(dx*m, dy*m)
 
  def move_center_abs(self,x,y):
-    self.cx = x
-    self.cy = y
+    self.engine.cx = x
+    self.engine.cy = y
 
  def spot_window_clicked(self, event):
     # Get the geometry of the spot window
@@ -1456,16 +1503,16 @@ class NextWaveMainWindow(QMainWindow):
     elif event.key()==Qt.Key_Right:
         self.move_center( 1,0,self.key_control)
     elif event.key()==Qt.Key_Up:
-        self.cy -= 1 + 10 * self.key_control
+        self.engine.cy -= 1 + 10 * self.key_control
         update_search_boxes=True
     elif event.key()==Qt.Key_Down:
-        self.cy += 1 + 10 * self.key_control
+        self.engine.cy += 1 + 10 * self.key_control
         update_search_boxes=True
     else:
         print( "Uknown Key:", event.key() )
 
     if update_search_boxes:
-        self.engine.make_searchboxes(self.cx,self.cy)
+        self.engine.make_searchboxes(self.engine.cx,self.engine.cy)
 
         #if event.key() == QtCore.Qt.Key_Q:
         #elif event.key() == QtCore.Qt.Key_Enter:
@@ -1521,7 +1568,7 @@ class NextWaveMainWindow(QMainWindow):
     self.engine = NextwaveEngine(self)
     self.engine.init()
     if not self.offline_only:
-       self.engine.make_searchboxes(self.cx,self.cy)
+       self.engine.make_searchboxes(self.engine.cx,self.engine.cy)
        self.sockets = NextwaveSocketComm(self)
        self.engine.mode_init()
 
@@ -1569,8 +1616,8 @@ class NextWaveMainWindow(QMainWindow):
 
                 #pixmap_l.mousePressEvent = self.offline_image_click 
 
-  self.offline_curr=0
-  self.engine.offline_frame(self.offline_curr)
+  self.engine.offline.offline_curr=0
+  self.engine.offline_frame(self.engine.offline.offline_curr)
 
 # rpyc servic definition
 # Doesn't let you access member variables, so seems kind of pointless
@@ -1602,6 +1649,22 @@ def main():
   if not win.offline_only:
       win.sockets.init()
   start_backdoor(win)
+
+  import traceback
+
+  def my_exception_hook(exctype, value, tb):
+    # Print the exception and traceback
+    print(exctype, value, tb)
+    traceback.print_decoder(exctype, value, tb)
+    sys._excepthook(exctype, value, tb)
+    sys.exit(1)
+
+  # Back up the default exception hook and replace it
+  sys._excepthook = sys.excepthook
+  sys.excepthook = my_exception_hook
+  
+  import faulthandler
+  faulthandler.enable()
 
   sys.exit(app.exec_())
 

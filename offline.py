@@ -33,8 +33,31 @@ import iterative
 from nextwave_comm import NextwaveEngineComm
 import defaults
 
-# import ffmpegcv # Read AVI... Better than OpenCV (built-in ffmpeg?)
+
+# Get the directory where your script is running
+current_dir = os.path.dirname(os.path.abspath(__file__))
+
+# Add the current directory to Windows PATH for this session
+os.environ["PATH"] += os.pathsep + current_dir
+
+# Now import your ffmpeg library
+import ffmpeg 
+
+import ffmpegcv # Read AVI... Better than OpenCV (built-in ffmpeg?)
 from PIL import Image, TiffImagePlugin # Needed
+
+from PyQt5.QtCore import QObject, pyqtSignal
+
+class OfflineSignals(QObject):
+    """ Notifications from the offline routines, which can run in a worker QThread.
+        These are one-way, for display only: the algorithm keeps its own state in member variables
+        and never reads anything back from the UI while running (see NextwaveOffline.__init__).
+        The main window connects them to slots (see connect_offline_signals).
+    """
+    pupil_diam_changed = pyqtSignal(float) # Current pupil diameter (user units)
+    pupil_stop_changed = pyqtSignal(float) # Computed max pupil diameter for iterating (user units)
+    box_size_changed = pyqtSignal(float)   # Box size (pixels)
+    frame_loaded = pyqtSignal(object)      # Image (numpy array) of frame just loaded
 
 class info_saver():
     def __init__(self,parent):
@@ -54,8 +77,8 @@ class info_saver():
             'centroids_y':self.engine.centroids_y,
             'est_x':self.offline.est_x,
             'est_y':self.offline.est_y,
-            'cx':self.ui.cx,
-            'cy':self.ui.cy,
+            'cx':self.engine.cx,
+            'cy':self.engine.cy,
             'rotation':self.offline.rotations[nframe],
             'pupil_diam':self.engine.pupil_diam / self.engine.pupil_mag, # In pupil coords, not sensor
             'zernikes':self.engine.zernikes}
@@ -75,16 +98,15 @@ class info_saver():
         self.engine.centroids_y = data_record['centroids_y']
         self.offline.est_x = data_record['est_x']
         self.offline.est_y = data_record['est_y']
-        self.ui.cx = data_record['cx']
-        self.ui.cy = data_record['cy']
+        self.engine.cx = data_record['cx']
+        self.engine.cy = data_record['cy']
         self.engine.pupil_diam = data_record['pupil_diam'] * self.engine.pupil_mag  # TODO: Should we rebuild boxes ?
         self.engine.zernikes = data_record['zernikes']
 
         self.engine.num_boxes = len( self.engine.centroids_x)
         #self.offline.rotations[self.ui.offline_curr]=data_record['rotation']
         
-        # UPDATE UI. TODO. Ambivalent this should be here...
-        self.ui.line_pupil_diam.setText('%2.2f'%(self.engine.pupil_diam / self.engine.pupil_mag ) )
+        self.offline.signals.pupil_diam_changed.emit( self.engine.pupil_diam / self.engine.pupil_mag )
 
         return data_record
 
@@ -129,7 +151,17 @@ class NextwaveOffline():
         self.parent = parent
         self.engine = self.parent
         self.ui = self.parent.ui
+        self.signals = OfflineSignals()
         self.saver = info_saver(self)
+
+        # Algorithm inputs. The UI updates these when the user edits them; the algorithm only reads them here.
+        self.it_start = float(defaults.ITERATIVE_PUPIL_START) # Starting pupil diameter
+        self.it_step = float(defaults.ITERATIVE_PUPIL_STEP_SIZE)
+        self.it_stop = float(defaults.ITERATIVE_PUPIL_STOP) # Max pupil diameter. Holds last computed value unless user-edited
+        self.it_stop_dirty = False # User has set it_stop: use it instead of estimating
+        self.center_dirty = False # User has set the center: don't autocenter
+
+        self.offline_curr = 0 # Current frame
         
     def iterative_run(self, cx, cy, step):
         return
@@ -150,7 +182,7 @@ class NextwaveOffline():
 
     def offline_frame(self,nframe=None):
         if nframe is None:
-            nframe = self.parent.ui.offline_curr
+            nframe = self.offline_curr
         #dims=np.zeros(2,dtype='uint16')
         #dims[0]=self.offline_movie[nframe].shape[0]
         #dims[1]=self.offline_movie[nframe].shape[1]
@@ -158,7 +190,7 @@ class NextwaveOffline():
         bytez=self.offline_movie[nframe]
         self.im = bytez
         self.parent.comm.write_image(self.dims,bytez)
-        self.ui.image_pixels = bytez
+        self.signals.frame_loaded.emit(bytez)
 
     def load_offline_background(self,file_info):
         # file_info: from dialog. Tuple: (list of files, file types)
@@ -178,7 +210,7 @@ class NextwaveOffline():
                     if buf_movie is None:
                         buf_movie=np.zeros( (50,f1.shape[0],f1.shape[1]), dtype='uint8') # TODO: grow new chunk if necessary
                     buf_movie[nf]=f1
-                    #print(nf,end=' ')
+                    print('%04d %03d '%(nf,f1.mean() ),end=' ')
 
             print("Background: read %d frames of %dx%d"%(nf,f1.shape[0],f1.shape[1]) )
             buf_movie=buf_movie[0:nf,:,:] # Trim to correct
@@ -237,7 +269,11 @@ class NextwaveOffline():
         fname = file_info[0][0]
         self.offline_fname = fname
         
-        self.parent.ui.mode_offline=True
+        self.parent.mode_offline=True
+        
+        self.scan_dir ="X"
+        self.condition="NONE"
+        self.sub_id="NONAME"
         
         if '.bin' in file_info[1]:
             print("Offline: ",file_info[0][0])
@@ -256,8 +292,13 @@ class NextwaveOffline():
             buf_movie=None
             pathname = file_info[0][0].upper()
 
+            NO_FILENAME=True
             GY_RESTRUCTURE=True
-            if GY_RESTRUCTURE:
+            if NO_FILENAME:
+                self.scan_dir ="X"
+                self.condition="NONE"
+                self.sub_id="NONAME"
+            elif GY_RESTRUCTURE:
                 # Find the last 3 (from the right) subdirs
                 i0=pathname[:].rfind('/')
                 i1=pathname[:i0].find('/')
@@ -294,7 +335,8 @@ class NextwaveOffline():
                         self.scan_dir = pathname[idxScanDir:idxScanDir+1]  
             
             nf=0 # USE nf instead of nf_x to allow skipping (e.g. if directory is in there)
-            self.fnames = np.zeros( len(file_info[0]) )
+            self.fnames = ["" for n in np.arange( len(file_info[0]) )]
+            
             for nf_x,frame1 in enumerate(file_info[0]):
                 if not (".png" in frame1):
                     continue
@@ -384,16 +426,6 @@ class NextwaveOffline():
 
             print(pathname, self.condition, self.scan_dir, self.sub_id, self.fnames)
             print("Read %d frames of %dx%d"%(nf,f1.shape[0],f1.shape[1]) )
-            buf_movie=buf_movie[0:nf,:,:] # Trim to correct
-            self.fnames = self.fnames[0:nf]
-            self.rotations = [None]*nf
-
-            # Threshold anything too bright
-            buf_movie[buf_movie >= defaults.SATURATION_MINIMUM] = 0
-            
-            self.offline_movie = buf_movie
-            self.parent.ui.add_offline(buf_movie)
-            self.dims=np.array([buf_movie.shape[1],buf_movie.shape[2]])
 
         elif '.avi' in file_info[1]:
             fname=file_info[0][0]
@@ -401,21 +433,35 @@ class NextwaveOffline():
             vidin = ffmpegcv.VideoCapture(fname)
             buf_movie=None
 
+            debug_nframes = defaults.AVI_DEBUG_FRAMES
+
             with vidin:
                 for nf,frame in enumerate(vidin):
-                    f1=frame.mean(2) #[0:1024,0:1024] # Avg RGB. TODO: crop hard-code
+                    f1=frame.mean(2)
                     if buf_movie is None:
-                        buf_movie=np.zeros( (512,f1.shape[0],f1.shape[1]), dtype='uint8') # TODO: grow new chunk if necessary
+                        buf_movie=np.zeros( (defaults.MOVIE_MAX_FRAMES,f1.shape[0],f1.shape[1]), dtype='uint8') # TODO: grow new chunk if necessary
                     buf_movie[nf]=f1
-                    print(nf,end=' ')
+                    print('%04d %03d\n'%(nf,f1.mean() ),end=' ', flush=True)
 
-            f1 = f1[nf,:,:]
+                    #if nf<100: # For e.g. debugging
+                    #    np.save("img_%02d.npy"%nf,f1)
+                        
+                    if debug_nframes>0 and nf>=debug_nframes:
+                        break
 
             print("Read %d frames of %dx%d"%(nf,f1.shape[0],f1.shape[1]) )
-            buf_movie=buf_movie[0:nf,:,:] # Trim to correct
-            self.offline_movie = buf_movie
-            self.parent.ui.add_offline(buf_movie)
-            self.dims=np.array([buf_movie.shape[1],buf_movie.shape[2]])
+            self.fnames = ["%03d" for n in np.arange(nf)]
+
+        buf_movie=buf_movie[0:nf,:,:] # Trim to correct
+        self.fnames = self.fnames[0:nf]
+        self.rotations = [None]*nf
+
+        # Threshold anything too bright
+        buf_movie[buf_movie >= defaults.SATURATION_MINIMUM] = 0
+        
+        self.offline_movie = buf_movie
+        self.parent.ui.add_offline(buf_movie)
+        self.dims=np.array([buf_movie.shape[1],buf_movie.shape[2]])
 
         self.max_frame = buf_movie.shape[0]
 
@@ -637,7 +683,7 @@ class NextwaveOffline():
         zs = self.zernikes
 
         #max_size = self.max_p_diam
-        step_size = float(self.parent.ui.it_step.text() )
+        step_size = self.it_step
         ccd_pixel = self.parent.ccd_pixel
         focal = self.parent.focal
         zs_for_extrapolate = np.zeros( 24 ) # Needed for extrapolate function
@@ -658,8 +704,8 @@ class NextwaveOffline():
                 self.iterative_size_pixels = self.iterative_max_pixels
 
             # Add tip/tilt to the centers
-            self.parent.ui.cx -= int( z_new[1] / focal * ccd_pixel )
-            self.parent.ui.cy += int( z_new[0] / focal * ccd_pixel )
+            self.parent.cx -= int( z_new[1] / focal * ccd_pixel )
+            self.parent.cy += int( z_new[0] / focal * ccd_pixel )
 
             self.parent.init_params( {'pupil_diam': self.iterative_size / self.parent.pupil_mag} )
             self.parent.make_searchboxes() #pupil_radius_pixel=self.iterative_size_pixels)
@@ -678,18 +724,18 @@ class NextwaveOffline():
             self.offline_auto_shrink()
 
     def offline_serialize(self):
-        self.saver.save1(self.parent.ui.offline_curr)
+        self.saver.save1(self.offline_curr)
         self.saver.serialize()
 
     def offline_manual1(self):
-        self.parent.offline_frame(self.parent.ui.offline_curr)
+        self.parent.offline_frame(self.offline_curr)
         self.iterative_run_good()
         #self.saver.save1(nframe)        
 
     def offline_auto1(self,nframe):
         # Load
-        self.parent.ui.offline_curr=nframe
-        self.parent.offline_frame(self.parent.ui.offline_curr)
+        self.offline_curr=nframe
+        self.parent.offline_frame(self.offline_curr)
         #Process
         self.iterative_run_good()
         #self.offline_centroids(conservative_threshold=True) # Now redo, with less conservative
@@ -705,19 +751,19 @@ class NextwaveOffline():
     def offline_auto_dumb(self):
         self.parent.ui.mode_init()
         for nframe in np.arange(self.max_frame):
-            self.parent.ui.offline_curr=nframe
-            self.parent.offline_frame(self.parent.ui.offline_curr)
+            self.offline_curr=nframe
+            self.parent.offline_frame(self.offline_curr)
             self.offline_centroids()
             self.saver.save1(nframe)         
         self.saver.serialize()
 
 # iterative_size is size on sensor
     def offline_reset(self):
-        pupil_diam = float(self.parent.ui.it_start.text())
+        pupil_diam = self.it_start
         pupil_diam = pupil_diam * self.parent.pupil_mag
         self.iterative_size = pupil_diam
         self.iterative_size_pixels = self.iterative_size/2.0 * 1000 / self.parent.ccd_pixel
-        self.parent.ui.line_pupil_diam.setText('%2.2f'%(self.iterative_size ) )
+        #self.parent.ui.line_pupil_diam.setText('%2.2f'%(self.iterative_size ) )
         # pupil_diam is the size on sensor, so divide by mag (because init code multiplies by mag)
         self.parent.init_params( { 'pupil_diam': pupil_diam / self.parent.pupil_mag } ) # Back to real pupil size
         self.parent.make_searchboxes() 
@@ -751,7 +797,7 @@ class NextwaveOffline():
         else:
             pass
         self.parent.shift_search_boxes(zs,from_dialog=False) 
-        self.parent.ui.widget_boxsize.setValue(self.parent.box_size_pixel) 
+        self.signals.box_size_changed.emit( float(self.parent.box_size_pixel) )
 
     def convex_hull_robust(self,dynamic_threshold=False):
         # Try random subsamples to omit outliers
@@ -830,7 +876,7 @@ class NextwaveOffline():
     def autocenter(self):
         if defaults.centering_method=='estimate_boxes':
             # First start small
-            pupil_radius_small = float(self.parent.ui.it_start.text()) * self.parent.pupil_mag / 2.0
+            pupil_radius_small = self.it_start * self.parent.pupil_mag / 2.0
             self.fit1(pupil_radius_small) # 
             
             # Now go big (maximal based on image), but correct from extrapolated small
@@ -868,7 +914,7 @@ class NextwaveOffline():
             self.opt1=opt1['x']
 
             if False: # TODO: DEBUG
-                np.savez("desired_%d"%self.parent.ui.offline_curr, desired,
+                np.savez("desired_%d"%self.offline_curr, desired,
                     self.parent.box_x, self.parent.box_y, self.box_metrics, self.cenx, self.ceny, self.opt1, guess )
 
             # Find closest box center
@@ -906,16 +952,16 @@ class NextwaveOffline():
 
         box_min = np.argmin( distances )
 
-        self.parent.ui.cx = self.parent.box_x[box_min]
-        self.parent.ui.cy = self.parent.box_y[box_min]
+        self.parent.cx = self.parent.box_x[box_min]
+        self.parent.cy = self.parent.box_y[box_min]
         self.cx_best = self.parent.box_x[box_min]
         self.cy_best = self.parent.box_y[box_min]
 
         # TODO: Figure out more correct diameter using max outermost box corner
         p_diam = r_pix*2.0/1000.0*self.parent.ccd_pixel
 
-        if self.parent.ui.it_stop_dirty: # If edited in the UI, override.
-            p_diam =  float( self.parent.ui.it_stop.text() ) * self.parent.pupil_mag
+        if self.it_stop_dirty: # If edited in the UI, override.
+            p_diam =  self.it_stop * self.parent.pupil_mag
             print("Dirty:", p_diam)
         elif p_diam > defaults.ITERATIVE_PUPIL_STOP * self.parent.pupil_mag: # Never exceed max.
             p_diam = defaults.ITERATIVE_PUPIL_STOP * self.parent.pupil_mag
@@ -941,11 +987,11 @@ class NextwaveOffline():
        # except:
        #     self.parent.ui.mode_init() # Call init if needed
 
-        self.iterative_size = float(self.parent.ui.it_start.text()) * self.parent.pupil_mag
+        self.iterative_size = self.it_start * self.parent.pupil_mag
         self.iterative_size_pixels = self.iterative_size/2.0 * 1000 / self.parent.ccd_pixel
         
         
-        if not self.parent.ui.center_dirty:
+        if not self.center_dirty:
             self.autocenter()
             # Is this circular? Where to get box centers from?
             #self.parent.init_params( { 'pupil_diam': pupil_diam / self.parent.pupil_mag } ) # Back to real pupil size
@@ -954,10 +1000,11 @@ class NextwaveOffline():
         if defaults.do_auto_rotation_fix:
             self.offline_rotation_fix()
 
-        # Show the computed max in the box:
-        if not self.parent.ui.it_stop_dirty:
-            self.parent.ui.it_stop.setText('%2.2f'%(self.iterative_max/ self.parent.pupil_mag) )
-        self.parent.ui.mode_offline=True
+        # Remember the computed max (and show it to the user):
+        if not self.it_stop_dirty:
+            self.it_stop = self.iterative_max / self.parent.pupil_mag
+            self.signals.pupil_stop_changed.emit( self.it_stop )
+        self.parent.mode_offline=True
         self.offline_reset()
         
     def iterative_offline(self):
@@ -966,11 +1013,11 @@ class NextwaveOffline():
     def iterative_step_good(self):
         self.iterative_size_pixels = self.iterative_size/2.0 * 1000 / self.parent.ccd_pixel
         self.offline_stepbox()
-        self.parent.ui.line_pupil_diam.setText('%2.2f'%(self.iterative_size / self.parent.pupil_mag) ) #+step) )
+        self.signals.pupil_diam_changed.emit( self.iterative_size / self.parent.pupil_mag ) #+step) )
         
     def iterative_run_good(self):
         # Size on the sensor, max pixel radius in the image
-        self.iterative_max =  float(self.parent.ui.it_stop.text() )
+        self.iterative_max = self.it_stop
         self.iterative_max_pixels = self.iterative_max/2.0 * 1000 / self.parent.ccd_pixel
 
         self.offline_startbox()
@@ -979,13 +1026,13 @@ class NextwaveOffline():
         while self.iterative_size_pixels < self.iterative_max_pixels:
             self.iterative_step_good()
 
-            s="Frame %02d/%02d; %04d boxes. %04d zern terms. Pupil: %02.2f/%02.2f"%(self.parent.ui.offline_curr, self.max_frame,
+            s="Frame %02d/%02d; %04d boxes. %04d zern terms. Pupil: %02.2f/%02.2f"%(self.offline_curr, self.max_frame,
                                                                                     self.parent.num_boxes, self.parent.zterms_full.shape[0], self.iterative_size, self.iterative_max )
             print(s,flush=True)
             
 
     def offline_navigate(self):
-        self.saver.load1(self.parent.ui.offline_curr)
+        self.saver.load1(self.offline_curr)
 
     def offline_goodbox(self,nframe):
         nbox=self.parent.ui.box_info
@@ -998,12 +1045,12 @@ class NextwaveOffline():
         #print("Goodbox", nbox,nframe,self.good_idx, patch.shape, self.box_size_pixel)
 
     def offline_rotation_fix(self):
-        if self.rotations[self.parent.ui.offline_curr] is None:
+        if self.rotations[self.offline_curr] is None:
             angle,img_rotated=detect_rotation(self.im, angls=defaults.rotation_fix_angles,
                 ratio_threshold=defaults.rotation_fix_min_peak_ratio)
-            self.rotations[self.parent.ui.offline_curr] = angle
+            self.rotations[self.offline_curr] = angle
             if not (angle==0):
-                self.offline_movie[self.parent.ui.offline_curr] = img_rotated # Overwrite
+                self.offline_movie[self.offline_curr] = img_rotated # Overwrite
                 self.offline_frame( ) # Updates some necessary local variables
             
     def show_dialog_debug(self):
@@ -1095,7 +1142,7 @@ For each frame:
             self.parent.make_searchboxes(cx,cy,pupil_radius_pixel=self.iterative_size/2.0*1000/self.ccd_pixel)
             self.parent.init_params( {'pupil_diam': self.iterative_size / self.parent.pupil_mag})
 
-            if self.parent.ui.mode_offline:
+            if self.parent.mode_offline:
                 self.iterative_offline()
                 return # Don't get boxes from engine
 
@@ -1129,11 +1176,11 @@ For each frame:
             self.compute_zernikes()
             zs = self.zernikes
 
-            frame_name = self.offline_fname + "_%02d.png"%self.parent.ui.offline_curr
+            frame_name = self.offline_fname + "_%02d.png"%self.offline_curr
             self.parent.ui.update_ui()
             self.parent.ui.image.save(frame_name)
 
-            s="%d,%d,%f,%d,%d,"%(self.parent.ui.offline_curr,self.parent.num_boxes,self.iterative_size,self.parent.ui.cx,self.parent.ui.cy)
+            s="%d,%d,%f,%d,%d,"%(self.offline_curr,self.parent.num_boxes,self.iterative_size,self.parent.cx,self.parent.cy)
             for zern1 in self.zernikes:
                 s += "%0.6f,"%zern1
             s += '\n'
