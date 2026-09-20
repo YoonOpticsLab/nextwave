@@ -127,6 +127,9 @@ class NextWaveMainWindow(QMainWindow):
 
     self.image_pixels = np.zeros( (10,10)) # Display copy of current image, updated by offline frame_loaded signal
 
+    self.load_dialog = None # Progress dialog, while loading a movie
+    self.load_paused_timers = []
+
     self.worker = OfflineWorker(self)
 
 
@@ -198,7 +201,11 @@ class NextWaveMainWindow(QMainWindow):
         self.save_setting("ui/folder",dirname)
         
         self.btn_off.setText(thedir[0][0])
-        self.engine.offline.load_offline(thedir)
+        self.start_load_progress("Loading movie")
+        try:
+            self.engine.offline.load_offline(thedir)
+        finally:
+            self.end_load_progress()
         self.engine.mode_offline = True
         self.chkOfflineAlgorithm.setChecked(True)
         self.engine.offline.center_dirty = False
@@ -227,6 +234,46 @@ class NextWaveMainWindow(QMainWindow):
     signals.pupil_stop_changed.connect(self.show_pupil_stop)
     signals.box_size_changed.connect(self.show_box_size)
     signals.frame_loaded.connect(self.show_frame)
+    signals.load_progress.connect(self.show_load_progress)
+
+ # Loading a movie runs in this (UI) thread. So it can't block the event loop silently: show a progress dialog,
+ # and let Qt repaint each time the loader reports. The loader only emits load_progress; this is all display.
+ def start_load_progress(self, title):
+    self.load_dialog = QtWidgets.QProgressDialog(title, "", 0, 0, self)
+    dlg = self.load_dialog
+    dlg.setCancelButton(None) # Can't stop a load half way
+    dlg.setWindowTitle(title)
+    dlg.setWindowModality(Qt.WindowModal) # Nothing else to click meanwhile
+    dlg.setMinimumWidth(420)
+    dlg.setMinimumDuration(0)
+    dlg.setAutoClose(False)
+    dlg.setAutoReset(False)
+    dlg.show()
+
+    # Don't let the refresh timers run on a half-loaded movie
+    self.load_paused_timers = [t for t in (self.updater, self.updater_dm) if t.isActive()]
+    for timer in self.load_paused_timers:
+        timer.stop()
+    QApplication.processEvents()
+
+ def end_load_progress(self):
+    for timer in self.load_paused_timers:
+        timer.start()
+    self.load_paused_timers = []
+    if self.load_dialog is not None:
+        self.load_dialog.close()
+        self.load_dialog.deleteLater()
+        self.load_dialog = None
+
+ @QtCore.pyqtSlot(str, int, int)
+ def show_load_progress(self, stage, done, total):
+    dlg = self.load_dialog
+    if dlg is None: # Not loading through the UI
+        return
+    dlg.setLabelText(stage + ("     %d / %d" % (min(done, total), total) if total > 0 else " ..."))
+    dlg.setMaximum(total) # 0: busy indicator, for the steps with no count
+    dlg.setValue(min(done, total))
+    QApplication.processEvents() # (setValue only does this when the value changes)
 
  # These only display what the algorithm reports. They must not change algorithm state.
  @QtCore.pyqtSlot(float)
@@ -285,7 +332,11 @@ class NextWaveMainWindow(QMainWindow):
         self.save_setting("ui/folder_background",dirname)
 
         self.btn_off_back.setText(thedir[0][0])
-        self.engine.offline.load_offline_background(thedir)
+        self.start_load_progress("Loading background")
+        try:
+            self.engine.offline.load_offline_background(thedir)
+        finally:
+            self.end_load_progress()
 
  def offline_config(self):
     ffilt='XML config files (*.xml);; JSON config files (*.json);; All files (*.*)'
@@ -1629,6 +1680,8 @@ class NextWaveMainWindow(QMainWindow):
                 self.layout_off.addWidget(self.offline_labels[nf], nf, 0)
                 self.layout_off.addWidget(self.offline_checks[nf], nf, 1)
                 self.layout_off.addWidget(pixmap_l, nf, 2)
+
+                self.engine.offline.signals.report("Building the frame list", nf+1, self.offline_nframes)
 
                 #pixmap_l.mousePressEvent = self.offline_image_click 
 

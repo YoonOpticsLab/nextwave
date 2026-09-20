@@ -58,6 +58,18 @@ class OfflineSignals(QObject):
     pupil_stop_changed = pyqtSignal(float) # Computed max pupil diameter for iterating (user units)
     box_size_changed = pyqtSignal(float)   # Box size (pixels)
     frame_loaded = pyqtSignal(object)      # Image (numpy array) of frame just loaded
+    load_progress = pyqtSignal(str, int, int) # While loading a movie: what's being done, n done, n total (total 0: no count)
+
+    def __init__(self):
+        super().__init__()
+        self._last_report = 0.0
+
+    def report(self, stage, done=0, total=0):
+        """ Emit load_progress, but no more often than it can be shown: a signal per frame would cost more than it's worth. """
+        now = time.monotonic()
+        if done == 0 or done >= total or now - self._last_report > 0.05: # Always the first and last of a stage
+            self._last_report = now
+            self.load_progress.emit(stage, done, total)
 
 class info_saver():
     def __init__(self,parent):
@@ -200,6 +212,16 @@ class NextwaveOffline():
         self.parent.comm.write_image(self.dims,bytez)
         self.signals.frame_loaded.emit(bytez)
 
+    def _frame_count(self, vidin, limit):
+        """ Number of frames we'll read from an open video, for the progress bar. 0 if it can't say. """
+        try:
+            count = len(vidin)
+        except Exception:
+            return 0
+        if limit > 0:
+            count = min(count, limit + 1) # (The read loop stops after frame index `limit`)
+        return count
+
     def load_offline_background(self,file_info):
         # file_info: from dialog. Tuple: (list of files, file types)
         if '.bin' in file_info[1]:
@@ -212,6 +234,7 @@ class NextwaveOffline():
             buf_movie=None
 
             with vidin:
+                total = self._frame_count(vidin, 0)
                 for nf,frame in enumerate(vidin):
                     #f1=frame.mean(2)[0:1024,0:1024] # Avg RGB. TODO: crop hard-code
                     f1=frame.mean(2)
@@ -219,11 +242,13 @@ class NextwaveOffline():
                         buf_movie=np.zeros( (50,f1.shape[0],f1.shape[1]), dtype='uint8') # TODO: grow new chunk if necessary
                     buf_movie[nf]=f1
                     print('%04d %03d '%(nf,f1.mean() ),end=' ')
+                    self.signals.report("Reading background frames", nf+1, total)
 
             print("Background: read %d frames of %dx%d"%(nf,f1.shape[0],f1.shape[1]) )
             buf_movie=buf_movie[0:nf,:,:] # Trim to correct
             self.offline_background = buf_movie
 
+            self.signals.report("Subtracting background") # (One long step)
             if self.offline_movie.shape[0] != self.offline_background.shape[0]:
                 print("Sub average ")
                 # Different number of frames in background and movie. Subtract mean background from each frame
@@ -241,6 +266,7 @@ class NextwaveOffline():
         elif '.bmp' in file_info[1]:
             buf_movie=None
             nf=0 # USE nf instead of nf_x to allow skipping (e.g. if directory is in there)
+            n_files = sum(".bmp" in frame1 for frame1 in file_info[0])
             for nf_x,frame1 in enumerate(file_info[0]):
                 if not (".bmp" in frame1):
                     continue
@@ -251,11 +277,13 @@ class NextwaveOffline():
                         buf_movie=np.zeros( (50,f1.shape[0],f1.shape[1]), dtype='uint8') # TODO: grow new chunk if necessary
                 buf_movie[nf]=f1
                 nf += 1
+                self.signals.report("Reading background frames", nf, n_files)
 
             print("Read %d frames of %dx%d"%(nf,f1.shape[0],f1.shape[1]) )
             buf_movie=buf_movie[0:nf,:,:] # Trim to correct
             self.offline_background = buf_movie
 
+            self.signals.report("Subtracting background") # (One long step)
             if self.offline_movie.shape[0] != self.offline_background.shape[0]:
                 print("Sub average")
                 # Different number of frames in background and movie. Subtract mean background from each frame
@@ -344,7 +372,8 @@ class NextwaveOffline():
             
             nf=0 # USE nf instead of nf_x to allow skipping (e.g. if directory is in there)
             self.fnames = ["" for n in np.arange( len(file_info[0]) )]
-            
+            n_files = sum(".png" in frame1 for frame1 in file_info[0])
+
             for nf_x,frame1 in enumerate(file_info[0]):
                 if not (".png" in frame1):
                     continue
@@ -358,6 +387,7 @@ class NextwaveOffline():
                 buf_movie[nf]=f1
                 self.fnames[nf] = frame1
                 nf += 1
+                self.signals.report("Reading frames", nf, n_files)
 
             buf_movie = buf_movie[0:nf]
             self.fnames = self.fnames[0:nf]
@@ -414,6 +444,7 @@ class NextwaveOffline():
                         
             nf=0 # USE nf instead of nf_x to allow skipping (e.g. if directory is in there)
             self.fnames = ["" for n in np.arange( len(file_info[0]) )]
+            n_files = sum(".bmp" in frame1 for frame1 in file_info[0])
             for nf_x,frame1 in enumerate(file_info[0]):
                 if not (".bmp" in frame1):
                     continue
@@ -429,8 +460,9 @@ class NextwaveOffline():
                 idx_number_after=frame1[idx_number:].find('.')+idx_number
                 #print( frame1, idx_number, frame1[idx_number:idx_number_after] )
                 self.fnames[nf] = int(frame1[idx_number:idx_number_after])
-                
+
                 nf += 1
+                self.signals.report("Reading frames", nf, n_files)
 
             print(pathname, self.condition, self.scan_dir, self.sub_id, self.fnames)
             print("Read %d frames of %dx%d"%(nf,f1.shape[0],f1.shape[1]) )
@@ -444,12 +476,14 @@ class NextwaveOffline():
             debug_nframes = defaults.AVI_DEBUG_FRAMES
 
             with vidin:
+                total = self._frame_count(vidin, debug_nframes)
                 for nf,frame in enumerate(vidin):
                     f1=frame.mean(2)
                     if buf_movie is None:
                         buf_movie=np.zeros( (defaults.MOVIE_MAX_FRAMES,f1.shape[0],f1.shape[1]), dtype='uint8') # TODO: grow new chunk if necessary
                     buf_movie[nf]=f1
                     print('%04d %03d\n'%(nf,f1.mean() ),end=' ', flush=True)
+                    self.signals.report("Reading frames", nf+1, total)
 
                     #if nf<100: # For e.g. debugging
                     #    np.save("img_%02d.npy"%nf,f1)
@@ -465,14 +499,16 @@ class NextwaveOffline():
         self.rotations = [None]*nf
 
         # Threshold anything too bright
+        self.signals.report("Removing saturated pixels") # (One long step)
         buf_movie[buf_movie >= defaults.SATURATION_MINIMUM] = 0
-        
+
         self.offline_movie = buf_movie
-        self.parent.ui.add_offline(buf_movie)
+        self.parent.ui.add_offline(buf_movie) # (Reports its own progress)
         self.dims=np.array([buf_movie.shape[1],buf_movie.shape[2]])
 
         self.max_frame = buf_movie.shape[0]
 
+        self.signals.report("Loading saved results") # (One long step)
         self.saver.unserialize() # Load previous if they exist
         self.saver.load1(0) # Restore if possible
 
