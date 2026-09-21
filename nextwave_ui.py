@@ -26,7 +26,7 @@ from nextwave_sockets import NextwaveSocketComm
 import defaults
 import offline_parallel
 
-from nextwave_widgets import ZernikeDialog, BoxInfoDialog, ActuatorPlot, MyBarWidget, OfflineDialog
+from nextwave_widgets import ZernikeDialog, BoxInfoDialog, ActuatorPlot, MyBarWidget, OfflineDialog, FrameListModel
 
 from nextwave_build import build_message
 
@@ -1342,20 +1342,23 @@ class NextWaveMainWindow(QMainWindow):
      layout1.addWidget(btn,6,0)
      btn.clicked.connect(lambda: self.engine.offline.offline_auto_dumb() )
 
-     # Offline scroll image:
-     self.scroll_off = QScrollArea()
-     self.layout_off = QGridLayout()
+     # Offline frame list. A virtual table (thumbnails are made as rows are shown), since movies can have thousands of frames
+     self.frame_model = FrameListModel(self)
+     self.frame_table = QtWidgets.QTableView()
+     self.frame_table.setModel(self.frame_model)
+     self.frame_table.horizontalHeader().hide()
+     self.frame_table.verticalHeader().hide()
+     self.frame_table.verticalHeader().setSectionResizeMode(QtWidgets.QHeaderView.Fixed) # Rows are all the same height (fast)
+     self.frame_table.setIconSize(QtCore.QSize(FrameListModel.THUMB_SIZE, FrameListModel.THUMB_SIZE))
+     self.frame_table.setColumnWidth(0, 80)
+     self.frame_table.setColumnWidth(1, 40)
+     self.frame_table.setColumnWidth(2, FrameListModel.THUMB_SIZE + 10)
+     self.frame_table.setShowGrid(False)
+     self.frame_table.setSelectionMode(QtWidgets.QAbstractItemView.NoSelection)
+     self.frame_table.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
+     self.frame_table.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
 
-     #Scroll Area Properties
-     self.scroll_off.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
-     self.scroll_off.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
-     self.scroll_off.setWidgetResizable(True)
-
-     self.widget_off = QWidget()
-     self.scroll_off.setWidget(self.widget_off)
-     self.widget_off.setLayout(self.layout_off)
-
-     layout1.addWidget(self.scroll_off,7,0) #,-1,-1)
+     layout1.addWidget(self.frame_table,7,0) #,-1,-1)
 
      self.chkOfflineAlgorithm = QCheckBox("Use offline algorithm")
      self.chkOfflineAlgorithm.stateChanged.connect(self.offline_algorithm)
@@ -1659,31 +1662,12 @@ class NextWaveMainWindow(QMainWindow):
 
  def add_offline(self,buf_movie):
   self.offline_nframes = buf_movie.shape[0]
-  self.offline_labels = [QLabel("Frame %02d"%n) for n in range(buf_movie.shape[0])]
-  self.offline_checks = [QCheckBox() for n in range(buf_movie.shape[0])]
 
-  # Clear current list (better in UI?)
-  clear_widget_list(self.layout_off)
-
-  for nf,frame in enumerate(buf_movie):
-                pixmap_l = QLabel()
-                #f1=np.array( np.log10(frame)/np.log10(255) * 255, dtype='uint8' )
-                f1=frame
-                qimage = QImage( f1, frame.shape[1], frame.shape[0], QImage.Format_Grayscale8)
-                pixmap = QPixmap(qimage)
-                pixmap = pixmap.scaled(200,200 , Qt.KeepAspectRatio) # TODO: Get size of widget
-                pixmap_l.setPixmap(pixmap)
-
-                if nf%4==0:
-                 self.offline_checks[nf].setChecked(True)
-
-                self.layout_off.addWidget(self.offline_labels[nf], nf, 0)
-                self.layout_off.addWidget(self.offline_checks[nf], nf, 1)
-                self.layout_off.addWidget(pixmap_l, nf, 2)
-
-                self.engine.offline.signals.report("Building the frame list", nf+1, self.offline_nframes)
-
-                #pixmap_l.mousePressEvent = self.offline_image_click 
+  # Replaces the whole list. (Thumbnails are made later, as rows are shown, so this is quick.)
+  self.engine.offline.signals.report("Building the frame list")
+  self.frame_model.set_movie(buf_movie)
+  self.frame_table.verticalHeader().setDefaultSectionSize(self.frame_model.row_height)
+  self.frame_table.scrollToTop()
 
   self.engine.offline.offline_curr=0
   self.engine.offline_frame(self.engine.offline.offline_curr)

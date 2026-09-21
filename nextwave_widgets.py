@@ -19,6 +19,7 @@ import numpy as np
 import sys
 import os
 import json
+from collections import OrderedDict
 
 import matplotlib.cm as cmap
 
@@ -30,6 +31,77 @@ from threading import Thread
 import xml.etree.ElementTree as ET
 
 NUM_ZERN_DIALOG=20 # TODO
+
+class FrameListModel(QtCore.QAbstractTableModel):
+    """ The frames of an offline movie, one per row: name, checkbox, thumbnail.
+        A movie can have thousands of frames, so this is a virtual list: the view only asks for the rows it is
+        showing, and a thumbnail is made when its row is first shown (the most recent ones are kept). """
+    THUMB_SIZE = 200 # Longest side of a thumbnail, pixels
+    MAX_CACHED = 400
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.movie = None
+        self.checked = set() # Rows with the box checked
+        self.thumbs = OrderedDict() # row -> QPixmap, least recently used first
+        self.row_height = self.THUMB_SIZE
+
+    def set_movie(self, movie):
+        """ movie: (frames, height, width) uint8 array. Not copied, so don't change it under us. """
+        self.beginResetModel()
+        self.movie = movie
+        self.checked = set(range(0, movie.shape[0], 4)) # Every 4th
+        self.thumbs.clear()
+        scale = self.THUMB_SIZE / max(movie.shape[1], movie.shape[2])
+        self.row_height = int(movie.shape[1] * scale) + 4
+        self.endResetModel()
+
+    def rowCount(self, parent=QtCore.QModelIndex()):
+        return 0 if (self.movie is None or parent.isValid()) else self.movie.shape[0]
+
+    def columnCount(self, parent=QtCore.QModelIndex()):
+        return 0 if parent.isValid() else 3
+
+    def flags(self, index):
+        flags = Qt.ItemIsEnabled
+        if index.column() == 1:
+            flags |= Qt.ItemIsUserCheckable
+        return flags
+
+    def data(self, index, role=Qt.DisplayRole):
+        row, col = index.row(), index.column()
+        if role == Qt.TextAlignmentRole and col < 2:
+            return int(Qt.AlignVCenter | Qt.AlignHCenter)
+        if col == 0 and role == Qt.DisplayRole:
+            return "Frame %02d" % row
+        if col == 1 and role == Qt.CheckStateRole:
+            return Qt.Checked if row in self.checked else Qt.Unchecked
+        if col == 2 and role == Qt.DecorationRole:
+            return self.thumbnail(row)
+        return None
+
+    def setData(self, index, value, role=Qt.EditRole):
+        if index.column() == 1 and role == Qt.CheckStateRole:
+            if value == Qt.Checked:
+                self.checked.add(index.row())
+            else:
+                self.checked.discard(index.row())
+            self.dataChanged.emit(index, index, [role])
+            return True
+        return False
+
+    def thumbnail(self, row):
+        pixmap = self.thumbs.get(row)
+        if pixmap is None:
+            frame = self.movie[row]
+            qimage = QImage(frame, frame.shape[1], frame.shape[0], QImage.Format_Grayscale8)
+            pixmap = QPixmap(qimage).scaled(self.THUMB_SIZE, self.THUMB_SIZE, Qt.KeepAspectRatio)
+            self.thumbs[row] = pixmap
+            if len(self.thumbs) > self.MAX_CACHED:
+                self.thumbs.popitem(last=False)
+        else:
+            self.thumbs.move_to_end(row)
+        return pixmap
 
 class ZernikeDialog(QDialog):
     def createFormGroupBox(self,titl):
