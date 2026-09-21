@@ -36,7 +36,8 @@ import ffmpegcv
 def frame_mean(frame, saturation):
     """ Mean brightness of one frame, as the app would see it: gray (mean of the color channels), 8 bit, saturated pixels 0 """
     gray = frame.mean(2).astype(np.uint8)
-    gray[gray >= saturation] = 0
+    if saturation > 0:
+        gray[gray >= saturation] = 0
     return gray.mean(dtype=np.float64)
 
 
@@ -65,7 +66,7 @@ def find_flashes(means, ratio=4.0, peak_ratio=20.0):
     return flashes
 
 
-def first_flash(path, ratio=4.0, baseline=30, saturation=255, exact=False, peak_ratio=20.0):
+def first_flash(path, ratio=4.0, baseline=30, saturation=0, exact=False, peak_ratio=20.0):
     """ Returns a dict: first (index of the first frame of the first flash, or None), peak (its brightest frame), frames (all
         the frames of that flash), ratio (peak brightness / median), n_read (frames read), n_frames (in the video). """
     means = []
@@ -125,7 +126,7 @@ def main():
     parser.add_argument("--ratio", type=float, default=4.0, help="flash frames are brighter than RATIO x the median (default 4.0)")
     parser.add_argument("--peak-ratio", type=float, default=20.0, help="a flash's brightest frame is over PEAK_RATIO x the median (default 20)")
     parser.add_argument("--baseline", type=int, default=30, help="frames to see before comparing with the median (default 30)")
-    parser.add_argument("--saturation", type=int, default=255, help="pixels at or above this are zeroed, as in the app (default 255)")
+    parser.add_argument("--saturation", type=int, default=0, help="pixels at or above this are zeroed, as SATURATION_MINIMUM in the app does (default 0: none)")
     parser.add_argument("--exact", action="store_true", help="read whole movies and use the overall median (slower)")
     parser.add_argument("--csv", help="also write the results to this .csv file")
     args = parser.parse_args()

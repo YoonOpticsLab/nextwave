@@ -32,7 +32,7 @@ from find_first_flash import frame_mean, find_flashes, DEFAULT_DIR, MERGE_GAP   
 import ffmpegcv
 
 
-def movie_means(path, saturation=255, cache=None):
+def movie_means(path, saturation=0, cache=None):
     """ Mean brightness of every frame of a movie (from the cache, if it has it). Runs in a worker process. """
     cache_file = None
     if cache:
@@ -90,7 +90,7 @@ def main():
     parser.add_argument("directory", nargs="?", default=DEFAULT_DIR, help="folder with the .avi files (default %s)" % DEFAULT_DIR)
     parser.add_argument("--ratio", type=float, default=4.0, help="flash if mean brightness > RATIO x the movie's median (default 4.0)")
     parser.add_argument("--peak-ratio", type=float, default=20.0, help="a flash's brightest frame is over PEAK_RATIO x the median (default 20)")
-    parser.add_argument("--saturation", type=int, default=255, help="pixels at or above this are zeroed, as in the app (default 255)")
+    parser.add_argument("--saturation", type=int, default=0, help="pixels at or above this are zeroed, as SATURATION_MINIMUM in the app does (default 0: none)")
     parser.add_argument("--workers", type=int, default=0, help="processes (default: one per movie, up to the number of cores - 1)")
     parser.add_argument("--cache", help="folder to keep each movie's per-frame brightness in, so a re-run is instant")
     parser.add_argument("--csv", help="write every flash of every movie to this .csv file")
