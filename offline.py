@@ -71,6 +71,16 @@ class OfflineSignals(QObject):
             self._last_report = now
             self.load_progress.emit(stage, done, total)
 
+def limit_zernikes(zernikes):
+    """ Copy of the Zernike coefficients with any whose magnitude is above defaults.ZERNIKE_MAX_ABS set to NaN.
+        (Only for saving/exporting: the algorithm itself needs the real values.) """
+    limit = float(getattr(defaults, 'ZERNIKE_MAX_ABS', 10.0) or 0)
+    zernikes = np.array(zernikes, dtype=float) # A copy
+    if limit > 0:
+        with np.errstate(invalid='ignore'): # (Already-NaN ones)
+            zernikes[np.abs(zernikes) > limit] = np.nan
+    return zernikes
+
 class info_saver():
     def __init__(self,parent):
         self.parent=parent
@@ -94,7 +104,7 @@ class info_saver():
             'rotation':self.offline.rotations[nframe],
             'pupil_diam':self.engine.pupil_diam / self.engine.pupil_mag, # In pupil coords, not sensor
             'box_size_pixel':float(self.engine.box_size_pixel), # Final search box size, pixels (the boxes shrink while processing)
-            'zernikes':self.engine.zernikes}
+            'zernikes':limit_zernikes(self.engine.zernikes)}
         self.data[nframe]=data_record
         #print( 'saved: ', data_record, flush=True)
 
@@ -134,7 +144,7 @@ class info_saver():
                 defaults.scan_frame_to_ecc[self.offline.scan_dir][nframe],data_record['pupil_diam'],data_record['cx'],data_record['cy'])
             except: # without the sub_id params
                 s=("%s,%s,%d,%0.2f,%0.3f,%d,%d,")%("","",nframe,0.0,data_record['pupil_diam'],data_record['cx'],data_record['cy'])
-            for nz1,z1 in enumerate(data_record['zernikes']):
+            for nz1,z1 in enumerate(limit_zernikes(data_record['zernikes'])): # (Also for results saved before this rule)
                 s += "%0.6f,"%(z1)
         else:
             s='%d,'%nframe

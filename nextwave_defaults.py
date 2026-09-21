@@ -86,6 +86,8 @@ NUM_ZS_FOR_SHRINK=9
 # TODO: Make this a maleable parameter
 MIN_BOXES_PER_NZERN=2
 
+ZERNIKE_MAX_ABS=10.0 # um. In saved results, any Zernike coefficient with a magnitude above this is saved as NaN (just that coefficient). 0 = off
+
 MAX_ZERNIKES=65 # Absolute max for 10th order: np.sum( np.arange(10+1+1))-1 .first of 11th order is np.sum(np.arange(12)) )
 MAX_ORDER=10
 
