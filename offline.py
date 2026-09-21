@@ -1,3 +1,4 @@
+from nextwave_log import log
 import numpy as np
 import sys
 import os
@@ -302,9 +303,9 @@ class NextwaveOffline():
         peak_ratio = float(getattr(defaults, 'FLASH_PEAK_RATIO_THRESHOLD', 0) or 0)
         self.flash_frames, self.dark_frames = classify_frames(self.offline_movie[:self.max_frame], flash_ratio, dark_ratio, peak_ratio)
         if self.flash_frames:
-            print("Flash frames (0-based): %s"%sorted(self.flash_frames), flush=True)
+            log.info("Flash frames (0-based): %s"%sorted(self.flash_frames), flush=True)
         if self.dark_frames:
-            print("Much darker frames (0-based): %s"%sorted(self.dark_frames), flush=True)
+            log.info("Much darker frames (0-based): %s"%sorted(self.dark_frames), flush=True)
 
     def _file_kind(self, file_info):
         """ What to load, as text that contains '.avi', '.bmp', etc. From the file's extension, so it works whatever
@@ -350,9 +351,9 @@ class NextwaveOffline():
         self.occupancy_template = occupancy.build_template([(i, self.offline_movie[i]) for i in sample], self.parent.lenslet_size_pixel, params)
         t = self.occupancy_template
         if t is None:
-            print("Occupancy template: no frame had enough spots", flush=True)
+            log.info("Occupancy template: no frame had enough spots", flush=True)
         else:
-            print("Occupancy template: %d sites from %d frames; the center is site %s" % (len(t['sites']), t['n_frames'], t['center_site']), flush=True)
+            log.info("Occupancy template: %d sites from %d frames; the center is site %s" % (len(t['sites']), t['n_frames'], t['center_site']), flush=True)
 
     def occupancy_autocenter(self):
         """ Find the pupil center of this frame by matching its box occupancy to the template """
@@ -371,7 +372,7 @@ class NextwaveOffline():
                 cx, cy, info = occupancy.find_center(self.im, template, params)
                 info = "shift %s, %d spots on sites, %d outside the template" % (info['shift'], info['matched'], info['outside'])
             self.parent.cx, self.parent.cy = cx, cy
-            print("Occupancy center: (%.1f, %.1f); %s" % (cx, cy, info), flush=True)
+            log.debug("Occupancy center: (%.1f, %.1f); %s" % (cx, cy, info), flush=True)
         self.cx_best, self.cy_best = self.parent.cx, self.parent.cy
         # The max pupil isn't estimated by this method: it's the set one (as it is when the center is set by the user)
         self.iterative_max = self.it_stop * self.parent.pupil_mag
@@ -416,16 +417,16 @@ class NextwaveOffline():
                     if buf_movie is None:
                         buf_movie=np.zeros( (50,f1.shape[0],f1.shape[1]), dtype='uint8') # TODO: grow new chunk if necessary
                     buf_movie[nf]=f1
-                    print('%04d %03d '%(nf,f1.mean() ),end=' ')
+                    log.debug('%04d %03d '%(nf,f1.mean() ),end=' ')
                     self.signals.report("Reading background frames", nf+1, total)
 
-            print("Background: read %d frames of %dx%d"%(nf,f1.shape[0],f1.shape[1]) )
+            log.info("Background: read %d frames of %dx%d"%(nf,f1.shape[0],f1.shape[1]) )
             buf_movie=buf_movie[0:nf,:,:] # Trim to correct
             self.offline_background = buf_movie
 
             self.signals.report("Subtracting background") # (One long step)
             if self.offline_movie.shape[0] != self.offline_background.shape[0]:
-                print("Sub average ")
+                log.info("Sub average ")
                 # Different number of frames in background and movie. Subtract mean background from each frame
                 offline_mean = np.array(self.offline_background.mean(0),dtype='int32') # Mean across frames
                 self.offline_movie = self.offline_movie - offline_mean
@@ -433,7 +434,7 @@ class NextwaveOffline():
                 self.offline_movie = np.array( self.offline_movie, dtype='uint8')
                 self._add_to_ui(self.offline_movie)
             else:
-                print("Sub whole movie")
+                log.info("Sub whole movie")
                 subbed = np.array(self.offline_movie,dtype='int32') - self.offline_background
                 subbed[subbed<0]=0
                 subbed=np.array( subbed, dtype='uint8')
@@ -454,13 +455,13 @@ class NextwaveOffline():
                 nf += 1
                 self.signals.report("Reading background frames", nf, n_files)
 
-            print("Read %d frames of %dx%d"%(nf,f1.shape[0],f1.shape[1]) )
+            log.info("Read %d frames of %dx%d"%(nf,f1.shape[0],f1.shape[1]) )
             buf_movie=buf_movie[0:nf,:,:] # Trim to correct
             self.offline_background = buf_movie
 
             self.signals.report("Subtracting background") # (One long step)
             if self.offline_movie.shape[0] != self.offline_background.shape[0]:
-                print("Sub average")
+                log.info("Sub average")
                 # Different number of frames in background and movie. Subtract mean background from each frame
                 offline_mean = np.array(self.offline_background.mean(0),dtype='int32') # Mean across frames
                 self.offline_movie = self.offline_movie - offline_mean
@@ -468,7 +469,7 @@ class NextwaveOffline():
                 self.offline_movie = np.array( self.offline_movie, dtype='uint8')
                 self._add_to_ui(self.offline_movie)
             else:
-                print("Sub each frame from each frame")
+                log.info("Sub each frame from each frame")
                 subbed = np.array(self.offline_movie,dtype='int32') - self.offline_background
                 subbed[subbed<0]=0
                 subbed=np.array( subbed, dtype='uint8')
@@ -494,11 +495,11 @@ class NextwaveOffline():
         self.sub_id="NONAME"
         
         if '.bin' in kind:
-            print("Offline: ",file_info[0][0])
+            log.info("Offline: ",file_info[0][0])
             #fil=open(file_info[0][0],'rb')
             bytez=np.fromfile(file_info[0][0],'uint8')
             width =int(np.sqrt(len(bytez)) ) #  Hopefully it's square
-            print( width )
+            log.debug( width )
 
             dims=np.zeros(2,dtype='uint16')
             dims[0]=width
@@ -577,8 +578,8 @@ class NextwaveOffline():
             self.fnames = self.fnames[0:nf]
             self.rotations = [None]*nf
             
-            print(pathname, self.condition, self.scan_dir, self.sub_id)
-            print("Read %d frames of %dx%d"%(nf,f1.shape[0],f1.shape[1]) )
+            log.info(pathname, self.condition, self.scan_dir, self.sub_id)
+            log.info("Read %d frames of %dx%d"%(nf,f1.shape[0],f1.shape[1]) )
             buf_movie=buf_movie[0:nf,:,:] # Trim to correct
             self.offline_movie = buf_movie
             self._add_to_ui(buf_movie)
@@ -650,12 +651,12 @@ class NextwaveOffline():
                 nf += 1
                 self.signals.report("Reading frames", nf, n_files)
 
-            print(pathname, self.condition, self.scan_dir, self.sub_id, self.fnames)
-            print("Read %d frames of %dx%d"%(nf,f1.shape[0],f1.shape[1]) )
+            log.info(pathname, self.condition, self.scan_dir, self.sub_id, self.fnames)
+            log.info("Read %d frames of %dx%d"%(nf,f1.shape[0],f1.shape[1]) )
 
         elif '.avi' in kind:
             fname=file_info[0][0]
-            print("Offline movie: ",fname)
+            log.info("Offline movie: ",fname)
             vidin = ffmpegcv.VideoCapture(fname)
             buf_movie=None
 
@@ -668,7 +669,7 @@ class NextwaveOffline():
                     if buf_movie is None:
                         buf_movie=np.zeros( (defaults.MOVIE_MAX_FRAMES,f1.shape[0],f1.shape[1]), dtype='uint8') # TODO: grow new chunk if necessary
                     buf_movie[nf]=f1
-                    print('%04d %03d\n'%(nf,f1.mean() ),end=' ', flush=True)
+                    log.debug('%04d %03d\n'%(nf,f1.mean() ),end=' ', flush=True)
                     if nf == 0:
                         self._preview(buf_movie[0])
                     self.signals.report("Reading frames", nf+1, total)
@@ -679,7 +680,7 @@ class NextwaveOffline():
                     if debug_nframes>0 and nf>=debug_nframes:
                         break
 
-            print("Read %d frames of %dx%d"%(nf,f1.shape[0],f1.shape[1]) )
+            log.info("Read %d frames of %dx%d"%(nf,f1.shape[0],f1.shape[1]) )
             self.fnames = ["%03d" for n in np.arange(nf)]
 
         buf_movie=buf_movie[0:nf,:,:] # Trim to correct
@@ -725,7 +726,7 @@ class NextwaveOffline():
         trim = int(getattr(defaults,'TRIM_TO_FIRST_FLASH',0) or 0)
         if trim > 0 and len(self.flash_frames) > 0:
             first_frame = min(self.flash_frames) - trim # (Negative if the flash is sooner than that into the movie: those rows are empty, so time 0 is always trim frames before the flash)
-        print("Exporting %s: frames %d-%d%s"%(out_fname, max(0,first_frame)+1, self.max_frame, " (%d empty rows first)"%-first_frame if first_frame < 0 else ""), flush=True)
+        log.info("Exporting %s: frames %d-%d%s"%(out_fname, max(0,first_frame)+1, self.max_frame, " (%d empty rows first)"%-first_frame if first_frame < 0 else ""), flush=True)
 
         self.f_out = open(out_fname,'w')
         s="subject_id,scan_dir,frame_num,time,ecc,pupil_diam_mm,cx,cy,FLAGS,"
@@ -808,7 +809,7 @@ class NextwaveOffline():
             try:
                 soln=np.matmul( lf, self.mati)
             except ValueError:
-                print( "-998 #1 %d: "%n_which_box + str(lf.min()) + " " + str( lf.max()  ) )
+                log.debug( "-998 #1 %d: "%n_which_box + str(lf.min()) + " " + str( lf.max()  ) )
                 return ind_max[1], ind_max[0],-998 # give up if too close to edge
         #except ValueError:
             # On the edge maybe?
@@ -906,7 +907,7 @@ class NextwaveOffline():
             ref_wavelength = defaults.LCA_REFERENCE_WAVELENGTH
             pupil_rad = self.engine.pupil_diam / self.engine.pupil_mag / 2.0
             correction = zernike_functions.LCA_z4_correction( wfs_wavelength, ref_wavelength, pupil_rad )
-            print( correction, pupil_rad, wfs_wavelength, ref_wavelength)
+            log.debug( correction, pupil_rad, wfs_wavelength, ref_wavelength)
             self.parent.zernikes[3] += correction
         self.zernikes = self.parent.zernikes 
 
@@ -1070,12 +1071,12 @@ class NextwaveOffline():
                 if num_components<defaults.centering_dynamic_ncomponents and area<defaults.centering_dynamic_area:
                     break # Good. First "few enough" components (around # of spots)
             if thresh_lower>=maxn-1:
-                print( "Error: couldn't find good dynamic threshold under %d. Using OTSU."%(maxn) ) # DBG
+                log.warning( "Error: couldn't find good dynamic threshold under %d. Using OTSU."%(maxn) ) # DBG
                 im_nonsat = im_smooth[im_smooth<defaults.NONSAT_MAX_OTSU]
                 self.thresh_lower = filters.threshold_otsu(im_nonsat)
             else:
                 self.thresh_lower = thresh_lower
-                print( "Dynamic threshold=%d. Num_components=%d. Area=%d"%(thresh_lower,num_components,area) ) # DBG
+                log.debug( "Dynamic threshold=%d. Num_components=%d. Area=%d"%(thresh_lower,num_components,area) ) # DBG
 
             im_smooth[im_smooth<thresh_lower] = 0
         else:
@@ -1219,12 +1220,12 @@ class NextwaveOffline():
 
         if self.it_stop_dirty: # If edited in the UI, override.
             p_diam =  self.it_stop * self.parent.pupil_mag
-            print("Dirty:", p_diam)
+            log.debug("Dirty:", p_diam)
         elif p_diam > defaults.ITERATIVE_PUPIL_STOP * self.parent.pupil_mag: # Never exceed max.
             p_diam = defaults.ITERATIVE_PUPIL_STOP * self.parent.pupil_mag
-            print("TOO BIG:", p_diam)
+            log.debug("TOO BIG:", p_diam)
         else: # Or, use the estimated value
-            print("Normal auto:", p_diam)
+            log.debug("Normal auto:", p_diam)
 
         # Size on the sensor, max pixel radius in the image
         self.iterative_max = p_diam
@@ -1285,7 +1286,7 @@ class NextwaveOffline():
             # No growing in steps: straight to the max pupil. (The box shrinking is a separate step, after this.)
             self.offline_reset(self.iterative_max)
             self.signals.pupil_diam_changed.emit( self.iterative_size / self.parent.pupil_mag )
-            print("Frame %02d/%02d; %04d boxes. Pupil: %02.2f (enlarge steps skipped)"%(self.offline_curr, self.max_frame,
+            log.debug("Frame %02d/%02d; %04d boxes. Pupil: %02.2f (enlarge steps skipped)"%(self.offline_curr, self.max_frame,
                                                                                         self.parent.num_boxes, self.iterative_size ),flush=True)
             return
 
@@ -1295,7 +1296,7 @@ class NextwaveOffline():
 
             s="Frame %02d/%02d; %04d boxes. %04d zern terms. Pupil: %02.2f/%02.2f"%(self.offline_curr, self.max_frame,
                                                                                     self.parent.num_boxes, self.parent.zterms_full.shape[0], self.iterative_size, self.iterative_max )
-            print(s,flush=True)
+            log.debug(s,flush=True)
             
 
     def offline_navigate(self):

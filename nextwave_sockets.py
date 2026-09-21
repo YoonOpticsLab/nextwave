@@ -1,6 +1,7 @@
 #  listener_thread = Thread(target=pyshmem.do_listen, args=[socket_callback] )
 #  listener_thread.daemon=True # So application will terminate even if this thread is alive
 #  listener_thread.start()    
+from nextwave_log import log
 from threading import Thread
 import socket
 import os
@@ -60,7 +61,7 @@ class NextwaveSocketComm():
         if "plugin_alpao" in self.ui.json_data:
             self.alpao = SocketComponent(SOCKET_ALPAO)
         else:
-            print("loaded Dumpmy AO")
+            log.info("loaded Dumpmy AO")
             self.alpao = SocketDummy(SOCKET_ALPAO)
         self.alpao.init()
 
@@ -72,7 +73,7 @@ def do_listen(fn_callback, port):
 
    while done==False:# Allow connect/reconnect forever
 
-     print('Waiting for connection')
+     log.info('Waiting for connection')
 
      with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1) # prevent address in use error
@@ -80,7 +81,7 @@ def do_listen(fn_callback, port):
         s.listen(1)
         conn, addr = s.accept()
         with conn:
-            print(f"Connected by {addr}")
+            log.info(f"Connected by {addr}")
             while done==False:
                 data = conn.recv(1024) # Don't think this number matters too much
 
@@ -88,7 +89,7 @@ def do_listen(fn_callback, port):
                     time.sleep(0.1)
                     continue
                     
-                print(data)
+                log.info(data)
 
                 if data==b'reset':
                     done=False

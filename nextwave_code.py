@@ -1,3 +1,4 @@
+from nextwave_log import log
 import numpy as np
 import sys
 import os
@@ -209,7 +210,7 @@ class NextwaveEngine():
 
         self.update_zernike_svd() # Precompute
 
-        print( "Make SB ",pupil_radius_pixel, box_size_pixel, box_spacing_pixel, ri_ratio, num_boxes, self.zterms_full.shape )
+        log.debug( "Make SB ",pupil_radius_pixel, box_size_pixel, box_spacing_pixel, ri_ratio, num_boxes, self.zterms_full.shape )
 
         # Determine neighbors (for nan interpolation)
         self.neighbors = np.zeros( (self.num_boxes, 4), dtype='int32')
@@ -360,7 +361,7 @@ class NextwaveEngine():
                 spot_displace_x[nidx]=0
                 spot_displace_y[nidx]=0
                 self.spot_displace_interpolated[nidx] = 2
-                print("BAD interp: %d %f %f"%(nidx,spot_displace_x[nidx], spot_displace_y[nidx]  ) )
+                log.debug("BAD interp: %d %f %f"%(nidx,spot_displace_x[nidx], spot_displace_y[nidx]  ) )
 
         slope = np.concatenate( (spot_displace_y, spot_displace_x)) * (self.ccd_pixel/self.focal);
 

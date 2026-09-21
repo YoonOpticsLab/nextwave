@@ -1,3 +1,4 @@
+from nextwave_log import log
 import numpy as np
 
 # Rotation fix:
@@ -41,7 +42,7 @@ def detect_rotation(img, angls, ratio_threshold):
             second_peak = np.max( power1[pks[pks != max_loc ]] )
         ratio = max_peak / second_peak
         if ratio > ratio_threshold:
-            print( "ROTATED ", dim, ratio, angl1 )
+            log.debug( "ROTATED ", dim, ratio, angl1 )
             im1 = img
             M = cv.getRotationMatrix2D((width/2,height/2),angl1,1)
             rotated = cv.warpAffine(im1,M, (width,height) )

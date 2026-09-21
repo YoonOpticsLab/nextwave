@@ -1,3 +1,4 @@
+from nextwave_log import log
 import numpy as np
 
 # Order copied from MATLAB code
@@ -219,5 +220,5 @@ def LCA(wavelength):
 def LCA_z4_correction(wavelength,wavelength_ref,pupil_radius):
     value = LCA(wavelength/1000.0)-LCA(wavelength_ref/1000.0)
     LCA_um = (value * pupil_radius**2)/(4*np.sqrt(3))
-    print( "LCA_D=",value, "LCA_m=",LCA_um, wavelength, wavelength_ref, pupil_radius)
+    log.debug( "LCA_D=",value, "LCA_m=",LCA_um, wavelength, wavelength_ref, pupil_radius)
     return LCA_um

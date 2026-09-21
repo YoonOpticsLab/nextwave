@@ -98,6 +98,13 @@ FLASH_PEAK_RATIO_THRESHOLD=20.0 # A run of flash frames only counts as a flash i
 DARK_RATIO_THRESHOLD=0.25 # A frame whose mean brightness is less than this fraction of the movie's median is much darker than usual (eye closed, lights off): Zernikes/centroids saved as NaN, but not flagged. 0 = off
 DARK_BOX_FRACTION_THRESHOLD=0.5 # If more than this fraction of a frame's boxes found no spot, its Zernikes (and the spot positions estimated from them) are saved as NaN. Not flagged. The measured centroids are kept. 0 = off
 
+############################################################
+# Logging (see nextwave_log.py). Everything the app used to print goes to this file; File > Show Log follows it.
+############################################################
+LOG_FILE="nextwave.log" # In the directory the app was started from. "" = no file. Rotated at 5 MB, 3 old ones kept
+LOG_LEVEL="INFO" # "DEBUG" adds the per-frame detail (a lot), "INFO" the milestones and errors, "WARNING" and "ERROR" less
+LOG_TO_CONSOLE=0 # 1: also write the log to the console
+
 FRAME_RATE=100.0 # Frames per second. The exported CSV's "time" column is (exported frame number - 1) / FRAME_RATE
 TRIM_TO_FIRST_FLASH=300 # CSV export: start this many frames before the movie's first flash (300 frames = 3 s at 100 FPS), and leave out the frames before that. The first exported frame is frame_num 1, time 0. 0 = export every frame. (A movie with no flash is exported whole.)
 

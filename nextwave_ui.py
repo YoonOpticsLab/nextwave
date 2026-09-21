@@ -1,3 +1,5 @@
+from nextwave_log import log
+import nextwave_log
 from PyQt5.QtWidgets import (QMainWindow, QLabel, QSizePolicy, QApplication, QPushButton,
                              QHBoxLayout, QVBoxLayout, QGridLayout, QScrollArea, QMessageBox,
                              QWidget, QGroupBox, QTabWidget, QTextEdit, QSpinBox, QDoubleSpinBox, QSlider,
@@ -76,7 +78,7 @@ class OfflineWorker(QtCore.QObject):
             if completed:
                 self.engine.offline.saver.serialize()
         except Exception:
-            traceback.print_exc() # Report it, but always finish below, or the UI would stay stuck in "processing"
+            log.exception('Auto process failed') # Report it, but always finish below, or the UI would stay stuck in "processing"
         finally:
             self.do_finished()
 
@@ -320,7 +322,7 @@ class NextWaveMainWindow(QMainWindow):
 
  def offline_load_failed(self, error_text):
     self.end_loading()
-    print(error_text, flush=True)
+    log.error(error_text, flush=True)
     QMessageBox.warning(self, "Couldn't load", "Loading failed:\n\n" + error_text.strip().splitlines()[-1])
 
  @QtCore.pyqtSlot(object)
@@ -405,7 +407,7 @@ class NextWaveMainWindow(QMainWindow):
                 ".", ffilt );
 
     if len(thedir)>0:
-        print( thedir )
+        log.debug( thedir )
 
     return
 
@@ -771,7 +773,7 @@ class NextWaveMainWindow(QMainWindow):
             nterms += 1
             self.bar_plot.addItem(bgx)
         except:
-            print("ERROR on BarGraph %d,%d"%(norder,order) )
+            log.error("ERROR on BarGraph %d,%d"%(norder,order) )
 
     #print( self.bar_plot.getViewBox().state['limits'] )
     # First_term will now be the first of the next order
@@ -833,7 +835,7 @@ class NextWaveMainWindow(QMainWindow):
  def get_paramX(self,name_parent,name,level=None):
     if level==None:
         level=self.params['children'] # start at top
-    print( level )
+    log.debug( level )
     for node in level:
         if node['name']==name_parent:
             return( self.get_param("",name,node["children"]) )
@@ -850,7 +852,7 @@ class NextWaveMainWindow(QMainWindow):
      if name=="pupil_diam":
          try:
              val=float( self.line_pupil_diam.text() )
-             print("From UI: %s"%val)
+             log.debug("From UI: %s"%val)
              if val>0:
                  return val
          except:
@@ -1469,7 +1471,7 @@ class NextWaveMainWindow(QMainWindow):
      self.show()
 
  def calibration_status(self,s):
-    print( s )
+    log.info( s )
     #  self.label_status0.setText(s)
     
  def do_calibration(self):
@@ -1596,9 +1598,9 @@ class NextWaveMainWindow(QMainWindow):
             self.box_info=which_box[0]
             self.box_info_loc = (event.pos().x(), event.pos().y() )
     elif which_box.size>1:
-        print( "Too many matches" )
+        log.debug( "Too many matches" )
     else :
-        print( "No matches")
+        log.debug( "No matches")
         self.box_info = -1
 
     return 
@@ -1653,7 +1655,7 @@ class NextWaveMainWindow(QMainWindow):
         self.engine.cy += 1 + 10 * self.key_control
         update_search_boxes=True
     else:
-        print( "Uknown Key:", event.key() )
+        log.debug( "Uknown Key:", event.key() )
 
     if update_search_boxes:
         self.engine.make_searchboxes(self.engine.cx,self.engine.cy)
@@ -1766,6 +1768,8 @@ def start_backdoor(win):
     t.start()
 
 def main():
+  nextwave_log.setup()
+  log.info('NextWave started. ' + build_message.replace('\n', ' | '))
   app = QApplication(sys.argv)
   win = NextWaveMainWindow()
   win.app = app
@@ -1783,8 +1787,7 @@ def main():
 
   def my_exception_hook(exctype, value, tb):
     # Print the exception and traceback
-    print(exctype, value, tb)
-    traceback.print_decoder(exctype, value, tb)
+    log.error("Uncaught exception:\n" + "".join(traceback.format_exception(exctype, value, tb)).rstrip())
     sys._excepthook(exctype, value, tb)
     sys.exit(1)
 

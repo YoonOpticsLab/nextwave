@@ -30,6 +30,9 @@ os.environ["PATH"] += os.pathsep + HERE # ffmpeg.exe is next to this script (as 
 
 import multiprocessing
 
+import nextwave_log
+from nextwave_log import log
+
 
 def movies_in(paths):
     """ The movie files named by the command line: files as given, and every .avi in a directory """
@@ -38,7 +41,7 @@ def movies_in(paths):
         if os.path.isdir(path):
             found = sorted(glob.glob(os.path.join(path, "*.avi")))
             if not found:
-                print("No .avi files in", path, flush=True)
+                log.warning("No .avi files in", path, flush=True)
             movies += found
         else:
             movies.append(path)
@@ -52,7 +55,7 @@ def process_movie(win, path, out_dir, workers, save_pkl, save_csv):
     offline.load_offline(([path], "Movies (*.avi)")) # (The file's extension decides what is loaded)
     win.engine.mode_offline = True
     win.iterative_reset() # What the Reset button does: builds the search boxes
-    print("%s: %d frames loaded in %.0f s; %d flash, %d dark frames" % (os.path.basename(path), offline.max_frame, time.time() - t0,
+    log.info("%s: %d frames loaded in %.0f s; %d flash, %d dark frames" % (os.path.basename(path), offline.max_frame, time.time() - t0,
                                                                         len(offline.flash_frames), len(offline.dark_frames)), flush=True)
 
     t0 = time.time()
@@ -60,9 +63,9 @@ def process_movie(win, path, out_dir, workers, save_pkl, save_csv):
     n_workers = max(1, min(n_workers, offline.max_frame))
     completed = offline_parallel.run_parallel(win.engine, n_workers)
     if completed is False:
-        print("%s: cancelled" % os.path.basename(path), flush=True)
+        log.warning("%s: cancelled" % os.path.basename(path), flush=True)
         return False
-    print("%s: %d frames processed in %.0f s (%d processes)" % (os.path.basename(path), len(offline.saver.data), time.time() - t0, n_workers), flush=True)
+    log.info("%s: %d frames processed in %.0f s (%d processes)" % (os.path.basename(path), len(offline.saver.data), time.time() - t0, n_workers), flush=True)
 
     if save_pkl:
         offline.saver.serialize()
@@ -80,6 +83,7 @@ def main():
     ap.add_argument("--no-csv", action="store_true", help="don't export the CSV")
     args = ap.parse_args()
 
+    nextwave_log.setup(console=True) # (The log file as usual, and the console too: this is a script)
     movies = movies_in(args.movies)
     if not movies:
         sys.exit("Nothing to process")
@@ -102,8 +106,7 @@ def main():
             if not process_movie(win, path, args.out_dir, args.workers, not args.no_pkl, not args.no_csv):
                 failed += 1
         except Exception:
-            import traceback
-            traceback.print_exc()
+            log.exception("Failed: " + os.path.basename(path))
             failed += 1
     sys.exit(1 if failed else 0)
 

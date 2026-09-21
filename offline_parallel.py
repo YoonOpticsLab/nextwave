@@ -19,6 +19,8 @@ from concurrent.futures import ProcessPoolExecutor, wait, FIRST_COMPLETED
 import numpy as np
 
 import defaults
+import nextwave_log
+from nextwave_log import log
 
 
 class HeadlessUI:
@@ -49,10 +51,10 @@ class FrameProcessor:
     def process(self, nframe, image, rotation, center_dirty, flash=False, dark=False):
         """ image: the frame. rotation: already-determined rotation of the frame (None if not yet). """
         cfg, engine, offline = self.cfg, self.engine, self.offline
-        log = io.StringIO()
+        captured = io.StringIO() # What the algorithm logs for this frame (see nextwave_log.setup_worker)
         result = dict(nframe=nframe, record=None, rotation=rotation, image=None, log='', error=None)
         try:
-            with contextlib.redirect_stdout(log):
+            with contextlib.redirect_stdout(captured):
                 np.random.seed(nframe) # Centering uses random subsamples. Repeatable, whatever the scheduling.
 
                 # Same starting point for every frame
@@ -85,7 +87,7 @@ class FrameProcessor:
                 result['image'] = offline.offline_movie[nframe]
         except Exception:
             result['error'] = traceback.format_exc()
-        result['log'] = log.getvalue()
+        result['log'] = captured.getvalue()
         return result
 
 
@@ -95,6 +97,7 @@ _processor = None
 
 def _init_worker(cfg):
     global _cfg
+    nextwave_log.setup_worker(cfg.get('log_level', 'INFO')) # (Before anything logs)
     _cfg = cfg # Cheap and can't fail. The engine is built on first use so errors are reported per frame.
 
 def _process_frame(nframe, image, rotation, center_dirty, flash, dark):
@@ -124,7 +127,7 @@ def make_config(engine):
         skip_enlarge=offline.skip_enlarge, fixed_center=offline.fixed_center, autocenter_enabled=offline.autocenter_enabled,
         occupancy_template=offline.occupancy_template,
         cx=engine.cx, cy=engine.cy,
-        n_frames=offline.max_frame)
+        n_frames=offline.max_frame, log_level=nextwave_log.get_level())
 
 
 @contextlib.contextmanager
@@ -156,9 +159,9 @@ def _kill_workers(pool):
 def _apply_result(offline, res):
     nframe = res['nframe']
     if res['log']:
-        print("---- Frame %d ----\n%s"%(nframe, res['log']), flush=True)
+        log.info("---- Frame %d ----\n%s"%(nframe, res['log'].rstrip()))
     if res['error']:
-        print("Frame %d FAILED:\n%s"%(nframe, res['error']), flush=True)
+        log.error("Frame %d FAILED:\n%s"%(nframe, res['error'].rstrip()))
         return
     offline.saver.data[nframe] = res['record']
     offline.rotations[nframe] = res['rotation']

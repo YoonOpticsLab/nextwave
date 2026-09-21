@@ -1,3 +1,4 @@
+from nextwave_log import log
 import numpy as np
 import sys
 import os
@@ -260,11 +261,11 @@ class NextwaveEngineComm():
 
         DEBUGGING=False
         if DEBUGGING:
-            print (num_boxes, np.min(self.centroids_x), np.max(self.centroids_x)  )
+            log.debug (num_boxes, np.min(self.centroids_x), np.max(self.centroids_x)  )
             for n in np.arange(num_boxes):
                 if np.isnan(self.centroids_x[n]):
-                    print( n, end=' ')
-                    print (num_boxes, self.centroids_x[100], self.centroids_y[100]  )
+                    log.debug( n, end=' ')
+                    log.debug (num_boxes, self.centroids_x[100], self.centroids_y[100]  )
 
     def set_mode(self, val):
         if not self.ui.offline_only:

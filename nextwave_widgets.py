@@ -1,3 +1,4 @@
+from nextwave_log import log
 from PyQt5.QtWidgets import (QMainWindow, QLabel, QSizePolicy, QApplication, QPushButton,
                              QHBoxLayout, QVBoxLayout, QGridLayout, QScrollArea,
                              QWidget, QGroupBox, QTabWidget, QTextEdit, QSpinBox, QDoubleSpinBox, QSlider,
@@ -320,7 +321,7 @@ class ZernikeDialog(QDialog):
             le.setText("")
 
     def chk0_changed(self):
-        print(self.ui_parent.engine.zernikes[4] )
+        log.debug(self.ui_parent.engine.zernikes[4] )
 
     def mycall(self):
         zs = [str( l1.text()) for l1 in self.lines]
@@ -423,7 +424,7 @@ class BoxInfoDialog(QDialog):
     def event(self, event): 
         if event.type() == QtCore.QEvent.EnterWhatsThisMode:
             self.ui_parent.engine.omits[self.nbox] = not ( self.ui_parent.engine.omits[self.nbox] )
-            print( "Omit: %d",self.nbox);
+            log.debug( "Omit: %d",self.nbox);
             return True
         return QDialog.event(self, event)
     
@@ -474,7 +475,7 @@ class ActuatorPlot(QLabel):
         # print("clicked:", event.pos() )
         x_scaled = event.pos().x() / width #* self.image_pixels.shape[1]
         y_scaled = event.pos().y() / height #* self.image_pixels.shape[0]
-        print("scaled: x,y ", x_scaled, y_scaled)
+        log.debug("scaled: x,y ", x_scaled, y_scaled)
         
     def paintEvent_manual(self): #, p, *args):
         #mirror_vals=np.array(np.random.normal(size=(97)) )
@@ -528,8 +529,8 @@ class MyBarWidget(pg.PlotWidget):
     def mousePressEvent(self, ev):
         super().mousePressEvent(ev)
         self.sigMouseClicked.emit(ev)
-        print(ev, ev.pos() )
-        print( self.getViewBox().viewRange() )
+        log.debug(ev, ev.pos() )
+        log.debug( self.getViewBox().viewRange() )
         if ev.button()==Qt.LeftButton:
             if (self.getViewBox().boundingRect().right() - self.getViewBox().mapFromScene(ev.pos()).x())<20:
                 self.terms_expanded = not( self.terms_expanded )
