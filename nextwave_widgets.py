@@ -1,8 +1,9 @@
 from PyQt5.QtWidgets import (QMainWindow, QLabel, QSizePolicy, QApplication, QPushButton,
                              QHBoxLayout, QVBoxLayout, QGridLayout, QScrollArea,
                              QWidget, QGroupBox, QTabWidget, QTextEdit, QSpinBox, QDoubleSpinBox, QSlider,
-                             QFileDialog, QCheckBox, QDialog, QFormLayout, QDialogButtonBox, QLineEdit)
-from PyQt5.QtGui import QPixmap, QImage, QPainter, QPen, QFont
+                             QFileDialog, QCheckBox, QDialog, QFormLayout, QDialogButtonBox, QLineEdit,
+                             QToolTip)
+from PyQt5.QtGui import QPixmap, QImage, QPainter, QPen, QFont, QColor, QBrush, QPolygonF, QPalette
 from PyQt5.QtCore import Qt, QTimer, QEvent, QLineF, QPointF, pyqtSignal 
 import PyQt5.QtGui as QtGui
 import PyQt5.QtCore as QtCore
@@ -32,76 +33,246 @@ import xml.etree.ElementTree as ET
 
 NUM_ZERN_DIALOG=20 # TODO
 
-class FrameListModel(QtCore.QAbstractTableModel):
-    """ The frames of an offline movie, one per row: name, checkbox, thumbnail.
-        A movie can have thousands of frames, so this is a virtual list: the view only asks for the rows it is
-        showing, and a thumbnail is made when its row is first shown (the most recent ones are kept). """
-    THUMB_SIZE = 200 # Longest side of a thumbnail, pixels
-    MAX_CACHED = 400
+class FrameGalleryModel(QtCore.QAbstractListModel):
+    """ The frames of an offline movie, as a gallery of small thumbnails, each captioned with its frame number (1..N, as
+        shown on screen). A movie can have thousands of frames, so this is a virtual list: the view only asks for the ones it
+        is showing, and a thumbnail is made when it is first shown (the most recent ones are kept).
+        Thumbnails keep the brightest pixel of each block of the frame, not an average or a sample: the frames are mostly black
+        with small bright spots, which a plain shrink would lose. """
+    THUMB_SIZE = 100 # Longest side of a thumbnail, pixels
+    MAX_CACHED = 1500
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.movie = None
-        self.checked = set() # Rows with the box checked
         self.thumbs = OrderedDict() # row -> QPixmap, least recently used first
-        self.row_height = self.THUMB_SIZE
+        self.shrink = 1 # Each thumbnail pixel is the brightest of shrink x shrink frame pixels
+        self.thumb_size = (self.THUMB_SIZE, self.THUMB_SIZE) # (width, height) of a thumbnail
 
     def set_movie(self, movie):
         """ movie: (frames, height, width) uint8 array. Not copied, so don't change it under us. """
         self.beginResetModel()
         self.movie = movie
-        self.checked = set(range(0, movie.shape[0], 4)) # Every 4th
         self.thumbs.clear()
-        scale = self.THUMB_SIZE / max(movie.shape[1], movie.shape[2])
-        self.row_height = int(movie.shape[1] * scale) + 4
+        height, width = movie.shape[1], movie.shape[2]
+        self.shrink = max(1, -(-max(height, width) // self.THUMB_SIZE)) # (Rounded up, so it fits in THUMB_SIZE)
+        self.thumb_size = (width // self.shrink, height // self.shrink)
         self.endResetModel()
 
     def rowCount(self, parent=QtCore.QModelIndex()):
         return 0 if (self.movie is None or parent.isValid()) else self.movie.shape[0]
 
-    def columnCount(self, parent=QtCore.QModelIndex()):
-        return 0 if parent.isValid() else 3
-
     def flags(self, index):
-        flags = Qt.ItemIsEnabled
-        if index.column() == 1:
-            flags |= Qt.ItemIsUserCheckable
-        return flags
+        return Qt.ItemIsEnabled
 
     def data(self, index, role=Qt.DisplayRole):
-        row, col = index.row(), index.column()
-        if role == Qt.TextAlignmentRole and col < 2:
-            return int(Qt.AlignVCenter | Qt.AlignHCenter)
-        if col == 0 and role == Qt.DisplayRole:
-            return "Frame %02d" % row
-        if col == 1 and role == Qt.CheckStateRole:
-            return Qt.Checked if row in self.checked else Qt.Unchecked
-        if col == 2 and role == Qt.DecorationRole:
-            return self.thumbnail(row)
+        if role == Qt.DecorationRole:
+            return self.thumbnail(index.row())
+        if role == Qt.DisplayRole:
+            return str(index.row() + 1)
+        if role == Qt.TextAlignmentRole:
+            return int(Qt.AlignHCenter | Qt.AlignVCenter)
         return None
-
-    def setData(self, index, value, role=Qt.EditRole):
-        if index.column() == 1 and role == Qt.CheckStateRole:
-            if value == Qt.Checked:
-                self.checked.add(index.row())
-            else:
-                self.checked.discard(index.row())
-            self.dataChanged.emit(index, index, [role])
-            return True
-        return False
 
     def thumbnail(self, row):
         pixmap = self.thumbs.get(row)
         if pixmap is None:
-            frame = self.movie[row]
-            qimage = QImage(frame, frame.shape[1], frame.shape[0], QImage.Format_Grayscale8)
-            pixmap = QPixmap(qimage).scaled(self.THUMB_SIZE, self.THUMB_SIZE, Qt.KeepAspectRatio)
+            frame, k = np.asarray(self.movie[row]), self.shrink
+            h, w = frame.shape[0] // k * k, frame.shape[1] // k * k
+            small = np.ascontiguousarray(frame[:h, :w].reshape(h // k, k, w // k, k).max(axis=(1, 3)))
+            qimage = QImage(small.data, small.shape[1], small.shape[0], small.shape[1], QImage.Format_Grayscale8)
+            pixmap = QPixmap(qimage) # (Copies the data, so `small` can go)
             self.thumbs[row] = pixmap
             if len(self.thumbs) > self.MAX_CACHED:
                 self.thumbs.popitem(last=False)
         else:
             self.thumbs.move_to_end(row)
         return pixmap
+
+class FrameSlider(QSlider):
+    """ Horizontal slider for choosing a frame. Its values are the frame numbers as shown on screen (1..N).
+        It draws everything itself (track, handle, ticks, markers), at fixed positions, and handles the mouse itself, so that
+        it looks and works the same in every Qt style. (The styles disagree about where a slider's groove is: in the Windows
+        ones it fills the whole height of the widget, which left no room for markers or ticks.)
+        Top to bottom: the flash markers (a triangle pointing down at each flash, set_flash_frames, with a tooltip saying
+        which frames), the track with its handle, then the ticks.
+        Ticks are drawn at the finest spacing that stays legible: every frame if there's room for them (at least MIN_TICK_PX
+        apart), otherwise every 2, 5, 10, 20, 50, ... frames, at multiples of that number, with a taller tick at every 10th of
+        them and at the first and last frame. Clicking anywhere on the track jumps straight there, and it can then be dragged
+        (the arrow keys step 1 frame, Page Up/Down step 10). """
+    MIN_TICK_PX = 4
+    TICK_MINOR, TICK_MAJOR = 2, 5 # Pixels
+    MARK_HEIGHT, MARK_HALF_WIDTH = 8, 4 # Pixels: the triangle that marks a flash
+    MARK_COLOR = QColor(230, 90, 20)
+    MARGIN = 4 # Pixels, either side of the handle at its extremes
+    HANDLE_W, HANDLE_H = 11, 18
+    Y_TIP = MARK_HEIGHT + 1 # The markers' tips
+    Y_HANDLE = Y_TIP + 2 # Top of the handle
+    Y_TICKS = Y_HANDLE + HANDLE_H + 3 # Top of the ticks
+    HEIGHT = Y_TICKS + TICK_MAJOR + 3
+
+    def __init__(self, parent=None):
+        super().__init__(Qt.Horizontal, parent)
+        self.setTickPosition(QSlider.NoTicks)
+        self.setMinimumHeight(self.HEIGHT)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.setToolTip("Frame number. Click or drag; arrow keys step 1 frame, Page Up/Down 10")
+        self._flashes = [] # (first, last) slider values of each flash
+        self.set_frames(0)
+
+    def sizeHint(self):
+        return QtCore.QSize(200, self.HEIGHT)
+
+    def minimumSizeHint(self):
+        return QtCore.QSize(60, self.HEIGHT)
+
+    def set_frames(self, n_frames):
+        """ Set up for a movie of n_frames frames (0: no movie) """
+        self.blockSignals(True)
+        self.setRange(1, max(1, n_frames))
+        self.setValue(1)
+        self.setSingleStep(1)
+        self.setPageStep(10)
+        self.blockSignals(False)
+        self.setEnabled(n_frames > 1)
+        self.set_flash_frames([]) # (Also updates)
+
+    def set_flash_frames(self, frames):
+        """ Mark where the flashes are. frames: 0-based numbers of the flash frames; those within 2 frames of each other are one
+            flash. (Slider values, and the numbers in the tooltip, are 1-based like the frame numbers on screen.) """
+        events = []
+        for f in sorted(int(n) + 1 for n in frames):
+            if events and f - events[-1][1] <= 2:
+                events[-1][1] = f
+            else:
+                events.append([f, f])
+        self._flashes = [(a, b) for a, b in events]
+        self.update()
+
+    def flash_events(self):
+        """ [(first, last)] slider values of each flash """
+        return list(self._flashes)
+
+    # --- where things are on screen
+    def _x_range(self):
+        """ (x of the handle's center at the minimum, at the maximum) """
+        return self.MARGIN + self.HANDLE_W / 2.0, self.width() - self.MARGIN - self.HANDLE_W / 2.0
+
+    def x_of(self, value):
+        """ x (pixels) of the center of the handle when the slider has this value """
+        left, right = self._x_range()
+        n = self.maximum() - self.minimum()
+        return left if n <= 0 else left + (right - left) * (value - self.minimum()) / float(n)
+
+    def value_at(self, x):
+        """ The value whose handle is centered nearest x """
+        left, right = self._x_range()
+        n = self.maximum() - self.minimum()
+        if right <= left or n <= 0:
+            return self.minimum()
+        return int(min(self.maximum(), max(self.minimum(), self.minimum() + round((x - left) / (right - left) * n))))
+
+    def tick_step(self):
+        """ Frames between ticks: the smallest of 1, 2, 5, 10, 20, 50, ... that keeps them MIN_TICK_PX apart """
+        n = self.maximum() - self.minimum()
+        if n <= 0:
+            return 1
+        left, right = self._x_range()
+        px_per_frame = max(1.0, right - left) / float(n)
+        step = 1
+        while step * px_per_frame < self.MIN_TICK_PX and step < n:
+            step *= 2 if str(step)[0] in "15" else 2.5   # 1 -> 2 -> 5 -> 10 -> 20 -> 50 ...
+            step = int(round(step))
+        return step
+
+    def tick_values(self):
+        """ (frame number, is it a major tick) for every tick """
+        lo, hi, step = self.minimum(), self.maximum(), self.tick_step()
+        ticks = {lo: True, hi: True} # The first and last frame always
+        x_lo, x_hi = self.x_of(lo), self.x_of(hi)
+        first = ((lo + step - 1) // step) * step # Multiples of the step
+        for v in range(first, hi + 1, step):
+            x = self.x_of(v)
+            if v in ticks or abs(x - x_lo) < self.MIN_TICK_PX or abs(x - x_hi) < self.MIN_TICK_PX:
+                continue # (Not one squeezed up against an end tick)
+            ticks[v] = (v % (10 * step) == 0)
+        return sorted(ticks.items())
+
+    # --- drawing
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        group = QPalette.Active if self.isEnabled() else QPalette.Disabled
+        color = lambda role: self.palette().color(group, role)
+        y_c = self.Y_HANDLE + self.HANDLE_H / 2.0
+        x_handle = self.x_of(self.value())
+
+        # The track, filled up to the handle
+        left, right = self._x_range()
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QBrush(color(QPalette.Mid)))
+        painter.drawRoundedRect(QtCore.QRectF(left, y_c - 2, right - left, 4), 2, 2)
+        if self.maximum() > self.minimum():
+            painter.setBrush(QBrush(color(QPalette.Highlight)))
+            painter.drawRoundedRect(QtCore.QRectF(left, y_c - 2, x_handle - left, 4), 2, 2)
+
+        # The handle
+        border = color(QPalette.Highlight) if self.hasFocus() else color(QPalette.Dark)
+        painter.setPen(QPen(border, 2 if self.hasFocus() else 1))
+        painter.setBrush(QBrush(color(QPalette.Midlight) if self.isSliderDown() else color(QPalette.Button)))
+        painter.drawRoundedRect(QtCore.QRectF(x_handle - self.HANDLE_W / 2.0 + 0.5, self.Y_HANDLE + 0.5, self.HANDLE_W - 1, self.HANDLE_H - 1), 3, 3)
+
+        # The ticks
+        if self.maximum() > self.minimum():
+            tick_color = color(QPalette.WindowText)
+            tick_color.setAlpha(170)
+            painter.setPen(QPen(tick_color, 1))
+            for value, major in self.tick_values():
+                x = int(round(self.x_of(value)))
+                painter.drawLine(x, self.Y_TICKS, x, self.Y_TICKS + (self.TICK_MAJOR if major else self.TICK_MINOR))
+
+        # The flashes: a triangle pointing down at each
+        mark = QColor(self.MARK_COLOR)
+        mark.setAlpha(255 if self.isEnabled() else 110)
+        painter.setPen(QPen(mark, 1))
+        painter.setBrush(QBrush(mark))
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        for first, last in self._flashes:
+            x = (self.x_of(first) + self.x_of(last)) / 2.0
+            half = max(self.MARK_HALF_WIDTH, (self.x_of(last) - self.x_of(first)) / 2.0 + 1)
+            painter.drawPolygon(QPolygonF([QPointF(x - half, self.Y_TIP - self.MARK_HEIGHT), QPointF(x + half, self.Y_TIP - self.MARK_HEIGHT), QPointF(x, self.Y_TIP)]))
+        painter.end()
+
+    def event(self, e):
+        if e.type() == QEvent.ToolTip and self._flashes: # Hovering over a flash marker says which frames it is
+            for k, (first, last) in enumerate(self._flashes, 1):
+                x0, x1 = self.x_of(first), self.x_of(last)
+                if x0 - self.MARK_HALF_WIDTH <= e.pos().x() <= x1 + self.MARK_HALF_WIDTH and e.pos().y() <= self.Y_HANDLE:
+                    QToolTip.showText(e.globalPos(), "Flash %d: %s" % (k, "frame %d" % first if first == last else "frames %d-%d" % (first, last)), self)
+                    return True
+        return super().event(e)
+
+    # --- the mouse: click anywhere to jump there, and drag
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton and self.isEnabled():
+            self.setSliderDown(True)
+            self.setValue(self.value_at(event.pos().x()))
+            event.accept()
+        else:
+            super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self.isSliderDown():
+            self.setValue(self.value_at(event.pos().x()))
+            event.accept()
+        else:
+            super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.LeftButton and self.isSliderDown():
+            self.setSliderDown(False)
+            event.accept()
+        else:
+            super().mouseReleaseEvent(event)
 
 class ZernikeDialog(QDialog):
     def createFormGroupBox(self,titl):
