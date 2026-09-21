@@ -130,9 +130,14 @@ class info_saver():
         flags = 0
         if flash:
             flags |= FLAG_FLASH
+        dark_box_fraction = float(np.mean(np.isnan(centroids_x))) if len(centroids_x) else 0.0 # Boxes that found no spot
+        limit = float(getattr(defaults, 'DARK_BOX_FRACTION_THRESHOLD', 0) or 0)
         if flash or dark: # A flash, or much too dark: nothing measured from the image means anything. NaN
             zernikes = np.full(np.shape(zernikes), np.nan)
             centroids_x, centroids_y, est_x, est_y = [np.full(np.shape(a), np.nan) for a in (centroids_x, centroids_y, est_x, est_y)]
+        elif limit > 0 and dark_box_fraction > limit: # Too few boxes with a spot for a fit. The centroids that were found are real
+            zernikes = np.full(np.shape(zernikes), np.nan)
+            est_x, est_y = [np.full(np.shape(a), np.nan) for a in (est_x, est_y)] # (Made from the Zernikes)
         data_record = {
             'box_x':self.engine.box_x,
             'box_y':self.engine.box_y,
@@ -148,6 +153,7 @@ class info_saver():
             'pupil_diam':self.engine.pupil_diam / self.engine.pupil_mag, # In pupil coords, not sensor
             'box_size_pixel':float(self.engine.box_size_pixel), # Final search box size, pixels (the boxes shrink while processing)
             'flags':flags, # See FLAG_*. (Not in results saved by older versions.)
+            'dark_box_fraction':dark_box_fraction, # Fraction of the boxes that found no spot (NaN centroid)
             'zernikes':zernikes}
         self.data[nframe]=data_record
         #print( 'saved: ', data_record, flush=True)
