@@ -324,7 +324,9 @@ class NextwaveOffline():
 
     def _preview(self, frame):
         """ Show the first frame as soon as it has been read, while the rest of the movie is still loading """
-        self.signals.first_frame.emit(frame.copy())
+        image = frame.copy()
+        image[image >= getattr(defaults, 'SATURATION_MINIMUM', 256)] = 0 # As it will be in the loaded movie
+        self.signals.first_frame.emit(image)
 
     def _occupancy_params(self):
         """ The occupancy matching's settings: the defaults in occupancy.py, unless nextwave_defaults.py sets them """
@@ -685,6 +687,10 @@ class NextwaveOffline():
         buf_movie=buf_movie[0:nf,:,:] # Trim to correct
         self.fnames = self.fnames[0:nf]
         self.rotations = [None]*nf
+
+        # Threshold anything too bright
+        self.signals.report("Removing saturated pixels") # (One long step)
+        buf_movie[buf_movie >= getattr(defaults, 'SATURATION_MINIMUM', 256)] = 0 # (256 or more: nothing, for 8 bit)
 
         self.offline_movie = buf_movie
         self._add_to_ui(buf_movie) # (Shown by finish_load)

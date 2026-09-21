@@ -5,7 +5,7 @@ A flash lights up the whole image: the frame's mean brightness is far above the 
 mean brightness is more than RATIO times the movie's median (FLASH_RATIO_THRESHOLD in nextwave_defaults.py). Flash frames within
 2 frames of each other are one flash, which is 1-3 frames long (often a partial glow, then the full flash), and it only counts if
 its brightest frame is over PEAK_RATIO times the median (FLASH_PEAK_RATIO_THRESHOLD): a slow, moderate brightening isn't a flash.
-The app makes the same decision, on the same 8-bit gray frames.
+The app makes the same decision, on the same 8-bit gray frames (saturated pixels zeroed only if SATURATION_MINIMUM is set below 256, --saturation).
 
 Usage:
     python find_all_flashes.py [directory] [--ratio 4.0] [--peak-ratio 20] [--csv flashes.csv] [--html flashes.html] [--details]
@@ -32,18 +32,18 @@ from find_first_flash import frame_mean, find_flashes, DEFAULT_DIR, MERGE_GAP   
 import ffmpegcv
 
 
-def movie_means(path, cache=None):
+def movie_means(path, saturation=256, cache=None):
     """ Mean brightness of every frame of a movie (from the cache, if it has it). Runs in a worker process. """
     cache_file = None
     if cache:
         stamp = os.stat(path)
-        cache_file = os.path.join(cache, "%s.%d.npy" % (os.path.basename(path), stamp.st_size))
+        cache_file = os.path.join(cache, "%s.%d.%d.npy" % (os.path.basename(path), stamp.st_size, saturation))
         if os.path.exists(cache_file):
             return path, np.load(cache_file)
     means = []
     with ffmpegcv.VideoCapture(path) as cap:
         for frame in cap:
-            means.append(frame_mean(frame))
+            means.append(frame_mean(frame, saturation))
     means = np.array(means)
     if cache_file:
         os.makedirs(cache, exist_ok=True)
@@ -90,6 +90,7 @@ def main():
     parser.add_argument("directory", nargs="?", default=DEFAULT_DIR, help="folder with the .avi files (default %s)" % DEFAULT_DIR)
     parser.add_argument("--ratio", type=float, default=4.0, help="flash if mean brightness > RATIO x the movie's median (default 4.0)")
     parser.add_argument("--peak-ratio", type=float, default=20.0, help="a flash's brightest frame is over PEAK_RATIO x the median (default 20)")
+    parser.add_argument("--saturation", type=int, default=256, help="pixels at or above this are zeroed, as SATURATION_MINIMUM in the app does (default 256: none)")
     parser.add_argument("--workers", type=int, default=0, help="processes (default: one per movie, up to the number of cores - 1)")
     parser.add_argument("--cache", help="folder to keep each movie's per-frame brightness in, so a re-run is instant")
     parser.add_argument("--csv", help="write every flash of every movie to this .csv file")
@@ -105,7 +106,7 @@ def main():
     print("Reading %d movies from %s with %d processes..." % (len(files), args.directory, workers), flush=True)
     t0 = time.time()
     with ProcessPoolExecutor(max_workers=workers) as pool:
-        futures = [pool.submit(movie_means, p, args.cache) for p in files]
+        futures = [pool.submit(movie_means, p, args.saturation, args.cache) for p in files]
         means_by_movie = dict(f.result() for f in futures)
     print("Read %d frames in %.0fs\n" % (sum(len(m) for m in means_by_movie.values()), time.time() - t0), flush=True)
 

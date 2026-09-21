@@ -4,7 +4,7 @@ Find the first flash in each movie (.avi) in a directory, and print its frame in
 A flash lights up the whole image, so the frame's mean brightness jumps far above the movie's usual. Flash frames are those
 brighter than RATIO times the median (FLASH_RATIO_THRESHOLD in nextwave_defaults.py), and a run of them is only a flash if its
 brightest frame is over PEAK_RATIO times the median (FLASH_PEAK_RATIO_THRESHOLD): a slow, moderate brightening isn't a flash.
-It's the same rule the app uses, on the same 8-bit gray frames.
+It's the same rule the app uses, on the same 8-bit gray frames (saturated pixels zeroed only if SATURATION_MINIMUM is set below 256, --saturation).
 
 Usage:
     python find_first_flash.py [directory] [--ratio 4.0] [--peak-ratio 20] [--exact] [--csv results.csv]
@@ -33,9 +33,10 @@ import numpy as np
 import ffmpegcv
 
 
-def frame_mean(frame):
-    """ Mean brightness of one frame, as the app would see it: gray (mean of the color channels), 8 bit """
+def frame_mean(frame, saturation):
+    """ Mean brightness of one frame, as the app would see it: gray (mean of the color channels), 8 bit, saturated pixels 0 """
     gray = frame.mean(2).astype(np.uint8)
+    gray[gray >= saturation] = 0 # (256 or more: nothing)
     return gray.mean(dtype=np.float64)
 
 
@@ -64,7 +65,7 @@ def find_flashes(means, ratio=4.0, peak_ratio=20.0):
     return flashes
 
 
-def first_flash(path, ratio=4.0, baseline=30, exact=False, peak_ratio=20.0):
+def first_flash(path, ratio=4.0, baseline=30, saturation=256, exact=False, peak_ratio=20.0):
     """ Returns a dict: first (index of the first frame of the first flash, or None), peak (its brightest frame), frames (all
         the frames of that flash), ratio (peak brightness / median), n_read (frames read), n_frames (in the video). """
     means = []
@@ -89,7 +90,7 @@ def first_flash(path, ratio=4.0, baseline=30, exact=False, peak_ratio=20.0):
     with ffmpegcv.VideoCapture(path) as cap:
         n_frames = len(cap)
         for i, frame in enumerate(cap):
-            means.append(frame_mean(frame))
+            means.append(frame_mean(frame, saturation))
             if exact or i + 1 < baseline:
                 continue
             median = np.median(means)
@@ -124,6 +125,7 @@ def main():
     parser.add_argument("--ratio", type=float, default=4.0, help="flash frames are brighter than RATIO x the median (default 4.0)")
     parser.add_argument("--peak-ratio", type=float, default=20.0, help="a flash's brightest frame is over PEAK_RATIO x the median (default 20)")
     parser.add_argument("--baseline", type=int, default=30, help="frames to see before comparing with the median (default 30)")
+    parser.add_argument("--saturation", type=int, default=256, help="pixels at or above this are zeroed, as SATURATION_MINIMUM in the app does (default 256: none)")
     parser.add_argument("--exact", action="store_true", help="read whole movies and use the overall median (slower)")
     parser.add_argument("--csv", help="also write the results to this .csv file")
     args = parser.parse_args()
@@ -138,7 +140,7 @@ def main():
         name = os.path.basename(path)
         t = time.time()
         try:
-            r = first_flash(path, args.ratio, args.baseline, args.exact, args.peak_ratio)
+            r = first_flash(path, args.ratio, args.baseline, args.saturation, args.exact, args.peak_ratio)
         except Exception as e:
             print("%-24s FAILED: %s" % (name, e))
             continue
