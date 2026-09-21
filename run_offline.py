@@ -10,8 +10,8 @@ For each movie it writes:
   - the full results, <movie>.avi.pkl next to the movie (as the app saves them; the app loads them when it opens the movie).
     --no-pkl leaves that out.
 
-Settings are the app's: config.json and nextwave_defaults.py in the directory you run this from (like the app). The center used
-for centering_method "occupancy_match" (and for a fixed center) is the config.json's cx, cy. --workers is the number of
+Settings are the app's: config.json and nextwave_defaults.py in the directory you run this from (like the app). The pupil
+center for centering_method "occupancy_match" comes from the movie itself; a fixed center (ITERATIVE_FIXED_CENTER) is config.json's cx, cy. --workers is the number of
 processes (default: OFFLINE_WORKERS in the defaults, 0 = automatic).
 
 Run it from the app's directory, or a scratch directory with copies of config.json (and nextwave_defaults.py): debug files the

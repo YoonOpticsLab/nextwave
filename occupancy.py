@@ -11,8 +11,9 @@ movies the bottom third), so some sites of the shape are simply empty.
   - Each frame's spots are put on the lattice sites, and the whole-site shift that best matches the frame's sites to the template
     is found: sites that agree are rewarded, spots outside the template are penalized hard (they don't belong), and template sites
     with no spot cost only a little (obstruction, or a dim spot).
-  - The pupil center is the center site of the template (the crosshair, when the template was made) moved by that shift, at
-    the lattice position in this frame (which follows the spots if the lattice moves a little).
+  - The pupil center is the center site of the template moved by that shift, at the lattice position in this frame (which
+    follows the spots if the lattice moves a little). The template's center is the middle of its own shape (halfway between its
+    outermost sites, in each direction; a half-way point rounds up), so it doesn't depend on where anyone put a crosshair.
 
 Frames with too few spots to say (a blink, a flash) get the template center unmoved.
 """
@@ -92,10 +93,10 @@ def best_shift(sites, template, params=PARAMS):
     return shift, dict(score=score, matched=inside, outside=outside, missing=missing, n_sites=len(sites), n_template=n_template)
 
 
-def build_template(frames, pitch, crosshair, crosshair_image=None, params=PARAMS):
-    """ frames: [(number, image)]. crosshair: (x, y) where the user put the center, on the frame they were looking at:
-        crosshair_image (if it's None, the template's own reference frame). Returns the template (a dict), or None if no frame
-        has enough spots. """
+def build_template(frames, pitch, params=PARAMS):
+    """ frames: [(number, image)]. Returns the template (a dict), or None if no frame has enough spots. Its center_site is the
+        middle of its shape: the template is the union of the frames' footprints, so an obstruction that hides part of the pupil
+        in some frames doesn't move it. """
     observed = []
     for number, image in frames:
         points = find_spots(image, pitch, params)
@@ -120,14 +121,11 @@ def build_template(frames, pitch, crosshair, crosshair_image=None, params=PARAMS
         if len(keep) >= params['min_sites']:
             template = keep
 
-    # The template is in the coordinates of its reference frame. The crosshair is where the center is in the frame that was on
-    # screen, whose pupil may be elsewhere: find where, so the template's own center is the same place on the pupil's shape.
-    di = dj = 0
-    if crosshair_image is not None:
-        shown, _ = sites_of(find_spots(crosshair_image, pitch, params), origin, pitch)
-        if len(shown) >= params['min_sites']:
-            (di, dj), _ = best_shift(shown, template, params)
-    center_site = (int(round((crosshair[0] - origin[0]) / pitch)) - di, int(round((crosshair[1] - origin[1]) / pitch)) - dj)
+    # The template is in the coordinates of its reference frame. Its center: halfway between its outermost sites (a half-way
+    # point, when the width is an even number of sites, rounds up)
+    xs = [i for i, j in template]
+    ys = [j for i, j in template]
+    center_site = (int(np.floor((min(xs) + max(xs)) / 2.0 + 0.5)), int(np.floor((min(ys) + max(ys)) / 2.0 + 0.5)))
     return dict(sites=np.array(sorted(template), dtype=int), origin=origin, pitch=float(pitch), center_site=center_site,
                 reference_frame=ref_number, n_frames=len(observed))
 

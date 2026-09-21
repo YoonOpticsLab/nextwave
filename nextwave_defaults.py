@@ -59,8 +59,8 @@ SATURATION_MINIMUM=256 # When loading a movie, pixels at or above this value are
 # "convex_hull_robust"    + outlier detection
 # "convex_hull_robust_dynamic" : dynamic threshold based on components(spots), not OTSU
 # "occupancy_match" : match which lenslet boxes have a spot to a reference shape made from the movie's frames (see occupancy.py).
-#                     Tolerates obstructed parts of the pupil. The center is where the crosshair is (on the frame on screen) when a run
-#                     starts. Doesn't estimate the max pupil: it is ITERATIVE_PUPIL_STOP_FORCE (or ITERATIVE_PUPIL_STOP).
+#                     Tolerates obstructed parts of the pupil. The center is the middle of the pupil's shape (the union of
+#                     the frames' footprints), not the crosshair. Doesn't estimate the max pupil: it is ITERATIVE_PUPIL_STOP_FORCE (or ITERATIVE_PUPIL_STOP).
 #                     Needs ITERATIVE_AUTOCENTER=1. Optional settings: OCCUPANCY_MAX_SHIFT (4), OCCUPANCY_MISSING_PENALTY (0.25),
 #                     OCCUPANCY_EDGE_REWARD (0.3), OCCUPANCY_OUTSIDE_PENALTY (1.0), OCCUPANCY_MIN_SITES (12)
 centering_method="occupancy_match"

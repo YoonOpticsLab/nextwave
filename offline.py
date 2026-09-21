@@ -339,7 +339,7 @@ class NextwaveOffline():
 
     def prepare_occupancy_template(self):
         """ For centering_method 'occupancy_match': make the reference shape from the loaded movie (see occupancy.py). The center
-            is where the crosshair is now, on the frame that's on screen. Does nothing for the other methods. Needs the whole
+            is the middle of that shape (see occupancy.py), not the crosshair. Does nothing for the other methods. Needs the whole
             movie, so the main process does it (before a run), and the workers are given the result. """
         if getattr(defaults, 'centering_method', '') != 'occupancy_match' or not hasattr(self.offline_movie, 'shape'):
             return
@@ -347,9 +347,7 @@ class NextwaveOffline():
         skip = self.flash_frames | self.dark_frames
         n = self.max_frame
         sample = sorted({int(i) for i in np.linspace(0, n - 1, min(n, int(params['sample_frames'])))} - skip)
-        shown = self.offline_movie[self.offline_curr] if self.offline_curr not in skip else None
-        self.occupancy_template = occupancy.build_template([(i, self.offline_movie[i]) for i in sample], self.parent.lenslet_size_pixel,
-                                                           (self.parent.cx, self.parent.cy), shown, params)
+        self.occupancy_template = occupancy.build_template([(i, self.offline_movie[i]) for i in sample], self.parent.lenslet_size_pixel, params)
         t = self.occupancy_template
         if t is None:
             print("Occupancy template: no frame had enough spots", flush=True)
@@ -362,8 +360,8 @@ class NextwaveOffline():
         pitch = self.parent.lenslet_size_pixel
         if self.occupancy_template is None: # (Normally made before the run, in the main process.)
             self.prepare_occupancy_template()
-        if self.occupancy_template is None: # Nothing to go on but this frame: its own shape, centered where the crosshair is
-            self.occupancy_template = occupancy.build_template([(self.offline_curr, self.im)], pitch, (self.parent.cx, self.parent.cy), self.im, params)
+        if self.occupancy_template is None: # Nothing to go on but this frame: its own shape
+            self.occupancy_template = occupancy.build_template([(self.offline_curr, self.im)], pitch, params)
         template = self.occupancy_template
         if template is not None:
             if self.offline_curr in self.flash_frames or self.offline_curr in self.dark_frames: # Nothing to judge from a flash or a dark frame
