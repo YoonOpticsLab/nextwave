@@ -492,6 +492,31 @@ class NextWaveMainWindow(QMainWindow):
     if b['failed']:
         QMessageBox.warning(self, "Some movies failed", "These movies could not be processed (see the log):\n" + "\n".join(b['failed']))
 
+ def summary_plot_directory(self):
+    """ Ask which directory of exported CSVs (native1.csv, native2.csv...) to make the summary plot from, and make it there """
+    start = self.load_setting("ui/folder_summary") or self.load_setting("ui/folder_batch") or "."
+    folder = QFileDialog.getExistingDirectory(self, "Directory of Zernike CSVs for the summary plot", start, QFileDialog.ShowDirsOnly)
+    if folder:
+        self.save_setting("ui/folder_summary", folder)
+        self.make_summary_plot(folder)
+
+ def make_summary_plot(self, folder):
+    """ The summary plot of the CSVs in folder, saved there as <folder name>.png, and shown """
+    csvs = sorted(glob.glob(os.path.join(folder, "*.csv")))
+    png = os.path.join(folder, os.path.basename(os.path.normpath(folder)) + ".png")
+    try:
+        plotted = zernike_plot.make_summary_plot(csvs, png, mean=self.action_summary_mean.isChecked())
+    except Exception:
+        log.exception("Summary plot failed")
+        QMessageBox.warning(self, "Summary plot failed", "Couldn't make the summary plot (see the log).")
+        return
+    if not plotted:
+        QMessageBox.information(self, "Summary plot", "There are no CSVs in " + folder + " named like native1.csv (condition, then number).")
+        return
+    log.info("Summary plot of %d CSVs in %s: %s" % (len(csvs), folder, png))
+    self.statusBar().showMessage("Summary plot " + png)
+    self.show_summary_plot(png)
+
  def show_summary_plot(self, png):
     dialog = QDialog(self)
     dialog.setWindowTitle(png)
@@ -1581,6 +1606,7 @@ class NextWaveMainWindow(QMainWindow):
      menu.addAction('&Export Centroids + Zernikes', self.export)
      menu.addAction('Export All &Zernikes', self.export_all)
      menu.addAction('Process &directory of AVIs...', self.process_directory)
+     menu.addAction('Make summary &plot from a directory of CSVs...', self.summary_plot_directory)
      self.action_summary_mean = menu.addAction('Summary plot: mean +/- 1 &SD, not each run')
      self.action_summary_mean.setCheckable(True)
      self.action_summary_mean.setChecked(self.settings.value('ui/summary_mean', bool(getattr(defaults, 'SUMMARY_PLOT_MEAN', 0)), type=bool))
