@@ -88,6 +88,10 @@ MIN_BOXES_PER_NZERN=2
 
 ZERNIKE_MAX_ABS=10.0 # um. In saved results, any Zernike coefficient with a magnitude above this is saved as NaN (just that coefficient). 0 = off
 
+FLASH_RATIO_THRESHOLD=4.0 # A frame whose mean brightness is more than this many times the movie's median is a flash (the whole image lights up). Saved with FLAGS 1 (a column of the CSV, and 'flags' in the pickle), and Zernikes/centroids NaN. 0 = off
+FLASH_PEAK_RATIO_THRESHOLD=20.0 # A run of flash frames only counts as a flash if its brightest frame is more than this many times the movie's median. Keeps a slow, moderate brightening (a few times the median, for many frames) from being taken for one. Real flashes peak at 60x or more. 0 = any run
+DARK_RATIO_THRESHOLD=0.25 # A frame whose mean brightness is less than this fraction of the movie's median is much darker than usual (eye closed, lights off): Zernikes/centroids saved as NaN, but not flagged. 0 = off
+
 MAX_ZERNIKES=65 # Absolute max for 10th order: np.sum( np.arange(10+1+1))-1 .first of 11th order is np.sum(np.arange(12)) )
 MAX_ORDER=10
 

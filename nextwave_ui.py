@@ -82,6 +82,7 @@ class OfflineWorker(QtCore.QObject):
 
     def do_auto_serial(self):
         """ One frame at a time, in this process. Returns False if cancelled. """
+        self.engine.offline.update_frame_classes()
         for nframe in np.arange(self.engine.offline.max_frame):
             self.progress.emit( nframe )
             if self.cancel:

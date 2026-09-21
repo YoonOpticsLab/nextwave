@@ -46,7 +46,7 @@ class FrameProcessor:
         self.offline.debug_dumps = False # Workers would all write the same files
         self.offline.max_frame = cfg['n_frames']
 
-    def process(self, nframe, image, rotation, center_dirty):
+    def process(self, nframe, image, rotation, center_dirty, flash=False, dark=False):
         """ image: the frame. rotation: already-determined rotation of the frame (None if not yet). """
         cfg, engine, offline = self.cfg, self.engine, self.offline
         log = io.StringIO()
@@ -71,6 +71,8 @@ class FrameProcessor:
                 offline.offline_movie = {nframe: image}
                 offline.rotations = {nframe: rotation}
                 offline.saver.data = {}
+                offline.flash_frames = {nframe} if flash else set() # (Decided on the whole movie, by the main process)
+                offline.dark_frames = {nframe} if dark else set()
                 offline.offline_curr = nframe
 
                 offline.offline_reset() # Fresh search boxes around the starting center
@@ -94,14 +96,14 @@ def _init_worker(cfg):
     global _cfg
     _cfg = cfg # Cheap and can't fail. The engine is built on first use so errors are reported per frame.
 
-def _process_frame(nframe, image, rotation, center_dirty):
+def _process_frame(nframe, image, rotation, center_dirty, flash, dark):
     global _processor
     try:
         if _processor is None:
             _processor = FrameProcessor(_cfg)
     except Exception:
         return dict(nframe=nframe, record=None, rotation=rotation, image=None, log='', error=traceback.format_exc())
-    return _processor.process(nframe, image, rotation, center_dirty)
+    return _processor.process(nframe, image, rotation, center_dirty, flash, dark)
 
 
 def default_workers(n_frames):
@@ -171,6 +173,8 @@ def run_parallel(engine, n_workers, progress=None, cancelled=None):
     first_center_dirty = offline.center_dirty # A user-set center applies to the first frame only, as in the serial loop
     offline.center_dirty = False
 
+    offline.update_frame_classes() # (Needs the whole movie, so it's done here, not in the workers)
+
     n_done = 0
     if progress:
         progress(n_done)
@@ -179,7 +183,7 @@ def run_parallel(engine, n_workers, progress=None, cancelled=None):
         pool = ProcessPoolExecutor(max_workers=n_workers, initializer=_init_worker, initargs=(cfg,))
         try:
             pending = {pool.submit(_process_frame, n, np.ascontiguousarray(offline.offline_movie[n]),
-                                   offline.rotations[n], first_center_dirty and n == 0)
+                                   offline.rotations[n], first_center_dirty and n == 0, n in offline.flash_frames, n in offline.dark_frames)
                        for n in range(offline.max_frame)}
             while pending:
                 done, pending = wait(pending, timeout=0.25, return_when=FIRST_COMPLETED)

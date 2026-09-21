@@ -81,6 +81,38 @@ def limit_zernikes(zernikes):
             zernikes[np.abs(zernikes) > limit] = np.nan
     return zernikes
 
+# Bits of a frame's FLAGS value (saved with the results, and a column of the exported CSV). 0: nothing to flag.
+FLAG_FLASH = 1 # The frame's mean brightness is over defaults.FLASH_RATIO_THRESHOLD times the movie's median: a flash
+# (Next flag: 2, then 4, ... so they can be combined)
+
+def classify_frames(movie, flash_ratio, dark_ratio, peak_ratio=0):
+    """ (flash frames, dark frames): sets of frame numbers, by mean brightness relative to the movie's median.
+        A flash lights up the whole image. Flash frames are over flash_ratio times the median (a strong one is about 60-460x
+        on our movies; normal frames stay within 2x); a run of them (within 2 frames of each other) is a flash only if its
+        brightest frame is over peak_ratio times the median, so a slow, moderate brightening isn't taken for one.
+        A "much darker" frame (eye closed, lights off) is under dark_ratio times the median.
+        A ratio of 0 turns that one off. """
+    if len(movie) < 3 or not (flash_ratio > 0 or dark_ratio > 0):
+        return set(), set()
+    means = np.asarray(movie).mean(axis=(1,2), dtype=np.float64)
+    median = np.median(means)
+    if not median > 0:
+        return set(), set()
+    ratio = means / median
+    flash = set()
+    if flash_ratio > 0:
+        runs = []
+        for n in np.where(ratio > flash_ratio)[0]:
+            if runs and n - runs[-1][-1] <= 2:
+                runs[-1].append(int(n))
+            else:
+                runs.append([int(n)])
+        for run in runs:
+            if not peak_ratio > 0 or ratio[run].max() > peak_ratio:
+                flash.update(run)
+    dark = {int(n) for n in np.where(ratio < dark_ratio)[0]} if dark_ratio > 0 else set()
+    return flash, dark
+
 class info_saver():
     def __init__(self,parent):
         self.parent=parent
@@ -90,21 +122,33 @@ class info_saver():
         self.data = {}
 
     def save1(self,nframe):
+        flash = nframe in self.offline.flash_frames
+        dark = nframe in self.offline.dark_frames
+        zernikes = limit_zernikes(self.engine.zernikes)
+        centroids_x, centroids_y = self.engine.centroids_x, self.engine.centroids_y
+        est_x, est_y = self.offline.est_x, self.offline.est_y
+        flags = 0
+        if flash:
+            flags |= FLAG_FLASH
+        if flash or dark: # A flash, or much too dark: nothing measured from the image means anything. NaN
+            zernikes = np.full(np.shape(zernikes), np.nan)
+            centroids_x, centroids_y, est_x, est_y = [np.full(np.shape(a), np.nan) for a in (centroids_x, centroids_y, est_x, est_y)]
         data_record = {
             'box_x':self.engine.box_x,
             'box_y':self.engine.box_y,
             'ref_x':self.engine.ref_x,
             'ref_y':self.engine.ref_y,
-            'centroids_x':self.engine.centroids_x,
-            'centroids_y':self.engine.centroids_y,
-            'est_x':self.offline.est_x,
-            'est_y':self.offline.est_y,
+            'centroids_x':centroids_x,
+            'centroids_y':centroids_y,
+            'est_x':est_x,
+            'est_y':est_y,
             'cx':self.engine.cx,
             'cy':self.engine.cy,
             'rotation':self.offline.rotations[nframe],
             'pupil_diam':self.engine.pupil_diam / self.engine.pupil_mag, # In pupil coords, not sensor
             'box_size_pixel':float(self.engine.box_size_pixel), # Final search box size, pixels (the boxes shrink while processing)
-            'zernikes':limit_zernikes(self.engine.zernikes)}
+            'flags':flags, # See FLAG_*. (Not in results saved by older versions.)
+            'zernikes':zernikes}
         self.data[nframe]=data_record
         #print( 'saved: ', data_record, flush=True)
 
@@ -140,10 +184,12 @@ class info_saver():
         data_record=self.load1(nframe)
         if not data_record is None:
             try:
-                s=("%s,%s,%s,%0.2f,%0.3f,%d,%d,")%(self.offline.sub_id,self.offline.scan_dir,self.offline.fnames[nframe],
-                defaults.scan_frame_to_ecc[self.offline.scan_dir][nframe],data_record['pupil_diam'],data_record['cx'],data_record['cy'])
+                s=("%s,%s,%s,%0.2f,%0.3f,%d,%d,%d,")%(self.offline.sub_id,self.offline.scan_dir,self.offline.fnames[nframe],
+                defaults.scan_frame_to_ecc[self.offline.scan_dir][nframe],data_record['pupil_diam'],data_record['cx'],data_record['cy'],
+                data_record.get('flags',0))
             except: # without the sub_id params
-                s=("%s,%s,%d,%0.2f,%0.3f,%d,%d,")%("","",nframe,0.0,data_record['pupil_diam'],data_record['cx'],data_record['cy'])
+                s=("%s,%s,%d,%0.2f,%0.3f,%d,%d,%d,")%("","",nframe,0.0,data_record['pupil_diam'],data_record['cx'],data_record['cy'],
+                data_record.get('flags',0))
             for nz1,z1 in enumerate(limit_zernikes(data_record['zernikes'])): # (Also for results saved before this rule)
                 s += "%0.6f,"%(z1)
         else:
@@ -198,6 +244,9 @@ class NextwaveOffline():
 
         self.offline_curr = 0 # Current frame
 
+        self.flash_frames = set() # Frames that are flashes, and frames that are much darker than usual (see update_frame_classes)
+        self.dark_frames = set()
+
         # Write debug arrays (ims.npy, etc.) to the current directory. Off in the parallel workers, which would collide.
         self.debug_dumps = True
         
@@ -229,6 +278,18 @@ class NextwaveOffline():
         self.im = bytez
         self.parent.comm.write_image(self.dims,bytez)
         self.signals.frame_loaded.emit(bytez)
+
+    def update_frame_classes(self):
+        """ Find the flash frames and the much darker frames of the loaded movie (FLASH_RATIO_THRESHOLD and
+            DARK_RATIO_THRESHOLD, FLASH_PEAK_RATIO_THRESHOLD in defaults). Their results are saved as NaN; flashes also get FLAGS 1. """
+        flash_ratio = float(getattr(defaults, 'FLASH_RATIO_THRESHOLD', 0) or 0)
+        dark_ratio = float(getattr(defaults, 'DARK_RATIO_THRESHOLD', 0) or 0)
+        peak_ratio = float(getattr(defaults, 'FLASH_PEAK_RATIO_THRESHOLD', 0) or 0)
+        self.flash_frames, self.dark_frames = classify_frames(self.offline_movie[:self.max_frame], flash_ratio, dark_ratio, peak_ratio)
+        if self.flash_frames:
+            print("Flash frames (0-based): %s"%sorted(self.flash_frames), flush=True)
+        if self.dark_frames:
+            print("Much darker frames (0-based): %s"%sorted(self.dark_frames), flush=True)
 
     def _file_kind(self, file_info):
         """ What to load, as text that contains '.avi', '.bmp', etc. From the file's extension, so it works whatever
@@ -534,6 +595,9 @@ class NextwaveOffline():
 
         self.max_frame = buf_movie.shape[0]
 
+        self.signals.report("Looking for flash and dark frames") # (One long step)
+        self.update_frame_classes()
+
         self.signals.report("Loading saved results") # (One long step)
         self.saver.unserialize() # Load previous if they exist
         self.saver.load1(0) # Restore if possible
@@ -549,7 +613,7 @@ class NextwaveOffline():
             out_fname = "%s/zc_%s_%s_%s_%02d.csv"%(dir1,self.sub_id,self.condition,self.scan_dir,idx)
         
         self.f_out = open(out_fname,'w')
-        s="subject_id,scan_dir,frame_num,ecc,pupil_diam_mm,cx,cy,"
+        s="subject_id,scan_dir,frame_num,ecc,pupil_diam_mm,cx,cy,FLAGS,"
         for nz in np.arange(65):
             s += "Z%d,"%(nz+1)
         s += "\n"
