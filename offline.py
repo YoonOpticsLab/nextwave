@@ -93,6 +93,7 @@ class info_saver():
             'cy':self.engine.cy,
             'rotation':self.offline.rotations[nframe],
             'pupil_diam':self.engine.pupil_diam / self.engine.pupil_mag, # In pupil coords, not sensor
+            'box_size_pixel':float(self.engine.box_size_pixel), # Final search box size, pixels (the boxes shrink while processing)
             'zernikes':self.engine.zernikes}
         self.data[nframe]=data_record
         #print( 'saved: ', data_record, flush=True)
@@ -114,10 +115,13 @@ class info_saver():
         self.engine.cy = data_record['cy']
         self.engine.pupil_diam = data_record['pupil_diam'] * self.engine.pupil_mag  # TODO: Should we rebuild boxes ?
         self.engine.zernikes = data_record['zernikes']
+        if 'box_size_pixel' in data_record: # (Results saved by older versions don't have it: leave the box size as is)
+            self.engine.box_size_pixel = data_record['box_size_pixel']
+            self.offline.signals.box_size_changed.emit( float(self.engine.box_size_pixel) )
 
         self.engine.num_boxes = len( self.engine.centroids_x)
         #self.offline.rotations[self.ui.offline_curr]=data_record['rotation']
-        
+
         self.offline.signals.pupil_diam_changed.emit( self.engine.pupil_diam / self.engine.pupil_mag )
 
         return data_record
