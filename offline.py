@@ -173,6 +173,8 @@ class NextwaveOffline():
         self.it_stop_dirty = False # User has set it_stop: use it instead of estimating
         self.center_dirty = False # User has set the center: don't autocenter
 
+        self.skip_enlarge = bool(getattr(defaults, 'ITERATIVE_SKIP_ENLARGE', 0)) # Don't grow the pupil in steps: start at the max
+
         forced_stop = float(getattr(defaults, 'ITERATIVE_PUPIL_STOP_FORCE', 0) or 0) # getattr: user's defaults file may predate this
         if forced_stop > 0: # Same as the user typing a max pupil into the UI
             self.it_stop = forced_stop
@@ -802,9 +804,11 @@ class NextwaveOffline():
         self.saver.serialize()
 
 # iterative_size is size on sensor
-    def offline_reset(self):
-        pupil_diam = self.it_start
-        pupil_diam = pupil_diam * self.parent.pupil_mag
+    def offline_reset(self, pupil_diam=None):
+        """ Fresh search boxes at the starting pupil size, or at pupil_diam (size on the sensor) if given """
+        if pupil_diam is None:
+            pupil_diam = self.it_start
+            pupil_diam = pupil_diam * self.parent.pupil_mag
         self.iterative_size = pupil_diam
         self.iterative_size_pixels = self.iterative_size/2.0 * 1000 / self.parent.ccd_pixel
         #self.parent.ui.line_pupil_diam.setText('%2.2f'%(self.iterative_size ) )
@@ -1069,6 +1073,14 @@ class NextwaveOffline():
         self.iterative_max_pixels = self.iterative_max/2.0 * 1000 / self.parent.ccd_pixel
 
         self.offline_startbox()
+
+        if self.skip_enlarge:
+            # No growing in steps: straight to the max pupil. (The box shrinking is a separate step, after this.)
+            self.offline_reset(self.iterative_max)
+            self.signals.pupil_diam_changed.emit( self.iterative_size / self.parent.pupil_mag )
+            print("Frame %02d/%02d; %04d boxes. Pupil: %02.2f (enlarge steps skipped)"%(self.offline_curr, self.max_frame,
+                                                                                        self.parent.num_boxes, self.iterative_size ),flush=True)
+            return
 
         #self.engine.offline.iterative_max_pixels = float(self.it_stop.text())/2.0 * 1000 / self.engine.ccd_pixel
         while self.iterative_size_pixels < self.iterative_max_pixels:

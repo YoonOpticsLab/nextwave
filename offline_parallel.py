@@ -62,6 +62,7 @@ class FrameProcessor:
                 offline.it_step = cfg['it_step']
                 offline.it_stop = cfg['it_stop']
                 offline.it_stop_dirty = cfg['it_stop_dirty']
+                offline.skip_enlarge = cfg['skip_enlarge']
                 offline.center_dirty = center_dirty
 
                 # Only this frame is needed
@@ -115,6 +116,7 @@ def make_config(engine):
         json_data=ui.json_data,
         xml_values={name: child["value"] for name, child in ui.params_xml_state["children"].items()},
         it_start=offline.it_start, it_step=offline.it_step, it_stop=offline.it_stop, it_stop_dirty=offline.it_stop_dirty,
+        skip_enlarge=offline.skip_enlarge,
         cx=engine.cx, cy=engine.cy,
         n_frames=offline.max_frame)
 
