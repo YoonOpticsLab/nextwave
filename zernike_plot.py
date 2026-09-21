@@ -16,8 +16,9 @@ A thin dashed black vertical line marks every flash (the frames with FLAGS 1; a 
 Columns of the CSV are counted from 1, as in a spreadsheet: time is column 4, FLAGS column 9, Z1 column 10, so Z4 is column 13.
 Frames with no result (flashes, dark frames, the empty rows before the movie) are gaps.
 
-If there is a protocol.txt in the directory with the CSVs (or the one above it), it is plotted first, on top, at half the height of the others: the
-stimulus demand (D) at each step of the trial, as a heavy dot and a line at each step's level (see read_protocol).
+If there is a protocol.txt in the directory with the CSVs (or the one above it), it is plotted first, on top (PROTOCOL_HEIGHT times the height of the others): the
+stimulus demand (D) at each step of the trial, as a gray line at each step's level with gray shading down to zero (see
+read_protocol).
 
 The figure is made without pyplot, so this is safe to call inside the app.
 """
@@ -40,6 +41,8 @@ MERGE_GAP = 2 # Flash frames this close together (or closer) are one flash
 DEFAULT_COLUMN = 13 # Z4
 DEFAULT_YLIM = (-1.0, 1.0)
 PROTOCOL_FILE = "protocol.txt" # In the directory with the CSVs (see read_protocol)
+PROTOCOL_HEIGHT = 0.25 # The protocol subplot's height, relative to each of the others
+PROTOCOL_LINEWIDTH = 3.0
 NO_DATA = 99 # In the protocol: no demand for that step
 
 
@@ -172,7 +175,7 @@ def make_summary_plot(csv_paths, out_png, column=DEFAULT_COLUMN, ylim=DEFAULT_YL
     have_protocol = protocol is not None and bounds is not None
 
     n_rows = len(conditions) + (1 if have_protocol else 0)
-    heights = ([0.5] if have_protocol else []) + [1.0] * len(conditions) # The protocol is half the height of the others
+    heights = ([PROTOCOL_HEIGHT] if have_protocol else []) + [1.0] * len(conditions)
     size = (11, 3.4 * sum(heights))
     if show:
         import matplotlib.pyplot as plt
@@ -195,15 +198,16 @@ def make_summary_plot(csv_paths, out_png, column=DEFAULT_COLUMN, ylim=DEFAULT_YL
     if have_protocol:
         end = max(np.nanmax(times) for c in data.values() for number, times, values in c)
         starts = np.concatenate([[0.0], bounds]) # Each step begins at a flash
-        ax_protocol.step(np.append(starts, end), np.append(protocol, protocol[-1]), where="post", color="black", linewidth=1.5)
-        ax_protocol.plot(starts, protocol, "o", color="black", markersize=8) # (NaN: no dot, and no line)
+        x, y = np.append(starts, end), np.append(protocol, protocol[-1])
+        ax_protocol.fill_between(x, y, 0, step="post", color="gray", alpha=0.45, linewidth=0) # Filled in to the y origin (NaN: nothing)
+        ax_protocol.step(x, y, where="post", color="gray", linewidth=PROTOCOL_LINEWIDTH)
         for t in bounds:
             ax_protocol.axvline(t, color="black", linestyle="--", linewidth=0.5)
         ax_protocol.set_title("protocol")
         ax_protocol.set_ylabel("Demand (D)")
         top = np.nanmax(protocol) if np.any(~np.isnan(protocol)) else 1.0
         low = np.nanmin(protocol) if np.any(~np.isnan(protocol)) else 0.0
-        ax_protocol.set_ylim(low - 0.5, top + 0.5)
+        ax_protocol.set_ylim(min(low, 0.0) - 0.25, max(top, 0.0) + 0.5)
         ax_protocol.grid(alpha=0.3)
 
     for ax, (condition, movies) in zip(zaxes, conditions):
