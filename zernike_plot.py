@@ -16,6 +16,9 @@ A thin dashed black vertical line marks every flash (the frames with FLAGS 1; a 
 Columns of the CSV are counted from 1, as in a spreadsheet: time is column 4, FLAGS column 9, Z1 column 10, so Z4 is column 13.
 Frames with no result (flashes, dark frames, the empty rows before the movie) are gaps.
 
+If there is a protocol.txt in the directory with the CSVs (or the one above it), it is plotted first, on top, at half the height of the others: the
+stimulus demand (D) at each step of the trial, as a heavy dot and a line at each step's level (see read_protocol).
+
 The figure is made without pyplot, so this is safe to call inside the app.
 """
 import os
@@ -26,6 +29,8 @@ from collections import defaultdict
 
 import numpy as np
 
+from nextwave_log import log
+
 TIME_COLUMN = 4
 FLAGS_COLUMN = 9
 Z1_COLUMN = 10
@@ -34,6 +39,8 @@ ORDER = ('native', 'correct', 'double', 'reverse') # Top to bottom (a condition 
 MERGE_GAP = 2 # Flash frames this close together (or closer) are one flash
 DEFAULT_COLUMN = 13 # Z4
 DEFAULT_YLIM = (-1.0, 1.0)
+PROTOCOL_FILE = "protocol.txt" # In the directory with the CSVs (see read_protocol)
+NO_DATA = 99 # In the protocol: no demand for that step
 
 
 def read_csv(path, column=DEFAULT_COLUMN):
@@ -107,33 +114,101 @@ def condition_order(item):
     return next((n for n, o in enumerate(ORDER) if name.startswith(o)), len(ORDER)), name
 
 
-def make_summary_plot(csv_paths, out_png, column=DEFAULT_COLUMN, ylim=DEFAULT_YLIM, mean=False, show=False):
+def read_protocol(path):
+    """ The stimulus demand (D) of each step of the trial, from protocol.txt: numbers separated by commas (or spaces or new
+        lines), e.g. "99,0,1,2,3,2,1,0". The first is what comes before the first flash, the next what follows the first flash,
+        and so on: one more value than there are flashes. 99 means no demand there (NaN: nothing is plotted). """
+    with open(path) as f:
+        words = [w for w in re.split(r"[,;\s]+", f.read().strip()) if w]
+    values = np.array([float(w) for w in words])
+    values[values == NO_DATA] = np.nan
+    return values
+
+
+def protocol_boundaries(n_steps, event_lists):
+    """ The times the protocol's steps change: the flash times, as the median over the runs of each flash's time. The runs
+        that have exactly n_steps - 1 flashes are used; None if there aren't any (so the steps can't be matched up). """
+    good = [e for e in event_lists if len(e) == n_steps - 1]
+    if not good:
+        return None
+    return np.median(np.array(good, dtype=float), axis=0)
+
+
+def make_summary_plot(csv_paths, out_png, column=DEFAULT_COLUMN, ylim=DEFAULT_YLIM, mean=False, show=False, protocol_file=None):
     """ Make the summary plot (see the top of this file) from the CSVs in csv_paths, and save it as out_png.
         Returns a list of (condition, [run numbers]) that were plotted; empty (and nothing is saved) if no CSV was named
-        like native1.csv. show: also open a window (for scripts; needs pyplot). """
+        like native1.csv. show: also open a window (for scripts; needs pyplot). protocol_file: the protocol to plot on top
+        (default: protocol.txt in the CSVs' directory, or the one above it, if there is one). """
     groups = group_by_condition(csv_paths)
     if not groups:
         return []
     conditions = sorted(groups.items(), key=condition_order)
-    size = (11, 3.4 * len(conditions))
+
+    # Read everything first: the protocol's steps change at the flashes, which are found in the runs
+    data = {} # condition -> [(number, times, values)]
+    events = {} # condition -> [flash times of each run]
+    for condition, movies in conditions:
+        data[condition], events[condition] = [], []
+        for number, path in sorted(movies.items()):
+            times, values, flash_times = read_csv(path, column)
+            data[condition].append((number, times, values))
+            frame_time = np.nanmedian(np.diff(times)) if len(times) > 1 else 0.01
+            events[condition].append(flash_events(flash_times, frame_time))
+
+    protocol = bounds = None
+    if protocol_file is None: # In the CSVs' directory, or else the one above it (where the movies are, for the app's batch)
+        csv_dir = os.path.dirname(os.path.abspath(csv_paths[0]))
+        candidates = [os.path.join(csv_dir, PROTOCOL_FILE), os.path.join(os.path.dirname(csv_dir), PROTOCOL_FILE)]
+        protocol_file = next((c for c in candidates if os.path.exists(c)), candidates[0])
+    if os.path.exists(protocol_file):
+        try:
+            protocol = read_protocol(protocol_file)
+            bounds = protocol_boundaries(len(protocol), [e for c in events.values() for e in c])
+            if bounds is None:
+                log.warning("%s has %d values, so %d flashes are expected, but no run has that many: the protocol isn't plotted"
+                            % (protocol_file, len(protocol), len(protocol) - 1))
+        except Exception:
+            log.exception("Couldn't read " + protocol_file)
+    have_protocol = protocol is not None and bounds is not None
+
+    n_rows = len(conditions) + (1 if have_protocol else 0)
+    heights = ([0.5] if have_protocol else []) + [1.0] * len(conditions) # The protocol is half the height of the others
+    size = (11, 3.4 * sum(heights))
     if show:
         import matplotlib.pyplot as plt
-        fig, axes = plt.subplots(len(conditions), 1, figsize=size, sharex=True, sharey=True, squeeze=False)
+        fig, axes = plt.subplots(n_rows, 1, figsize=size, sharex=True, squeeze=False, gridspec_kw=dict(height_ratios=heights))
     else:
         from matplotlib.figure import Figure
         from matplotlib.backends.backend_agg import FigureCanvasAgg
         fig = Figure(figsize=size)
         FigureCanvasAgg(fig)
-        axes = fig.subplots(len(conditions), 1, sharex=True, sharey=True, squeeze=False)
+        axes = fig.subplots(n_rows, 1, sharex=True, squeeze=False, gridspec_kw=dict(height_ratios=heights))
     ylabel = "Z%d (um)" % (column - Z1_COLUMN + 1)
+    axes = list(axes[:, 0])
+    if have_protocol:
+        ax_protocol, zaxes = axes[0], axes[1:]
+    else:
+        ax_protocol, zaxes = None, axes
+    for ax in zaxes[1:]:
+        ax.sharey(zaxes[0]) # (Not the protocol's: it isn't in um)
 
-    for ax, (condition, movies) in zip(axes[:, 0], conditions):
-        runs, flashes = [], []
-        for number, path in sorted(movies.items()):
-            times, values, flash_times = read_csv(path, column)
-            runs.append((number, times, values))
-            frame_time = np.nanmedian(np.diff(times)) if len(times) > 1 else 0.01
-            flashes += flash_events(flash_times, frame_time)
+    if have_protocol:
+        end = max(np.nanmax(times) for c in data.values() for number, times, values in c)
+        starts = np.concatenate([[0.0], bounds]) # Each step begins at a flash
+        ax_protocol.step(np.append(starts, end), np.append(protocol, protocol[-1]), where="post", color="black", linewidth=1.5)
+        ax_protocol.plot(starts, protocol, "o", color="black", markersize=8) # (NaN: no dot, and no line)
+        for t in bounds:
+            ax_protocol.axvline(t, color="black", linestyle="--", linewidth=0.5)
+        ax_protocol.set_title("protocol")
+        ax_protocol.set_ylabel("Demand (D)")
+        top = np.nanmax(protocol) if np.any(~np.isnan(protocol)) else 1.0
+        low = np.nanmin(protocol) if np.any(~np.isnan(protocol)) else 0.0
+        ax_protocol.set_ylim(low - 0.5, top + 0.5)
+        ax_protocol.grid(alpha=0.3)
+
+    for ax, (condition, movies) in zip(zaxes, conditions):
+        runs = data[condition]
+        flashes = [t for e in events[condition] for t in e]
         if mean:
             t, m, sd, count = mean_and_sd([(times, values) for number, times, values in runs])
             ax.fill_between(t, m - sd, m + sd, color="black", alpha=0.2, linewidth=0, label="± 1 SD")
@@ -149,8 +224,8 @@ def make_summary_plot(csv_paths, out_png, column=DEFAULT_COLUMN, ylim=DEFAULT_YL
         ax.set_ylabel(ylabel)
         ax.legend(title=None if mean else "movie", loc="upper right")
         ax.grid(alpha=0.3)
-    axes[-1, 0].set_ylim(*ylim) # (All the subplots share it)
-    axes[-1, 0].set_xlabel("time (s)")
+    zaxes[0].set_ylim(*ylim) # (All the Zernike subplots share it)
+    axes[-1].set_xlabel("time (s)")
     fig.tight_layout()
     os.makedirs(os.path.dirname(os.path.abspath(out_png)), exist_ok=True)
     fig.savefig(out_png, dpi=110)
