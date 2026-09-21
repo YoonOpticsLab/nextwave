@@ -36,9 +36,9 @@ ui_normalize_max = 50
 ITERATIVE_PUPIL_START=2.65 # TODO: Maybe should determine based on magnification, etc., pupil for minimum # of boxes
 ITERATIVE_PUPIL_STEP_SIZE=0.25
 ITERATIVE_PUPIL_STOP=8.0
-ITERATIVE_AUTOCENTER=0 # 1: find the pupil center in each frame (and snap it to a search box). 0: don't. Use the current center (the UI's, initially cx,cy in config.json). Also then the max pupil isn't estimated: it's ITERATIVE_PUPIL_STOP_FORCE (or ITERATIVE_PUPIL_STOP). Tip/tilt still nudges the center while enlarging: see ITERATIVE_FIXED_CENTER
+ITERATIVE_AUTOCENTER=1 # 1: find the pupil center in each frame (and snap it to a search box). 0: don't. Use the current center (the UI's, initially cx,cy in config.json). Also then the max pupil isn't estimated: it's ITERATIVE_PUPIL_STOP_FORCE (or ITERATIVE_PUPIL_STOP). Tip/tilt still nudges the center while enlarging: see ITERATIVE_FIXED_CENTER
 ITERATIVE_FIXED_CENTER=0 # 1: use the same pupil center for every frame: the UI's current center (initially cx,cy in config.json). Don't find the center in each frame, and don't move it with tip/tilt while enlarging. 0: center each frame
-ITERATIVE_SKIP_ENLARGE=0 # 1: skip the "enlarge pupil" steps (growing from ITERATIVE_PUPIL_START by ITERATIVE_PUPIL_STEP_SIZE). Start at the max pupil (see below), then just shrink the search boxes. 0: enlarge in steps
+ITERATIVE_SKIP_ENLARGE=1 # 1: skip the "enlarge pupil" steps (growing from ITERATIVE_PUPIL_START by ITERATIVE_PUPIL_STEP_SIZE). Start at the max pupil (see below), then just shrink the search boxes. 0: enlarge in steps
 ITERATIVE_PUPIL_STOP_FORCE=4.0 # mm. If >0, always use this as the max pupil (as if typed into the UI's max box) instead of estimating it from each image. 0=estimate
 
 GAUSS_SD=3
@@ -51,14 +51,19 @@ threshold_max_minus_mean=-10 # If box max - mean is less than this, make box NaN
 
 scan_frame_to_ecc={'H': np.linspace(-35,35,37),'V': np.linspace(-20,20,27),'D': np.linspace(-28.28,28.28,27),'D2': np.linspace(-28.28,28.28,27)}
   
-SATURATION_MINIMUM=255
+SATURATION_MINIMUM=0 # When loading a movie, pixels at or above this value are set to 0 (so saturated pixels don't count). 0 = leave them as they are. (Was 255.)
   
 #Centering method:
 # "estimate_boxes" (use default positions and find best circle to optimize box population)
 # "convex_hull"    (gaussian, threshold (otsu's method), convex hull, fit circle)
 # "convex_hull_robust"    + outlier detection
 # "convex_hull_robust_dynamic" : dynamic threshold based on components(spots), not OTSU
-centering_method="convex_hull_robust_dynamic"
+# "occupancy_match" : match which lenslet boxes have a spot to a reference shape made from the movie's frames (see occupancy.py).
+#                     Tolerates obstructed parts of the pupil. The center is where the crosshair is (on the frame on screen) when a run
+#                     starts. Doesn't estimate the max pupil: it is ITERATIVE_PUPIL_STOP_FORCE (or ITERATIVE_PUPIL_STOP).
+#                     Needs ITERATIVE_AUTOCENTER=1. Optional settings: OCCUPANCY_MAX_SHIFT (4), OCCUPANCY_MISSING_PENALTY (0.25),
+#                     OCCUPANCY_EDGE_REWARD (0.3), OCCUPANCY_OUTSIDE_PENALTY (1.0), OCCUPANCY_MIN_SITES (12)
+centering_method="occupancy_match"
 CENTERING_GAUSS_SD=1
 NONSAT_MAX_OTSU=100
 centering_convex_robust_nboots=100
@@ -68,7 +73,7 @@ centering_dynamic_ncomponents=600 # TODO: Better would to base on # of spots/len
 centering_dynamic_area=3500 # TODO: Better would be based on image size
 
 # AUTO Rotation detection and correction
-do_auto_rotation_fix=True
+do_auto_rotation_fix=False # (The "Rotate this frame" button in the offline panel still works)
 rotation_fix_angles=np.linspace(-6,6,100)
 rotation_fix_min_peak_ratio=3.0
 
@@ -92,6 +97,9 @@ FLASH_RATIO_THRESHOLD=4.0 # A frame whose mean brightness is more than this many
 FLASH_PEAK_RATIO_THRESHOLD=20.0 # A run of flash frames only counts as a flash if its brightest frame is more than this many times the movie's median. Keeps a slow, moderate brightening (a few times the median, for many frames) from being taken for one. Real flashes peak at 60x or more. 0 = any run
 DARK_RATIO_THRESHOLD=0.25 # A frame whose mean brightness is less than this fraction of the movie's median is much darker than usual (eye closed, lights off): Zernikes/centroids saved as NaN, but not flagged. 0 = off
 DARK_BOX_FRACTION_THRESHOLD=0.5 # If more than this fraction of a frame's boxes found no spot, its Zernikes (and the spot positions estimated from them) are saved as NaN. Not flagged. The measured centroids are kept. 0 = off
+
+FRAME_RATE=100.0 # Frames per second. The exported CSV's "time" column is (exported frame number - 1) / FRAME_RATE
+TRIM_TO_FIRST_FLASH=300 # CSV export: start this many frames before the movie's first flash (300 frames = 3 s at 100 FPS), and leave out the frames before that. The first exported frame is frame_num 1, time 0. 0 = export every frame. (A movie with no flash is exported whole.)
 
 MAX_ZERNIKES=65 # Absolute max for 10th order: np.sum( np.arange(10+1+1))-1 .first of 11th order is np.sum(np.arange(12)) )
 MAX_ORDER=10

@@ -65,6 +65,7 @@ class FrameProcessor:
                 offline.skip_enlarge = cfg['skip_enlarge']
                 offline.fixed_center = cfg['fixed_center']
                 offline.autocenter_enabled = cfg['autocenter_enabled']
+                offline.occupancy_template = cfg['occupancy_template']
                 offline.center_dirty = center_dirty
 
                 # Only this frame is needed
@@ -121,6 +122,7 @@ def make_config(engine):
         xml_values={name: child["value"] for name, child in ui.params_xml_state["children"].items()},
         it_start=offline.it_start, it_step=offline.it_step, it_stop=offline.it_stop, it_stop_dirty=offline.it_stop_dirty,
         skip_enlarge=offline.skip_enlarge, fixed_center=offline.fixed_center, autocenter_enabled=offline.autocenter_enabled,
+        occupancy_template=offline.occupancy_template,
         cx=engine.cx, cy=engine.cy,
         n_frames=offline.max_frame)
 
@@ -169,11 +171,11 @@ def run_parallel(engine, n_workers, progress=None, cancelled=None):
         progress(n_done) is called as frames complete. cancelled() is polled; return value is False if it cancelled us.
         Meant to run in a non-UI thread. """
     offline = engine.offline
+    offline.update_frame_classes() # (Needs the whole movie, so it's done here, not in the workers)
+    offline.prepare_occupancy_template() # (Likewise; only for centering_method 'occupancy_match')
     cfg = make_config(engine)
     first_center_dirty = offline.center_dirty # A user-set center applies to the first frame only, as in the serial loop
     offline.center_dirty = False
-
-    offline.update_frame_classes() # (Needs the whole movie, so it's done here, not in the workers)
 
     n_done = 0
     if progress:

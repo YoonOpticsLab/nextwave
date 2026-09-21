@@ -26,7 +26,7 @@ from nextwave_sockets import NextwaveSocketComm
 import defaults
 import offline_parallel
 
-from nextwave_widgets import ZernikeDialog, BoxInfoDialog, ActuatorPlot, MyBarWidget, OfflineDialog, FrameListModel
+from nextwave_widgets import ZernikeDialog, BoxInfoDialog, ActuatorPlot, MyBarWidget, OfflineDialog, FrameGalleryModel, FrameSlider
 
 from nextwave_build import build_message
 
@@ -83,6 +83,7 @@ class OfflineWorker(QtCore.QObject):
     def do_auto_serial(self):
         """ One frame at a time, in this process. Returns False if cancelled. """
         self.engine.offline.update_frame_classes()
+        self.engine.offline.prepare_occupancy_template()
         for nframe in np.arange(self.engine.offline.max_frame):
             self.progress.emit( nframe )
             if self.cancel:
@@ -91,6 +92,25 @@ class OfflineWorker(QtCore.QObject):
             self.engine.offline.center_dirty=False # Only true for first frame
         return True
         
+class LoadWorker(QtCore.QObject):
+    """ Runs the slow part of loading a movie, func(files), in a QThread. It must not touch any widgets. Emits done, or failed
+        with the traceback text. """
+    done = QtCore.pyqtSignal()
+    failed = QtCore.pyqtSignal(str)
+
+    def __init__(self, func, files):
+        super().__init__(parent=None)
+        self.func = func
+        self.files = files
+
+    def run(self):
+        try:
+            self.func(self.files)
+        except Exception:
+            self.failed.emit(traceback.format_exc())
+            return
+        self.done.emit()
+
 class NextWaveMainWindow(QMainWindow):
  def __init__(self):
     super().__init__(parent=None)
@@ -128,8 +148,12 @@ class NextWaveMainWindow(QMainWindow):
 
     self.image_pixels = np.zeros( (10,10)) # Display copy of current image, updated by offline frame_loaded signal
 
-    self.load_dialog = None # Progress dialog, while loading a movie
-    self.load_paused_timers = []
+    self.loading = False # A movie is being loaded in a worker thread (see start_loading)
+    self.load_kind = 'movie' # or 'background'
+    self.load_thread = None
+    self.load_worker = None
+    self.load_saved_enabled = {}
+    self.load_button_text = ""
 
     self.worker = OfflineWorker(self)
 
@@ -211,17 +235,7 @@ class NextWaveMainWindow(QMainWindow):
         self.save_setting("ui/folder",dirname)
         
         self.btn_off.setText(thedir[0][0])
-        self.start_load_progress("Loading movie")
-        try:
-            self.engine.offline.load_offline(thedir)
-        finally:
-            self.end_load_progress()
-        self.engine.mode_offline = True
-        self.chkOfflineAlgorithm.setChecked(True)
-        self.engine.offline.center_dirty = False
-        
-        self.offline_move(0) # Updates UI, etc.
-        self.btn_off_back.setText("Load Offline Background") # Reset this
+        self.start_loading('movie', self.engine.offline.load_offline_data, thedir)
 
  def offline_finished(self):
     self.worker.running = False
@@ -245,45 +259,86 @@ class NextWaveMainWindow(QMainWindow):
     signals.box_size_changed.connect(self.show_box_size)
     signals.frame_loaded.connect(self.show_frame)
     signals.load_progress.connect(self.show_load_progress)
+    signals.first_frame.connect(self.show_first_frame)
 
- # Loading a movie runs in this (UI) thread. So it can't block the event loop silently: show a progress dialog,
- # and let Qt repaint each time the loader reports. The loader only emits load_progress; this is all display.
- def start_load_progress(self, title):
-    self.load_dialog = QtWidgets.QProgressDialog(title, "", 0, 0, self)
-    dlg = self.load_dialog
-    dlg.setCancelButton(None) # Can't stop a load half way
-    dlg.setWindowTitle(title)
-    dlg.setWindowModality(Qt.WindowModal) # Nothing else to click meanwhile
-    dlg.setMinimumWidth(420)
-    dlg.setMinimumDuration(0)
-    dlg.setAutoClose(False)
-    dlg.setAutoReset(False)
-    dlg.show()
+ # Loading a movie: the slow part (reading and checking the frames, and the saved results) runs in a worker thread, so the window
+ # stays alive. Only the quick part, which makes widgets, is done here afterwards (see NextwaveOffline.finish_load).
+ # The worker only emits load_progress; it's shown in the progress bar, and as the load button's text. The offline controls
+ # are off until it's done, since they'd use a movie that's half loaded.
+ def set_offline_controls_enabled(self, enabled):
+    if not enabled:
+        widgets = self.ops_offline.findChildren(QtWidgets.QAbstractButton) + [self.frame_slider, self.frame_gallery]
+        self.load_saved_enabled = {w: w.isEnabled() for w in widgets}
+        for w in widgets:
+            w.setEnabled(False)
+    else:
+        for w, was in self.load_saved_enabled.items():
+            w.setEnabled(was)
+        self.load_saved_enabled = {}
 
-    # Don't let the refresh timers run on a half-loaded movie
-    self.load_paused_timers = [t for t in (self.updater, self.updater_dm) if t.isActive()]
-    for timer in self.load_paused_timers:
-        timer.stop()
-    QApplication.processEvents()
+ def start_loading(self, kind, func, files):
+    if self.loading or self.worker.running: # (The buttons are off then, but be sure)
+        return
+    self.loading = True
+    self.load_kind = kind
+    button = self.btn_off if kind == 'movie' else self.btn_off_back
+    self.load_button_text = button.text()
+    self.set_offline_controls_enabled(False)
+    self.progress_bar.setRange(0, 0) # Busy, until the first count comes
 
- def end_load_progress(self):
-    for timer in self.load_paused_timers:
-        timer.start()
-    self.load_paused_timers = []
-    if self.load_dialog is not None:
-        self.load_dialog.close()
-        self.load_dialog.deleteLater()
-        self.load_dialog = None
+    self.load_thread = QtCore.QThread()
+    self.load_worker = LoadWorker(func, files)
+    self.load_worker.moveToThread(self.load_thread)
+    self.load_thread.started.connect(self.load_worker.run)
+    self.load_worker.done.connect(self.offline_load_done)
+    self.load_worker.failed.connect(self.offline_load_failed)
+    self.load_worker.done.connect(self.load_thread.quit)
+    self.load_worker.failed.connect(self.load_thread.quit)
+    self.load_thread.start()
+
+ def end_loading(self):
+    self.loading = False
+    self.set_offline_controls_enabled(True)
+    (self.btn_off if self.load_kind == 'movie' else self.btn_off_back).setText(self.load_button_text)
+    self.progress_bar.setRange(0, 100)
+    self.progress_bar.setValue(0)
+
+ def offline_load_done(self):
+    self.end_loading()
+    offline = self.engine.offline
+    if self.load_kind == 'movie':
+        offline.finish_load(restore=True) # (Quick, and makes widgets: so here, not in the worker)
+        self.engine.mode_offline = True
+        self.chkOfflineAlgorithm.setChecked(True)
+        offline.center_dirty = False
+
+        self.offline_move(0) # Updates UI, etc.
+        self.btn_off_back.setText("Load Offline Background") # Reset this
+    else:
+        offline.finish_load(restore=False)
+        self.offline_move(0)
+
+ def offline_load_failed(self, error_text):
+    self.end_loading()
+    print(error_text, flush=True)
+    QMessageBox.warning(self, "Couldn't load", "Loading failed:\n\n" + error_text.strip().splitlines()[-1])
+
+ @QtCore.pyqtSlot(object)
+ def show_first_frame(self, image):
+    """ Show the first frame of the movie being loaded straight away (the rest of it is still coming) """
+    if not self.loading or self.load_kind != 'movie':
+        return
+    self.image_pixels = image
+    self.engine.comm.write_image(np.array(image.shape, dtype='uint16'), image)
 
  @QtCore.pyqtSlot(str, int, int)
  def show_load_progress(self, stage, done, total):
-    dlg = self.load_dialog
-    if dlg is None: # Not loading through the UI
+    if not self.loading: # (Not loading through the UI)
         return
-    dlg.setLabelText(stage + ("     %d / %d" % (min(done, total), total) if total > 0 else " ..."))
-    dlg.setMaximum(total) # 0: busy indicator, for the steps with no count
-    dlg.setValue(min(done, total))
-    QApplication.processEvents() # (setValue only does this when the value changes)
+    self.progress_bar.setRange(0, total) # 0: busy indicator, for the steps with no count
+    self.progress_bar.setValue(min(done, total))
+    button = self.btn_off if self.load_kind == 'movie' else self.btn_off_back
+    button.setText(stage + ("   %d / %d" % (min(done, total), total) if total > 0 else " ..."))
 
  # These only display what the algorithm reports. They must not change algorithm state.
  @QtCore.pyqtSlot(float)
@@ -342,11 +397,7 @@ class NextWaveMainWindow(QMainWindow):
         self.save_setting("ui/folder_background",dirname)
 
         self.btn_off_back.setText(thedir[0][0])
-        self.start_load_progress("Loading background")
-        try:
-            self.engine.offline.load_offline_background(thedir)
-        finally:
-            self.end_load_progress()
+        self.start_loading('background', self.engine.offline.load_offline_background_data, thedir)
 
  def offline_config(self):
     ffilt='XML config files (*.xml);; JSON config files (*.json);; All files (*.*)'
@@ -929,8 +980,16 @@ class NextWaveMainWindow(QMainWindow):
 
   self.lbl_frame_curr.setText("Frame %d/%d"%(offline.offline_curr+1,self.offline_nframes) )
 
+  self.frame_slider.blockSignals(True) # (It's what moved us if we were called by it)
+  self.frame_slider.setValue(offline.offline_curr+1)
+  self.frame_slider.blockSignals(False)
+
   if restore_mode:
    self.engine.offline.offline_navigate()
+
+ def offline_goto(self, frame_number):
+  """ Show the frame with this number, as displayed on screen (1..N), with its saved results if there are any. """
+  self.offline_move((int(frame_number) - 1) - self.engine.offline.offline_curr, True)
 
  def offline_goodbox(self):
   return
@@ -1310,6 +1369,11 @@ class NextWaveMainWindow(QMainWindow):
      self.btn_off_back.clicked.connect(self.offline_load_background)
      layout1.addWidget(self.btn_off_back, 2,0)
 
+     # Choose the frame to show. Above the arrows, spanning their three columns
+     self.frame_slider = FrameSlider()
+     self.frame_slider.valueChanged.connect(self.offline_goto)
+     layout1.addWidget(self.frame_slider, 2,1, 1,3)
+
      # OFfline iteration offline_next prev.
      btn = QPushButton("\u2190") # left arrow
      layout1.addWidget(btn,3,1)
@@ -1332,7 +1396,7 @@ class NextWaveMainWindow(QMainWindow):
     # btn.clicked.connect(lambda: self.engine.offline.offline_rotation_fix() )
 
      btn = QPushButton("Rotate this frame")
-     layout1.addWidget(btn,1,2)
+     layout1.addWidget(btn,6,2)
      btn.clicked.connect(lambda: self.engine.offline.offline_rotation_fix() )
 
      btn = QPushButton("Process this frame")
@@ -1352,23 +1416,23 @@ class NextWaveMainWindow(QMainWindow):
      layout1.addWidget(btn,6,0)
      btn.clicked.connect(lambda: self.engine.offline.offline_auto_dumb() )
 
-     # Offline frame list. A virtual table (thumbnails are made as rows are shown), since movies can have thousands of frames
-     self.frame_model = FrameListModel(self)
-     self.frame_table = QtWidgets.QTableView()
-     self.frame_table.setModel(self.frame_model)
-     self.frame_table.horizontalHeader().hide()
-     self.frame_table.verticalHeader().hide()
-     self.frame_table.verticalHeader().setSectionResizeMode(QtWidgets.QHeaderView.Fixed) # Rows are all the same height (fast)
-     self.frame_table.setIconSize(QtCore.QSize(FrameListModel.THUMB_SIZE, FrameListModel.THUMB_SIZE))
-     self.frame_table.setColumnWidth(0, 80)
-     self.frame_table.setColumnWidth(1, 40)
-     self.frame_table.setColumnWidth(2, FrameListModel.THUMB_SIZE + 10)
-     self.frame_table.setShowGrid(False)
-     self.frame_table.setSelectionMode(QtWidgets.QAbstractItemView.NoSelection)
-     self.frame_table.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
-     self.frame_table.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
+     # Offline frame gallery: small thumbnails, wrapping across the panel's width. Virtual (a thumbnail is made when it is shown),
+     # since movies can have thousands of frames
+     self.frame_model = FrameGalleryModel(self)
+     self.frame_gallery = QtWidgets.QListView()
+     self.frame_gallery.setModel(self.frame_model)
+     self.frame_gallery.setViewMode(QtWidgets.QListView.IconMode)
+     self.frame_gallery.setResizeMode(QtWidgets.QListView.Adjust) # Re-wrap when the width changes
+     self.frame_gallery.setMovement(QtWidgets.QListView.Static)
+     self.frame_gallery.setUniformItemSizes(True) # (All the same size: much faster with thousands)
+     self.frame_gallery.setIconSize(QtCore.QSize(FrameGalleryModel.THUMB_SIZE, FrameGalleryModel.THUMB_SIZE))
+     self.frame_gallery.setSpacing(3)
+     self.frame_gallery.setSelectionMode(QtWidgets.QAbstractItemView.NoSelection)
+     self.frame_gallery.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
+     self.frame_gallery.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
+     self.frame_gallery.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
 
-     layout1.addWidget(self.frame_table,7,0) #,-1,-1)
+     layout1.addWidget(self.frame_gallery,7,0, 1,4) # Across all the columns of the panel
 
      self.chkOfflineAlgorithm = QCheckBox("Use offline algorithm")
      self.chkOfflineAlgorithm.stateChanged.connect(self.offline_algorithm)
@@ -1676,8 +1740,10 @@ class NextWaveMainWindow(QMainWindow):
   # Replaces the whole list. (Thumbnails are made later, as rows are shown, so this is quick.)
   self.engine.offline.signals.report("Building the frame list")
   self.frame_model.set_movie(buf_movie)
-  self.frame_table.verticalHeader().setDefaultSectionSize(self.frame_model.row_height)
-  self.frame_table.scrollToTop()
+  self.frame_gallery.setIconSize(QtCore.QSize(*self.frame_model.thumb_size))
+  self.frame_gallery.scrollToTop()
+  self.frame_slider.set_frames(self.offline_nframes)
+  self.frame_slider.set_flash_frames(self.engine.offline.flash_frames) # (Found while loading; empty if detection is off)
 
   self.engine.offline.offline_curr=0
   self.engine.offline_frame(self.engine.offline.offline_curr)

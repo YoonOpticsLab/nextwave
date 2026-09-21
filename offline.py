@@ -29,6 +29,7 @@ import extract_memory
 
 import zernike_functions
 import iterative
+import occupancy
 
 from nextwave_comm import NextwaveEngineComm
 import defaults
@@ -59,6 +60,7 @@ class OfflineSignals(QObject):
     box_size_changed = pyqtSignal(float)   # Box size (pixels)
     frame_loaded = pyqtSignal(object)      # Image (numpy array) of frame just loaded
     load_progress = pyqtSignal(str, int, int) # While loading a movie: what's being done, n done, n total (total 0: no count)
+    first_frame = pyqtSignal(object)       # The first frame of a movie being loaded (numpy array), as soon as it's read
 
     def __init__(self):
         super().__init__()
@@ -84,6 +86,7 @@ def limit_zernikes(zernikes):
 # Bits of a frame's FLAGS value (saved with the results, and a column of the exported CSV). 0: nothing to flag.
 FLAG_FLASH = 1 # The frame's mean brightness is over defaults.FLASH_RATIO_THRESHOLD times the movie's median: a flash
 # (Next flag: 2, then 4, ... so they can be combined)
+MAX_EXPORT_ZERNIKES = 65 # Zernike columns (Z1..) of the exported CSV
 
 def classify_frames(movie, flash_ratio, dark_ratio, peak_ratio=0):
     """ (flash frames, dark frames): sets of frame numbers, by mean brightness relative to the movie's median.
@@ -186,20 +189,23 @@ class info_saver():
 
         return data_record
 
-    def printable1(self,nframe):
+    def printable1(self,nframe,first_frame=0):
+        """ One line of the exported CSV. first_frame: the first frame exported (see export_all_zernikes): it is exported frame 1, time 0 """
         data_record=self.load1(nframe)
+        n_export = nframe - first_frame + 1 # 1-based, counting from the first frame exported
+        t_sec = (n_export-1) / float(getattr(defaults,'FRAME_RATE',100.0))
         if not data_record is None:
             try:
-                s=("%s,%s,%s,%0.2f,%0.3f,%d,%d,%d,")%(self.offline.sub_id,self.offline.scan_dir,self.offline.fnames[nframe],
+                s=("%s,%s,%s,%0.3f,%0.2f,%0.3f,%d,%d,%d,")%(self.offline.sub_id,self.offline.scan_dir,self.offline.fnames[nframe],t_sec,
                 defaults.scan_frame_to_ecc[self.offline.scan_dir][nframe],data_record['pupil_diam'],data_record['cx'],data_record['cy'],
                 data_record.get('flags',0))
             except: # without the sub_id params
-                s=("%s,%s,%d,%0.2f,%0.3f,%d,%d,%d,")%("","",nframe,0.0,data_record['pupil_diam'],data_record['cx'],data_record['cy'],
+                s=("%s,%s,%d,%0.3f,%0.2f,%0.3f,%d,%d,%d,")%("","",n_export,t_sec,0.0,data_record['pupil_diam'],data_record['cx'],data_record['cy'],
                 data_record.get('flags',0))
             for nz1,z1 in enumerate(limit_zernikes(data_record['zernikes'])): # (Also for results saved before this rule)
                 s += "%0.6f,"%(z1)
         else:
-            s='%d,'%nframe
+            s=',,%d,%0.3f,'%(n_export,t_sec) + ','*(5+MAX_EXPORT_ZERNIKES) # No data (e.g. padding before the movie starts): the rest empty
         return s
 
     def serialize(self):
@@ -255,6 +261,9 @@ class NextwaveOffline():
 
         # Write debug arrays (ims.npy, etc.) to the current directory. Off in the parallel workers, which would collide.
         self.debug_dumps = True
+
+        self._movie_for_ui = None # Set by the loaders: the movie for the frame list. See finish_load
+        self.occupancy_template = None # For centering_method 'occupancy_match': see prepare_occupancy_template
         
     def iterative_run(self, cx, cy, step):
         return
@@ -313,7 +322,84 @@ class NextwaveOffline():
             count = min(count, limit + 1) # (The read loop stops after frame index `limit`)
         return count
 
+    def _preview(self, frame):
+        """ Show the first frame as soon as it has been read, while the rest of the movie is still loading """
+        image = frame.copy()
+        if getattr(defaults, 'SATURATION_MINIMUM', 0) > 0:
+            image[image >= defaults.SATURATION_MINIMUM] = 0 # As it will be in the loaded movie
+        self.signals.first_frame.emit(image)
+
+    def _occupancy_params(self):
+        """ The occupancy matching's settings: the defaults in occupancy.py, unless nextwave_defaults.py sets them """
+        params = dict(occupancy.PARAMS)
+        for key, name in (('max_shift', 'OCCUPANCY_MAX_SHIFT'), ('missing_penalty', 'OCCUPANCY_MISSING_PENALTY'), ('edge_reward', 'OCCUPANCY_EDGE_REWARD'),
+                          ('outside_penalty', 'OCCUPANCY_OUTSIDE_PENALTY'), ('min_sites', 'OCCUPANCY_MIN_SITES')):
+            if hasattr(defaults, name):
+                params[key] = getattr(defaults, name)
+        return params
+
+    def prepare_occupancy_template(self):
+        """ For centering_method 'occupancy_match': make the reference shape from the loaded movie (see occupancy.py). The center
+            is where the crosshair is now, on the frame that's on screen. Does nothing for the other methods. Needs the whole
+            movie, so the main process does it (before a run), and the workers are given the result. """
+        if getattr(defaults, 'centering_method', '') != 'occupancy_match' or not hasattr(self.offline_movie, 'shape'):
+            return
+        params = self._occupancy_params()
+        skip = self.flash_frames | self.dark_frames
+        n = self.max_frame
+        sample = sorted({int(i) for i in np.linspace(0, n - 1, min(n, int(params['sample_frames'])))} - skip)
+        shown = self.offline_movie[self.offline_curr] if self.offline_curr not in skip else None
+        self.occupancy_template = occupancy.build_template([(i, self.offline_movie[i]) for i in sample], self.parent.lenslet_size_pixel,
+                                                           (self.parent.cx, self.parent.cy), shown, params)
+        t = self.occupancy_template
+        if t is None:
+            print("Occupancy template: no frame had enough spots", flush=True)
+        else:
+            print("Occupancy template: %d sites from %d frames; the center is site %s" % (len(t['sites']), t['n_frames'], t['center_site']), flush=True)
+
+    def occupancy_autocenter(self):
+        """ Find the pupil center of this frame by matching its box occupancy to the template """
+        params = self._occupancy_params()
+        pitch = self.parent.lenslet_size_pixel
+        if self.occupancy_template is None: # (Normally made before the run, in the main process.)
+            self.prepare_occupancy_template()
+        if self.occupancy_template is None: # Nothing to go on but this frame: its own shape, centered where the crosshair is
+            self.occupancy_template = occupancy.build_template([(self.offline_curr, self.im)], pitch, (self.parent.cx, self.parent.cy), self.im, params)
+        template = self.occupancy_template
+        if template is not None:
+            if self.offline_curr in self.flash_frames or self.offline_curr in self.dark_frames: # Nothing to judge from a flash or a dark frame
+                cx, cy = occupancy.template_center(template)
+                info = 'flash or dark frame: center unmoved'
+            else:
+                cx, cy, info = occupancy.find_center(self.im, template, params)
+                info = "shift %s, %d spots on sites, %d outside the template" % (info['shift'], info['matched'], info['outside'])
+            self.parent.cx, self.parent.cy = cx, cy
+            print("Occupancy center: (%.1f, %.1f); %s" % (cx, cy, info), flush=True)
+        self.cx_best, self.cy_best = self.parent.cx, self.parent.cy
+        # The max pupil isn't estimated by this method: it's the set one (as it is when the center is set by the user)
+        self.iterative_max = self.it_stop * self.parent.pupil_mag
+        self.iterative_max_pixels = self.iterative_max/2.0 * 1000 / self.parent.ccd_pixel
+
+    def _add_to_ui(self, movie):
+        """ The loaders say which movie the frame list should show; finish_load (on the UI thread) does it """
+        self._movie_for_ui = movie
+
+    def finish_load(self, restore=True):
+        """ The quick part of loading a movie, which makes widgets and so has to run on the UI thread: fill in the frame list, and
+            (restore) show the saved results of the first frame. Call it after load_offline_data() or
+            load_offline_background_data(), which don't touch the UI, so they can run in a worker thread. """
+        if self._movie_for_ui is not None:
+            movie, self._movie_for_ui = self._movie_for_ui, None
+            self.parent.ui.add_offline(movie) # (Reports its own progress)
+        if restore:
+            self.saver.load1(0) # Restore if possible
+
     def load_offline_background(self,file_info):
+        """ Load a background, all in this thread. (The UI does load_offline_background_data in a worker, then finish_load.) """
+        self.load_offline_background_data(file_info)
+        self.finish_load(restore=False)
+
+    def load_offline_background_data(self,file_info):
         # file_info: from dialog. Tuple: (list of files, file types)
         kind = self._file_kind(file_info)
         if '.bin' in kind:
@@ -348,13 +434,13 @@ class NextwaveOffline():
                 self.offline_movie = self.offline_movie - offline_mean
                 self.offline_movie[ self.offline_movie<0] = 0
                 self.offline_movie = np.array( self.offline_movie, dtype='uint8')
-                self.parent.ui.add_offline(self.offline_movie)
+                self._add_to_ui(self.offline_movie)
             else:
                 print("Sub whole movie")
                 subbed = np.array(self.offline_movie,dtype='int32') - self.offline_background
                 subbed[subbed<0]=0
                 subbed=np.array( subbed, dtype='uint8')
-                self.parent.ui.add_offline( subbed)                
+                self._add_to_ui( subbed)                
         elif '.bmp' in kind:
             buf_movie=None
             nf=0 # USE nf instead of nf_x to allow skipping (e.g. if directory is in there)
@@ -383,16 +469,22 @@ class NextwaveOffline():
                 self.offline_movie = self.offline_movie - offline_mean
                 self.offline_movie[ self.offline_movie<0] = 0
                 self.offline_movie = np.array( self.offline_movie, dtype='uint8')
-                self.parent.ui.add_offline(self.offline_movie)
+                self._add_to_ui(self.offline_movie)
             else:
                 print("Sub each frame from each frame")
                 subbed = np.array(self.offline_movie,dtype='int32') - self.offline_background
                 subbed[subbed<0]=0
                 subbed=np.array( subbed, dtype='uint8')
                 self.offline_movie = subbed                
-                self.parent.ui.add_offline( subbed)                
+                self._add_to_ui( subbed)                
 
     def load_offline(self,file_info):
+        """ Load a movie, all in this thread. (The UI does load_offline_data in a worker, then finish_load.) """
+        self.load_offline_data(file_info)
+        self.finish_load(restore=True)
+
+    def load_offline_data(self,file_info):
+        self.occupancy_template = None # (Made from the movie, so a new movie needs a new one)
         # file_info: from dialog. Tuple: (list of files, file types)
         fname = file_info[0][0]
         self.offline_fname = fname
@@ -479,6 +571,8 @@ class NextwaveOffline():
                         buf_movie=np.zeros( (2048,f1.shape[0],f1.shape[1]), dtype='uint8') # TODO: grow new chunk if necessary
                 buf_movie[nf]=f1
                 self.fnames[nf] = frame1
+                if nf == 0:
+                    self._preview(buf_movie[0])
                 nf += 1
                 self.signals.report("Reading frames", nf, n_files)
 
@@ -490,7 +584,7 @@ class NextwaveOffline():
             print("Read %d frames of %dx%d"%(nf,f1.shape[0],f1.shape[1]) )
             buf_movie=buf_movie[0:nf,:,:] # Trim to correct
             self.offline_movie = buf_movie
-            self.parent.ui.add_offline(buf_movie)
+            self._add_to_ui(buf_movie)
             self.dims=np.array([buf_movie.shape[1],buf_movie.shape[2]])
 
         elif '.bmp' in kind:
@@ -547,6 +641,8 @@ class NextwaveOffline():
                 if buf_movie is None:
                         buf_movie=np.zeros( (50,f1.shape[0],f1.shape[1]), dtype='uint8') # TODO: grow new chunk if necessary
                 buf_movie[nf]=f1
+                if nf == 0:
+                    self._preview(buf_movie[0])
                 
                 # Assume fname is xxxx_nnn.bmp : extract nnn
                 idx_number=frame1.rfind('_')+1
@@ -576,6 +672,8 @@ class NextwaveOffline():
                         buf_movie=np.zeros( (defaults.MOVIE_MAX_FRAMES,f1.shape[0],f1.shape[1]), dtype='uint8') # TODO: grow new chunk if necessary
                     buf_movie[nf]=f1
                     print('%04d %03d\n'%(nf,f1.mean() ),end=' ', flush=True)
+                    if nf == 0:
+                        self._preview(buf_movie[0])
                     self.signals.report("Reading frames", nf+1, total)
 
                     #if nf<100: # For e.g. debugging
@@ -593,10 +691,11 @@ class NextwaveOffline():
 
         # Threshold anything too bright
         self.signals.report("Removing saturated pixels") # (One long step)
-        buf_movie[buf_movie >= defaults.SATURATION_MINIMUM] = 0
+        if getattr(defaults, 'SATURATION_MINIMUM', 0) > 0: # (0: leave saturated pixels as they are)
+            buf_movie[buf_movie >= defaults.SATURATION_MINIMUM] = 0
 
         self.offline_movie = buf_movie
-        self.parent.ui.add_offline(buf_movie) # (Reports its own progress)
+        self._add_to_ui(buf_movie) # (Shown by finish_load)
         self.dims=np.array([buf_movie.shape[1],buf_movie.shape[2]])
 
         self.max_frame = buf_movie.shape[0]
@@ -606,27 +705,41 @@ class NextwaveOffline():
 
         self.signals.report("Loading saved results") # (One long step)
         self.saver.unserialize() # Load previous if they exist
-        self.saver.load1(0) # Restore if possible
+        # (finish_load fills in the frame list and shows the first frame's saved results)
 
     def export_all_zernikes(self,dir1="."):
         idx=0
         #out_fname = self.offline_fname + "_zern_%02d.csv"%idx        
-        out_fname = "%s/zc_%s_%s_%s.csv"%(dir1,self.sub_id,self.condition,self.scan_dir)
-        
+        stem = None
+        if self.offline_fname.lower().endswith('.avi'): # An AVI's CSV is named for it (only an AVI: the others are many files, or not named for the movie)
+            stem = "%s/%s"%(dir1,Path(self.offline_fname).stem)
+            out_fname = stem + ".csv"
+        else:
+            out_fname = "%s/zc_%s_%s_%s.csv"%(dir1,self.sub_id,self.condition,self.scan_dir)
+
         while Path(out_fname).exists():
             idx += 1
             #out_fname = self.offline_fname + "_zern_%02d.csv"%idx
-            out_fname = "%s/zc_%s_%s_%s_%02d.csv"%(dir1,self.sub_id,self.condition,self.scan_dir,idx)
-        
+            if stem:
+                out_fname = "%s_%02d.csv"%(stem,idx)
+            else:
+                out_fname = "%s/zc_%s_%s_%s_%02d.csv"%(dir1,self.sub_id,self.condition,self.scan_dir,idx)
+
+        first_frame = 0 # Start this many frames before the first flash, if there is one
+        trim = int(getattr(defaults,'TRIM_TO_FIRST_FLASH',0) or 0)
+        if trim > 0 and len(self.flash_frames) > 0:
+            first_frame = min(self.flash_frames) - trim # (Negative if the flash is sooner than that into the movie: those rows are empty, so time 0 is always trim frames before the flash)
+        print("Exporting %s: frames %d-%d%s"%(out_fname, max(0,first_frame)+1, self.max_frame, " (%d empty rows first)"%-first_frame if first_frame < 0 else ""), flush=True)
+
         self.f_out = open(out_fname,'w')
-        s="subject_id,scan_dir,frame_num,ecc,pupil_diam_mm,cx,cy,FLAGS,"
-        for nz in np.arange(65):
+        s="subject_id,scan_dir,frame_num,time,ecc,pupil_diam_mm,cx,cy,FLAGS,"
+        for nz in np.arange(MAX_EXPORT_ZERNIKES):
             s += "Z%d,"%(nz+1)
         s += "\n"
         self.f_out.write(s)
 
-        for nframe in np.arange(self.max_frame):
-            s=self.saver.printable1(nframe)
+        for nframe in np.arange(first_frame, self.max_frame):
+            s=self.saver.printable1(int(nframe), first_frame)
             s += "\n"
             self.f_out.write(s)
         self.f_out.close()
@@ -1018,6 +1131,9 @@ class NextwaveOffline():
         return best_guess,im_smooth
 
     def autocenter(self):
+        if defaults.centering_method=='occupancy_match':
+            self.occupancy_autocenter()
+            return
         if defaults.centering_method=='estimate_boxes':
             # First start small
             pupil_radius_small = self.it_start * self.parent.pupil_mag / 2.0
