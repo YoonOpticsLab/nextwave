@@ -7,7 +7,7 @@ Usage:
 The CSVs are grouped by condition: native1.csv, native2.csv and native3.csv are one condition, "native", drawn together in one
 subplot (one line per number, 1 in blue, 2 in orange, 3 in green), titled with the condition. (A name like correct1_SN.csv is the
 condition "correct SN".) A thin dashed black vertical line marks every flash of every movie (the frames with FLAGS 1: runs of them
-count as one flash). All the conditions are subplots of one PNG, stacked vertically, top to bottom: native, corrected, doubled, reversed (time is shared), named for the CSV directory (Jacinth.png),
+count as one flash). All the conditions are subplots of one PNG, stacked vertically with the same y range (--ylim, default -1 to 1; values outside it are cut off), top to bottom: native, corrected, doubled, reversed (time is shared), named for the CSV directory (Jacinth.png),
 saved to --out-dir (default: "plots" inside the CSV directory).
 
 Columns are counted from 1, as in a spreadsheet: time is column 4, FLAGS column 9, Z1 column 10, so Z4 is column 13 (--column
@@ -80,6 +80,7 @@ def main():
     ap.add_argument("directory", nargs="?", default=DEFAULT_DIR, help="directory of exported CSVs (default: %s)" % DEFAULT_DIR)
     ap.add_argument("--out-dir", help="where the PNGs go (default: 'plots' inside the CSV directory)")
     ap.add_argument("--column", type=int, default=13, help="column to plot, counted from 1 (default 13: Z4)")
+    ap.add_argument("--ylim", type=float, nargs=2, default=(-1.0, 1.0), metavar=("LOW", "HIGH"), help="y range of every subplot (default: -1 1)")
     ap.add_argument("--show", action="store_true", help="show the plots in windows too")
     args = ap.parse_args()
 
@@ -100,7 +101,7 @@ def main():
         name = item[0].lower()
         return next((n for n, o in enumerate(ORDER) if name.startswith(o)), len(ORDER)), name
     conditions = sorted(groups.items(), key=position)
-    fig, axes = plt.subplots(len(conditions), 1, figsize=(11, 3.4 * len(conditions)), sharex=True, squeeze=False)
+    fig, axes = plt.subplots(len(conditions), 1, figsize=(11, 3.4 * len(conditions)), sharex=True, sharey=True, squeeze=False)
     for ax, (condition, movies) in zip(axes[:, 0], conditions):
         for number, path in sorted(movies.items()):
             color = COLORS.get(number, "tab:gray")
@@ -113,6 +114,7 @@ def main():
         ax.set_ylabel(ylabel)
         ax.legend(title="movie", loc="upper right")
         ax.grid(alpha=0.3)
+    axes[-1, 0].set_ylim(*args.ylim) # (All the subplots share it)
     axes[-1, 0].set_xlabel("time (s)")
     fig.tight_layout()
     out = os.path.join(out_dir, "%s.png" % (os.path.basename(os.path.normpath(args.directory)) or "zernikes"))
