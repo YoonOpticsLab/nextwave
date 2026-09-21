@@ -106,4 +106,6 @@ AVI_DEBUG_FRAMES=4096 # Set large (or -1) to load all frames
 ## Offline processing
 #########
 
+OFFLINE_LOAD_FILTER="Movies (*.avi)" # File wildcard selected by default in the "Load Offline Source" dialog. Any Qt filter, e.g. "Movies (*.avi)" or "My movies (native*.avi)"
+OFFLINE_BACKGROUND_FILTER="Cam1 Images (sweep_cam1_*.bmp)" # Same, for "Load Offline Background"
 OFFLINE_WORKERS=0 # Processes for "Auto process all frames". 0=automatic (cores-1). 1=one frame at a time, in the UI process (old behavior)

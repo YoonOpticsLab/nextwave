@@ -216,6 +216,12 @@ class NextwaveOffline():
         self.parent.comm.write_image(self.dims,bytez)
         self.signals.frame_loaded.emit(bytez)
 
+    def _file_kind(self, file_info):
+        """ What to load, as text that contains '.avi', '.bmp', etc. From the file's extension, so it works whatever
+            wildcard the user chose (e.g. "files (*.*)"); if the extension isn't one we know, from the dialog's filter text. """
+        ext = os.path.splitext(file_info[0][0])[1].lower()
+        return ext if ext in ('.bin', '.png', '.bmp', '.avi') else file_info[1]
+
     def _frame_count(self, vidin, limit):
         """ Number of frames we'll read from an open video, for the progress bar. 0 if it can't say. """
         try:
@@ -228,9 +234,10 @@ class NextwaveOffline():
 
     def load_offline_background(self,file_info):
         # file_info: from dialog. Tuple: (list of files, file types)
-        if '.bin' in file_info[1]:
+        kind = self._file_kind(file_info)
+        if '.bin' in kind:
             pass # TODO
-        elif '.avi' in file_info[1]:
+        elif '.avi' in kind:
             fname=file_info[0][0]
             #print("Offline movie: ",fname)
 
@@ -267,7 +274,7 @@ class NextwaveOffline():
                 subbed[subbed<0]=0
                 subbed=np.array( subbed, dtype='uint8')
                 self.parent.ui.add_offline( subbed)                
-        elif '.bmp' in file_info[1]:
+        elif '.bmp' in kind:
             buf_movie=None
             nf=0 # USE nf instead of nf_x to allow skipping (e.g. if directory is in there)
             n_files = sum(".bmp" in frame1 for frame1 in file_info[0])
@@ -308,14 +315,15 @@ class NextwaveOffline():
         # file_info: from dialog. Tuple: (list of files, file types)
         fname = file_info[0][0]
         self.offline_fname = fname
-        
+        kind = self._file_kind(file_info)
+
         self.parent.mode_offline=True
         
         self.scan_dir ="X"
         self.condition="NONE"
         self.sub_id="NONAME"
         
-        if '.bin' in file_info[1]:
+        if '.bin' in kind:
             print("Offline: ",file_info[0][0])
             #fil=open(file_info[0][0],'rb')
             bytez=np.fromfile(file_info[0][0],'uint8')
@@ -328,7 +336,7 @@ class NextwaveOffline():
             self.dims = dims
             self.parent.comm.write_image(dims,bytez)
 
-        elif '.png' in file_info[1]:
+        elif '.png' in kind:
             buf_movie=None
             pathname = file_info[0][0].upper()
 
@@ -404,7 +412,7 @@ class NextwaveOffline():
             self.parent.ui.add_offline(buf_movie)
             self.dims=np.array([buf_movie.shape[1],buf_movie.shape[2]])
 
-        elif '.bmp' in file_info[1]:
+        elif '.bmp' in kind:
             buf_movie=None
             pathname = file_info[0][0].upper()
 
@@ -471,7 +479,7 @@ class NextwaveOffline():
             print(pathname, self.condition, self.scan_dir, self.sub_id, self.fnames)
             print("Read %d frames of %dx%d"%(nf,f1.shape[0],f1.shape[1]) )
 
-        elif '.avi' in file_info[1]:
+        elif '.avi' in kind:
             fname=file_info[0][0]
             print("Offline movie: ",fname)
             vidin = ffmpegcv.VideoCapture(fname)

@@ -191,12 +191,21 @@ class NextWaveMainWindow(QMainWindow):
     self.updater.start(self.get_param("UI","update_rate"))
     self.updater_dm.start(self.get_param("UI","update_rate_dm"))
 
- def offline_load_image(self):
-    ffilt='Cam1 Images (sweep_cam1_*.bmp);; Movies (*.avi);; PNGs (*.png);; BMP Directory (*.bmp);; Binary files (*.bin);; files (*.*)'
-    thedir = QFileDialog.getOpenFileNames(self, "Choose file",
-                self.load_setting("ui/folder"), ffilt );
+ def choose_offline_files(self, caption, folder_key, filters, default_filter):
+    """ Open-files dialog. default_filter (a wildcard from nextwave_defaults.py) is the one selected; if it isn't
+        already one of the choices, it's added. Returns what QFileDialog does: (list of files, selected filter). """
+    filters = list(filters)
+    default_filter = str(default_filter or filters[0]).strip()
+    if default_filter not in filters:
+        filters.insert(0, default_filter)
+    return QFileDialog.getOpenFileNames(self, caption, self.load_setting(folder_key), ";;".join(filters), default_filter)
 
-    if len(thedir)>0:
+ def offline_load_image(self):
+    filters=['Cam1 Images (sweep_cam1_*.bmp)', 'Movies (*.avi)', 'PNGs (*.png)', 'BMP Directory (*.bmp)', 'Binary files (*.bin)', 'files (*.*)']
+    thedir = self.choose_offline_files("Choose file", "ui/folder", filters,
+                getattr(defaults, 'OFFLINE_LOAD_FILTER', filters[0]) )
+
+    if len(thedir[0])>0: # (Empty if cancelled)
         dirname = os.path.dirname(thedir[0][0])
         self.save_setting("ui/folder",dirname)
         
@@ -324,10 +333,10 @@ class NextWaveMainWindow(QMainWindow):
 
  def offline_load_background(self):
     #ffilt='Movies (*.avi);; Binary files (*.bin);; BMP Images (*.bmp);; files (*.*)'
-    ffilt='Cam1 Images (sweep_cam1_*.bmp)'
-    thedir = QFileDialog.getOpenFileNames(self, "Choose background file",
-        self.load_setting("ui/folder_background"), ffilt );
-    if len(thedir)>0:
+    filters=['Cam1 Images (sweep_cam1_*.bmp)']
+    thedir = self.choose_offline_files("Choose background file", "ui/folder_background", filters,
+                getattr(defaults, 'OFFLINE_BACKGROUND_FILTER', filters[0]) )
+    if len(thedir[0])>0: # (Empty if cancelled)
         dirname = os.path.dirname(thedir[0][0])
         self.save_setting("ui/folder_background",dirname)
 
