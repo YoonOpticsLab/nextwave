@@ -36,6 +36,8 @@ ui_normalize_max = 50
 ITERATIVE_PUPIL_START=2.65 # TODO: Maybe should determine based on magnification, etc., pupil for minimum # of boxes
 ITERATIVE_PUPIL_STEP_SIZE=0.25
 ITERATIVE_PUPIL_STOP=8.0
+ITERATIVE_AUTOCENTER=0 # 1: find the pupil center in each frame (and snap it to a search box). 0: don't. Use the current center (the UI's, initially cx,cy in config.json). Also then the max pupil isn't estimated: it's ITERATIVE_PUPIL_STOP_FORCE (or ITERATIVE_PUPIL_STOP). Tip/tilt still nudges the center while enlarging: see ITERATIVE_FIXED_CENTER
+ITERATIVE_FIXED_CENTER=0 # 1: use the same pupil center for every frame: the UI's current center (initially cx,cy in config.json). Don't find the center in each frame, and don't move it with tip/tilt while enlarging. 0: center each frame
 ITERATIVE_SKIP_ENLARGE=0 # 1: skip the "enlarge pupil" steps (growing from ITERATIVE_PUPIL_START by ITERATIVE_PUPIL_STEP_SIZE). Start at the max pupil (see below), then just shrink the search boxes. 0: enlarge in steps
 ITERATIVE_PUPIL_STOP_FORCE=6.0 # mm. If >0, always use this as the max pupil (as if typed into the UI's max box) instead of estimating it from each image. 0=estimate
 

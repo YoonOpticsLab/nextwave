@@ -174,6 +174,8 @@ class NextwaveOffline():
         self.center_dirty = False # User has set the center: don't autocenter
 
         self.skip_enlarge = bool(getattr(defaults, 'ITERATIVE_SKIP_ENLARGE', 0)) # Don't grow the pupil in steps: start at the max
+        self.autocenter_enabled = bool(getattr(defaults, 'ITERATIVE_AUTOCENTER', 1)) # Find the pupil center in each frame
+        self.fixed_center = bool(getattr(defaults, 'ITERATIVE_FIXED_CENTER', 0)) # Same center for every frame: engine.cx, cy stay put
 
         forced_stop = float(getattr(defaults, 'ITERATIVE_PUPIL_STOP_FORCE', 0) or 0) # getattr: user's defaults file may predate this
         if forced_stop > 0: # Same as the user typing a max pupil into the UI
@@ -749,9 +751,10 @@ class NextwaveOffline():
                 self.iterative_size = self.iterative_max
                 self.iterative_size_pixels = self.iterative_max_pixels
 
-            # Add tip/tilt to the centers
-            self.parent.cx -= int( z_new[1] / focal * ccd_pixel )
-            self.parent.cy += int( z_new[0] / focal * ccd_pixel )
+            # Add tip/tilt to the centers (unless the center is fixed. The boxes are still shifted by the tilt, below.)
+            if not self.fixed_center:
+                self.parent.cx -= int( z_new[1] / focal * ccd_pixel )
+                self.parent.cy += int( z_new[0] / focal * ccd_pixel )
 
             self.parent.init_params( {'pupil_diam': self.iterative_size / self.parent.pupil_mag} )
             self.parent.make_searchboxes() #pupil_radius_pixel=self.iterative_size_pixels)
@@ -1042,7 +1045,7 @@ class NextwaveOffline():
         self.iterative_size_pixels = self.iterative_size/2.0 * 1000 / self.parent.ccd_pixel
         
         
-        if not self.center_dirty:
+        if self.autocenter_enabled and not (self.center_dirty or self.fixed_center): # (Otherwise the center is what's already set)
             self.autocenter()
             # Is this circular? Where to get box centers from?
             #self.parent.init_params( { 'pupil_diam': pupil_diam / self.parent.pupil_mag } ) # Back to real pupil size
