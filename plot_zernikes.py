@@ -5,7 +5,7 @@ Usage:
     python plot_zernikes.py [directory of CSVs] [--out-dir DIR] [--mean] [--show] [--column 13] [--ylim -1 1]
 
 One PNG, a subplot per condition (native1/2/3.csv are the condition "native"), stacked vertically, named for the CSV directory
-(Jacinth.png), saved to --out-dir (default: "plots" inside the CSV directory). By default each run is a line (1 blue, 2 orange,
+(Jacinth.png, or Jacinth_mean.png with --mean), saved to --out-dir (default: "plots" inside the CSV directory). By default each run is a line (1 blue, 2 orange,
 3 green); with --mean the subplot instead shows the mean of the runs in black and shading of +/- 1 standard deviation.
 Thin dashed black vertical lines mark the flashes. --ylim is the y range of every subplot (values outside it are cut off).
 The plotting itself is in zernike_plot.py, which the app's "Process directory of AVIs" also uses.
@@ -34,7 +34,8 @@ def main():
 
     paths = sorted(glob.glob(os.path.join(args.directory, "*.csv")))
     out_dir = args.out_dir or os.path.join(args.directory, "plots")
-    out = os.path.join(out_dir, "%s.png" % (os.path.basename(os.path.normpath(args.directory)) or "zernikes"))
+    name = os.path.basename(os.path.normpath(args.directory)) or "zernikes"
+    out = os.path.join(out_dir, "%s%s.png" % (name, "_mean" if args.mean else "")) # (So the mean plot doesn't replace the plot of each run)
     plotted = zernike_plot.make_summary_plot(paths, out, args.column, args.ylim, args.mean, args.show)
     if not plotted:
         raise SystemExit("No CSVs named like native1.csv in " + args.directory)
