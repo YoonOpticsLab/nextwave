@@ -51,7 +51,6 @@ threshold_max_minus_mean=-10 # If box max - mean is less than this, make box NaN
 
 scan_frame_to_ecc={'H': np.linspace(-35,35,37),'V': np.linspace(-20,20,27),'D': np.linspace(-28.28,28.28,27),'D2': np.linspace(-28.28,28.28,27)}
   
-SATURATION_MINIMUM=0 # When loading a movie, pixels at or above this value are set to 0 (so saturated pixels don't count). 0 = leave them as they are. (Was 255.)
   
 #Centering method:
 # "estimate_boxes" (use default positions and find best circle to optimize box population)
