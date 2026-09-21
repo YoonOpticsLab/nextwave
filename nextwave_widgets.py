@@ -1,9 +1,10 @@
+import nextwave_log
 from nextwave_log import log
 from PyQt5.QtWidgets import (QMainWindow, QLabel, QSizePolicy, QApplication, QPushButton,
                              QHBoxLayout, QVBoxLayout, QGridLayout, QScrollArea,
                              QWidget, QGroupBox, QTabWidget, QTextEdit, QSpinBox, QDoubleSpinBox, QSlider,
                              QFileDialog, QCheckBox, QDialog, QFormLayout, QDialogButtonBox, QLineEdit,
-                             QToolTip)
+                             QToolTip, QPlainTextEdit, QComboBox)
 from PyQt5.QtGui import QPixmap, QImage, QPainter, QPen, QFont, QColor, QBrush, QPolygonF, QPalette
 from PyQt5.QtCore import Qt, QTimer, QEvent, QLineF, QPointF, pyqtSignal 
 import PyQt5.QtGui as QtGui
@@ -584,3 +585,118 @@ class OfflineDialog(QDialog):
 
         # Set the layout for the dialog
         self.setLayout(layout)
+
+
+class LogViewer(QWidget):
+    """ A window that shows the log file (see nextwave_log.py) and follows it as it grows: the last part of the file when it
+        opens, then whatever is added, checked twice a second while the window is open. "Follow" keeps the newest line in view
+        (untick it to scroll back and read). The level box changes what is logged from now on (DEBUG is a lot). """
+    TAIL_BYTES = 200 * 1024 # How much of the end of the file to show at first
+    POLL_MS = 500
+
+    def __init__(self, parent=None):
+        super().__init__(parent, Qt.Window)
+        self.setWindowTitle("Log")
+        self.resize(1000, 500)
+        self.path = None
+        self.pos = 0 # How far into the file has been shown
+
+        self.text = QPlainTextEdit()
+        self.text.setReadOnly(True)
+        self.text.setLineWrapMode(QPlainTextEdit.NoWrap)
+        self.text.setMaximumBlockCount(20000)
+        font = QFont("Consolas" if os.name == 'nt' else "Monospace")
+        font.setStyleHint(QFont.Monospace)
+        self.text.setFont(font)
+
+        self.label_path = QLabel()
+        self.chk_follow = QCheckBox("Follow")
+        self.chk_follow.setChecked(True)
+        self.combo_level = QComboBox()
+        self.combo_level.addItems(nextwave_log.LEVELS)
+        self.combo_level.currentTextChanged.connect(self.level_changed)
+        btn_clear = QPushButton("Clear")
+        btn_clear.setToolTip("Clears this window, not the file")
+        btn_clear.clicked.connect(self.text.clear)
+
+        top = QHBoxLayout()
+        top.addWidget(self.label_path, 1)
+        top.addWidget(QLabel("Level:"))
+        top.addWidget(self.combo_level)
+        top.addWidget(self.chk_follow)
+        top.addWidget(btn_clear)
+        layout = QVBoxLayout()
+        layout.addLayout(top)
+        layout.addWidget(self.text)
+        self.setLayout(layout)
+
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self.poll)
+
+    def level_changed(self, level):
+        nextwave_log.set_level(level)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self.combo_level.blockSignals(True)
+        self.combo_level.setCurrentText(nextwave_log.get_level())
+        self.combo_level.blockSignals(False)
+        self.reload()
+        self.timer.start(self.POLL_MS)
+
+    def hideEvent(self, event):
+        self.timer.stop()
+        super().hideEvent(event)
+
+    def reload(self):
+        """ Show the end of the log file again from scratch """
+        self.text.clear()
+        self.path = nextwave_log.log_path()
+        self.pos = 0
+        if not self.path:
+            self.label_path.setText("Not logging to a file (LOG_FILE is empty in nextwave_defaults.py)")
+            return
+        self.label_path.setText(self.path)
+        try:
+            size = os.path.getsize(self.path)
+            with open(self.path, 'rb') as f:
+                start = max(0, size - self.TAIL_BYTES)
+                f.seek(start)
+                data = f.read()
+            if start > 0: # (Began in the middle of a line: leave that out)
+                data = data.split(bytes([10]), 1)[-1] # (Split at the first newline)
+            self.pos = size
+        except OSError:
+            return
+        self.append(data.decode('utf-8', errors='replace'))
+
+    def poll(self):
+        if not self.path:
+            return
+        try:
+            size = os.path.getsize(self.path)
+        except OSError:
+            return
+        if size < self.pos: # The log was rotated (or cleared): start again on the new file
+            self.reload()
+            return
+        if size == self.pos:
+            return
+        try:
+            with open(self.path, 'rb') as f:
+                f.seek(self.pos)
+                data = f.read(size - self.pos)
+        except OSError:
+            return
+        self.pos = size
+        self.append(data.decode('utf-8', errors='replace'))
+
+    def append(self, chunk):
+        bar = self.text.verticalScrollBar()
+        keep = bar.value()
+        self.text.moveCursor(QtGui.QTextCursor.End)
+        self.text.insertPlainText(chunk)
+        if self.chk_follow.isChecked():
+            bar.setValue(bar.maximum())
+        else:
+            bar.setValue(keep)
