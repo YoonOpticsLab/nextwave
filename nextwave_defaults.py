@@ -131,3 +131,5 @@ AVI_DEBUG_FRAMES=4096 # Set large (or -1) to load all frames
 OFFLINE_LOAD_FILTER="Movies (*.avi)" # File wildcard selected by default in the "Load Offline Source" dialog. Any Qt filter, e.g. "Movies (*.avi)" or "My movies (native*.avi)"
 OFFLINE_BACKGROUND_FILTER="Cam1 Images (sweep_cam1_*.bmp)" # Same, for "Load Offline Background"
 OFFLINE_WORKERS=0 # Processes for "Auto process all frames". 0=automatic (cores-1). 1=one frame at a time, in the UI process (old behavior)
+BATCH_OUTPUT_DIR="zernikes" # File > "Process directory of AVIs": the CSVs and the summary plot go in this subdirectory of the movies' directory
+SUMMARY_PLOT_MEAN=0 # The summary plot's style at start-up: 0 = a line for each run (the numbers in the movie names), 1 = the mean of the runs (black) with +/- 1 standard deviation shaded. Also a checkable entry in the File menu (which remembers its setting)

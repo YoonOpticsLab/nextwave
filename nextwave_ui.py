@@ -28,7 +28,7 @@ from nextwave_sockets import NextwaveSocketComm
 import defaults
 import offline_parallel
 
-from nextwave_widgets import ZernikeDialog, BoxInfoDialog, ActuatorPlot, MyBarWidget, OfflineDialog, FrameGalleryModel, FrameSlider
+from nextwave_widgets import ZernikeDialog, BoxInfoDialog, ActuatorPlot, MyBarWidget, OfflineDialog, FrameGalleryModel, FrameSlider, LogViewer
 
 from nextwave_build import build_message
 
@@ -37,6 +37,8 @@ from threading import Thread
 from zernike_functions import calc_rms
 
 import xml.etree.ElementTree as ET
+import glob
+import zernike_plot
 
 WINDOWS=(os.name == 'nt')
 
@@ -66,6 +68,7 @@ class OfflineWorker(QtCore.QObject):
 
     def do_auto(self):
         self.running = True
+        self.completed = False # Set when it has done every frame (not cancelled, and no error)
         self.engine = self.ui.engine
 
         try:
@@ -77,6 +80,7 @@ class OfflineWorker(QtCore.QObject):
                 completed = self.do_auto_serial()
             if completed:
                 self.engine.offline.saver.serialize()
+                self.completed = True
         except Exception:
             log.exception('Auto process failed') # Report it, but always finish below, or the UI would stay stuck in "processing"
         finally:
@@ -150,6 +154,9 @@ class NextWaveMainWindow(QMainWindow):
 
     self.image_pixels = np.zeros( (10,10)) # Display copy of current image, updated by offline frame_loaded signal
 
+    self.batch = None # While a directory of movies is being processed (see process_directory)
+    self.log_viewer = None
+    self.summary_dialog = None
     self.loading = False # A movie is being loaded in a worker thread (see start_loading)
     self.load_kind = 'movie' # or 'background'
     self.load_thread = None
@@ -158,6 +165,7 @@ class NextWaveMainWindow(QMainWindow):
     self.load_button_text = ""
 
     self.worker = OfflineWorker(self)
+    self.worker_connected = False # Its signals are connected (see offline_autoall)
 
 
  def params_json(self):
@@ -240,6 +248,7 @@ class NextWaveMainWindow(QMainWindow):
         self.start_loading('movie', self.engine.offline.load_offline_data, thedir)
 
  def offline_finished(self):
+    cancelled, completed = self.worker.cancel, self.worker.completed
     self.worker.running = False
     self.worker.cancel = False
 
@@ -251,6 +260,8 @@ class NextWaveMainWindow(QMainWindow):
     
     self.progress_bar.setValue( 0 )
     self.offline_move(0) # Updates UI 
+    if self.batch:
+        self.batch_processed(cancelled, completed)
                
  def connect_offline_signals(self):
     # Offline routines (possibly in the worker thread) emit these rather than touching widgets.
@@ -316,6 +327,8 @@ class NextWaveMainWindow(QMainWindow):
 
         self.offline_move(0) # Updates UI, etc.
         self.btn_off_back.setText("Load Offline Background") # Reset this
+        if self.batch:
+            QTimer.singleShot(0, self.offline_autoall) # (See batch_processed for what comes next)
     else:
         offline.finish_load(restore=False)
         self.offline_move(0)
@@ -323,6 +336,10 @@ class NextWaveMainWindow(QMainWindow):
  def offline_load_failed(self, error_text):
     self.end_loading()
     log.error(error_text, flush=True)
+    if self.batch:
+        self.batch['failed'].append(os.path.basename(self.batch['movies'][self.batch['index']]))
+        QTimer.singleShot(0, self.batch_next) # Next movie
+        return
     QMessageBox.warning(self, "Couldn't load", "Loading failed:\n\n" + error_text.strip().splitlines()[-1])
 
  @QtCore.pyqtSlot(object)
@@ -380,14 +397,121 @@ class NextWaveMainWindow(QMainWindow):
     self.worker.moveToThread(self.thread)
 
     self.thread.started.connect(self.worker.do_auto)
-    self.worker.finished.connect(self.offline_finished)
+    if not self.worker_connected: # (The worker is the same one every time: connect its signals once, or each run would call them once more)
+        self.worker.finished.connect(self.offline_finished)
+        self.worker.progress.connect(self.update_progress)
+        self.worker_connected = True
     #self.worker.finished.connect(self.thread.quit)
     #self.worker.finished.connect(self.worker.deleteLater) # Worker stays alive forever
     self.thread.finished.connect(self.thread.deleteLater)
-    self.worker.progress.connect(self.update_progress)
     
     self.progress_bar.setValue(0)
     self.thread.start() # Will start the OfflineWorker & call do_auto
+
+ # ---- Process a directory of AVIs: for each movie, load it, process all its frames and export its Zernikes as a CSV (the same
+ # steps as the buttons, one movie after another, each shown on screen as it goes). Then make the summary plot from the CSVs.
+ # The CSVs and the plot go in a subdirectory of the movies' directory (BATCH_OUTPUT_DIR in the defaults). A movie that fails is
+ # logged and skipped. Cancelling the processing (its button) stops the batch.
+ def process_directory(self):
+    if self.batch or self.loading or self.worker.running:
+        QMessageBox.information(self, "Busy", "Wait for the current loading or processing to finish first.")
+        return
+    start = self.load_setting("ui/folder_batch") or self.load_setting("ui/folder") or "."
+    folder = QFileDialog.getExistingDirectory(self, "Directory of AVI movies to process", start, QFileDialog.ShowDirsOnly)
+    if folder:
+        self.save_setting("ui/folder_batch", folder)
+        self.start_batch(folder)
+
+ def start_batch(self, folder, confirm=True):
+    movies = sorted(glob.glob(os.path.join(folder, "*.avi")))
+    if not movies:
+        QMessageBox.information(self, "No movies", "There are no .avi files in " + folder)
+        return
+    out_dir = os.path.join(folder, str(getattr(defaults, 'BATCH_OUTPUT_DIR', 'zernikes')))
+    if confirm and QMessageBox.question(self, "Process directory", "Process all %d movies in\n%s\n\nEach one is processed (every frame) and "
+            "its Zernikes saved as a CSV in\n%s\nthen a summary plot is made there. This can take a long time." % (len(movies), folder, out_dir)
+            ) != QMessageBox.Yes:
+        return
+    self.batch = dict(movies=movies, index=-1, out_dir=out_dir, csvs=[], failed=[], folder=folder)
+    log.info("Batch: %d movies in %s; results to %s" % (len(movies), folder, out_dir))
+    self.batch_next()
+
+ def batch_next(self):
+    b = self.batch
+    b['index'] += 1
+    if b['index'] >= len(b['movies']):
+        self.batch_finish()
+        return
+    path = b['movies'][b['index']]
+    text = "Batch %d/%d: %s" % (b['index'] + 1, len(b['movies']), os.path.basename(path))
+    log.info(text)
+    self.statusBar().showMessage(text)
+    self.btn_off.setText(path)
+    self.start_loading('movie', self.engine.offline.load_offline_data, ([path], 'Movies (*.avi)'))
+
+ def batch_processed(self, cancelled, completed):
+    """ The movie's frames are done (or the processing was cancelled, or it failed): export it, and go on to the next """
+    b = self.batch
+    name = os.path.basename(b['movies'][b['index']])
+    if cancelled:
+        log.warning("Batch cancelled during " + name)
+        self.batch = None
+        self.statusBar().showMessage("Batch cancelled")
+        return
+    if completed:
+        try:
+            b['csvs'].append(self.engine.offline.export_all_zernikes(b['out_dir'], overwrite=True))
+        except Exception:
+            log.exception("Couldn't export " + name)
+            b['failed'].append(name)
+    else:
+        log.error("Processing " + name + " didn't finish")
+        b['failed'].append(name)
+    QTimer.singleShot(0, self.batch_next)
+
+ def batch_finish(self):
+    b, self.batch = self.batch, None
+    png = None
+    if b['csvs']:
+        try:
+            png = os.path.join(b['out_dir'], os.path.basename(os.path.normpath(b['folder'])) + ".png")
+            plotted = zernike_plot.make_summary_plot(b['csvs'], png, mean=self.action_summary_mean.isChecked())
+            if not plotted:
+                png = None
+                log.warning("Summary plot: no CSV is named like native1.csv (condition + number), so there is nothing to group")
+        except Exception:
+            png = None
+            log.exception("Summary plot failed")
+    text = "Batch done: %d of %d movies processed" % (len(b['movies']) - len(b['failed']), len(b['movies']))
+    if png:
+        text += "; summary plot " + png
+    log.info(text)
+    self.statusBar().showMessage(text)
+    if png:
+        self.show_summary_plot(png)
+    if b['failed']:
+        QMessageBox.warning(self, "Some movies failed", "These movies could not be processed (see the log):\n" + "\n".join(b['failed']))
+
+ def show_summary_plot(self, png):
+    dialog = QDialog(self)
+    dialog.setWindowTitle(png)
+    label = QLabel()
+    pixmap = QPixmap(png)
+    label.setPixmap(pixmap)
+    scroll = QScrollArea()
+    scroll.setWidget(label)
+    layout = QVBoxLayout(dialog)
+    layout.addWidget(scroll)
+    dialog.resize(min(pixmap.width() + 30, 1300), min(pixmap.height() + 30, 900))
+    dialog.show()
+    self.summary_dialog = dialog # (Keeps it alive)
+
+ def show_log(self):
+    if self.log_viewer is None:
+        self.log_viewer = LogViewer(self)
+    self.log_viewer.show()
+    self.log_viewer.raise_()
+    self.log_viewer.activateWindow()
 
  def offline_load_background(self):
     #ffilt='Movies (*.avi);; Binary files (*.bin);; BMP Images (*.bmp);; files (*.*)'
@@ -1456,6 +1580,12 @@ class NextWaveMainWindow(QMainWindow):
      menu=self.menuBar().addMenu('&File')
      menu.addAction('&Export Centroids + Zernikes', self.export)
      menu.addAction('Export All &Zernikes', self.export_all)
+     menu.addAction('Process &directory of AVIs...', self.process_directory)
+     self.action_summary_mean = menu.addAction('Summary plot: mean +/- 1 &SD, not each run')
+     self.action_summary_mean.setCheckable(True)
+     self.action_summary_mean.setChecked(self.settings.value('ui/summary_mean', bool(getattr(defaults, 'SUMMARY_PLOT_MEAN', 0)), type=bool))
+     self.action_summary_mean.toggled.connect(lambda on: self.save_setting('ui/summary_mean', on))
+     menu.addAction('Show &Log', self.show_log)
      menu.addAction('Run &Calibration', self.do_calibration)
      menu.addAction('e&Xit', self.close)
 

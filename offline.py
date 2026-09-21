@@ -704,7 +704,9 @@ class NextwaveOffline():
         self.saver.unserialize() # Load previous if they exist
         # (finish_load fills in the frame list and shows the first frame's saved results)
 
-    def export_all_zernikes(self,dir1="."):
+    def export_all_zernikes(self,dir1=".",overwrite=False):
+        """ Export every frame's Zernikes as a CSV in dir1 (made if it isn't there); returns the CSV's path. If the file exists,
+            a new one is made with _01, _02... added to its name, unless overwrite. """
         idx=0
         #out_fname = self.offline_fname + "_zern_%02d.csv"%idx        
         stem = None
@@ -714,7 +716,7 @@ class NextwaveOffline():
         else:
             out_fname = "%s/zc_%s_%s_%s.csv"%(dir1,self.sub_id,self.condition,self.scan_dir)
 
-        while Path(out_fname).exists():
+        while not overwrite and Path(out_fname).exists():
             idx += 1
             #out_fname = self.offline_fname + "_zern_%02d.csv"%idx
             if stem:
@@ -728,6 +730,7 @@ class NextwaveOffline():
             first_frame = min(self.flash_frames) - trim # (Negative if the flash is sooner than that into the movie: those rows are empty, so time 0 is always trim frames before the flash)
         log.info("Exporting %s: frames %d-%d%s"%(out_fname, max(0,first_frame)+1, self.max_frame, " (%d empty rows first)"%-first_frame if first_frame < 0 else ""), flush=True)
 
+        os.makedirs(dir1, exist_ok=True)
         self.f_out = open(out_fname,'w')
         s="subject_id,scan_dir,frame_num,time,ecc,pupil_diam_mm,cx,cy,FLAGS,"
         for nz in np.arange(MAX_EXPORT_ZERNIKES):
@@ -740,6 +743,7 @@ class NextwaveOffline():
             s += "\n"
             self.f_out.write(s)
         self.f_out.close()
+        return out_fname
 
     def metric_patch(self,patch_orig):
         po=patch_orig.copy()
