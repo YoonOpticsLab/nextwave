@@ -16,7 +16,7 @@ if USE_GIT_LOG:
     
 else:
     extra_info="STANDALONE OFFLINE"
-    extra_info2="Editable defaults.py"
+    extra_info2="Zero saturated. Editable defaults.py"
 
     fil=open("nextwave_build.py","wt")
     str_now = datetime.datetime.now()
