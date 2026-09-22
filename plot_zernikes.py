@@ -27,7 +27,7 @@ def main():
     ap.add_argument("directory", nargs="?", default=DEFAULT_DIR, help="directory of exported CSVs (default: %s)" % DEFAULT_DIR)
     ap.add_argument("--out-dir", help="where the PNG goes (default: 'plots' inside the CSV directory)")
     ap.add_argument("--column", type=int, default=zernike_plot.DEFAULT_COLUMN, help="column to plot, counted from 1 (default 13: Z4)")
-    ap.add_argument("--ylim", type=float, nargs=2, default=zernike_plot.DEFAULT_YLIM, metavar=("LOW", "HIGH"), help="y range of every subplot (default: -1 1)")
+    ap.add_argument("--ylim", type=float, nargs=2, default=None, metavar=("LOW", "HIGH"), help="y range of every subplot (default: SUMMARY_PLOT_YLIM in nextwave_defaults.py)")
     ap.add_argument("--mean", action="store_true", help="show the mean of the runs (black) and +/- 1 standard deviation (shaded), not each run")
     ap.add_argument("--show", action="store_true", help="show the plot in a window too")
     args = ap.parse_args()

@@ -31,6 +31,7 @@ from collections import defaultdict
 import numpy as np
 
 from nextwave_log import log
+import defaults
 
 TIME_COLUMN = 4
 FLAGS_COLUMN = 9
@@ -39,7 +40,7 @@ COLORS = {1: "tab:blue", 2: "tab:orange", 3: "tab:green"} # By the movie's numbe
 ORDER = ('native', 'correct', 'double', 'reverse') # Top to bottom (a condition is matched by the start of its name: 'corrected', 'doubled', ...)
 MERGE_GAP = 2 # Flash frames this close together (or closer) are one flash
 DEFAULT_COLUMN = 13 # Z4
-DEFAULT_YLIM = (-1.0, 1.0)
+DEFAULT_YLIM = (-1.0, 1.0) # Used if nextwave_defaults.py doesn't set SUMMARY_PLOT_YLIM
 PROTOCOL_FILE = "protocol.txt" # In the directory with the CSVs (see read_protocol)
 PROTOCOL_HEIGHT = 0.25 # The protocol subplot's height, relative to each of the others
 PROTOCOL_LINEWIDTH = 3.0
@@ -137,11 +138,14 @@ def protocol_boundaries(n_steps, event_lists):
     return np.median(np.array(good, dtype=float), axis=0)
 
 
-def make_summary_plot(csv_paths, out_png, column=DEFAULT_COLUMN, ylim=DEFAULT_YLIM, mean=False, show=False, protocol_file=None):
+def make_summary_plot(csv_paths, out_png, column=DEFAULT_COLUMN, ylim=None, mean=False, show=False, protocol_file=None):
     """ Make the summary plot (see the top of this file) from the CSVs in csv_paths, and save it as out_png.
         Returns a list of (condition, [run numbers]) that were plotted; empty (and nothing is saved) if no CSV was named
         like native1.csv. show: also open a window (for scripts; needs pyplot). protocol_file: the protocol to plot on top
-        (default: protocol.txt in the CSVs' directory, or the one above it, if there is one). """
+        (default: protocol.txt in the CSVs' directory, or the one above it, if there is one). ylim: the Zernike subplots' shared
+        y range (default: SUMMARY_PLOT_YLIM in nextwave_defaults.py, or DEFAULT_YLIM if that isn't set). """
+    if ylim is None:
+        ylim = tuple(getattr(defaults, 'SUMMARY_PLOT_YLIM', DEFAULT_YLIM))
     groups = group_by_condition(csv_paths)
     if not groups:
         return []
