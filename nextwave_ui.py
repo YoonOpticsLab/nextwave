@@ -156,7 +156,7 @@ class NextWaveMainWindow(QMainWindow):
 
     self.batch = None # While a directory of movies is being processed (see process_directory)
     self.log_viewer = None
-    self.summary_dialog = None
+    self.summary_dialogs = [] # Keeps the summary-plot windows alive
     self.loading = False # A movie is being loaded in a worker thread (see start_loading)
     self.load_kind = 'movie' # or 'background'
     self.load_thread = None
@@ -471,51 +471,44 @@ class NextWaveMainWindow(QMainWindow):
 
  def batch_finish(self):
     b, self.batch = self.batch, None
-    png = None
-    if b['csvs']:
-        try:
-            png = os.path.join(b['out_dir'], os.path.basename(os.path.normpath(b['folder'])) + ".png")
-            plotted = zernike_plot.make_summary_plot(b['csvs'], png, mean=self.action_summary_mean.isChecked())
-            if not plotted:
-                png = None
-                log.warning("Summary plot: no CSV is named like native1.csv (condition + number), so there is nothing to group")
-        except Exception:
-            png = None
-            log.exception("Summary plot failed")
+    name = os.path.basename(os.path.normpath(b['folder']))
+    pngs = self.make_summary_plots(b['csvs'], b['out_dir'], name) if b['csvs'] else []
     text = "Batch done: %d of %d movies processed" % (len(b['movies']) - len(b['failed']), len(b['movies']))
-    if png:
-        text += "; summary plot " + png
+    if pngs:
+        text += "; summary plots " + ", ".join(pngs)
     log.info(text)
     self.statusBar().showMessage(text)
-    if png:
-        self.show_summary_plot(png)
     if b['failed']:
         QMessageBox.warning(self, "Some movies failed", "These movies could not be processed (see the log):\n" + "\n".join(b['failed']))
 
  def summary_plot_directory(self):
-    """ Ask which directory of exported CSVs (native1.csv, native2.csv...) to make the summary plot from, and make it there """
+    """ Ask which directory of exported CSVs (native1.csv, native2.csv...) to make the summary plots from, and make them there """
     start = self.load_setting("ui/folder_summary") or self.load_setting("ui/folder_batch") or "."
     folder = QFileDialog.getExistingDirectory(self, "Directory of Zernike CSVs for the summary plot", start, QFileDialog.ShowDirsOnly)
     if folder:
         self.save_setting("ui/folder_summary", folder)
-        self.make_summary_plot(folder)
+        csvs = sorted(glob.glob(os.path.join(folder, "*.csv")))
+        name = os.path.basename(os.path.normpath(folder))
+        if not self.make_summary_plots(csvs, folder, name):
+            QMessageBox.information(self, "Summary plot", "There are no CSVs in " + folder + " named like native1.csv (condition, then number).")
 
- def make_summary_plot(self, folder):
-    """ The summary plot of the CSVs in folder, saved there as <folder name>.png, and shown """
-    csvs = sorted(glob.glob(os.path.join(folder, "*.csv")))
-    png = os.path.join(folder, os.path.basename(os.path.normpath(folder)) + ".png")
-    try:
-        plotted = zernike_plot.make_summary_plot(csvs, png, mean=self.action_summary_mean.isChecked())
-    except Exception:
-        log.exception("Summary plot failed")
-        QMessageBox.warning(self, "Summary plot failed", "Couldn't make the summary plot (see the log).")
-        return
-    if not plotted:
-        QMessageBox.information(self, "Summary plot", "There are no CSVs in " + folder + " named like native1.csv (condition, then number).")
-        return
-    log.info("Summary plot of %d CSVs in %s: %s" % (len(csvs), folder, png))
-    self.statusBar().showMessage("Summary plot " + png)
-    self.show_summary_plot(png)
+ def make_summary_plots(self, csvs, out_dir, name):
+    """ Both summary plots (each run, and the mean +/- 1 SD) of csvs, saved in out_dir as <name>.png and <name>_mean.png, and
+        shown. Returns the paths saved (empty, and nothing shown, if there was nothing to plot: see zernike_plot). """
+    pngs = []
+    for mean, suffix in ((False, ""), (True, "_mean")):
+        png = os.path.join(out_dir, name + suffix + ".png")
+        try:
+            plotted = zernike_plot.make_summary_plot(csvs, png, mean=mean)
+        except Exception:
+            log.exception("Summary plot failed (%s)" % png)
+            continue
+        if not plotted:
+            continue
+        log.info("Summary plot of %d CSVs: %s" % (len(csvs), png))
+        self.show_summary_plot(png)
+        pngs.append(png)
+    return pngs
 
  def show_summary_plot(self, png):
     dialog = QDialog(self)
@@ -529,7 +522,7 @@ class NextWaveMainWindow(QMainWindow):
     layout.addWidget(scroll)
     dialog.resize(min(pixmap.width() + 30, 1300), min(pixmap.height() + 30, 900))
     dialog.show()
-    self.summary_dialog = dialog # (Keeps it alive)
+    self.summary_dialogs.append(dialog) # (Keeps it alive)
 
  def show_log(self):
     if self.log_viewer is None:
@@ -1607,10 +1600,6 @@ class NextWaveMainWindow(QMainWindow):
      menu.addAction('Export All &Zernikes', self.export_all)
      menu.addAction('Process &directory of AVIs...', self.process_directory)
      menu.addAction('Make summary &plot from a directory of CSVs...', self.summary_plot_directory)
-     self.action_summary_mean = menu.addAction('Summary plot: mean +/- 1 &SD, not each run')
-     self.action_summary_mean.setCheckable(True)
-     self.action_summary_mean.setChecked(self.settings.value('ui/summary_mean', bool(getattr(defaults, 'SUMMARY_PLOT_MEAN', 0)), type=bool))
-     self.action_summary_mean.toggled.connect(lambda on: self.save_setting('ui/summary_mean', on))
      menu.addAction('Show &Log', self.show_log)
      menu.addAction('Run &Calibration', self.do_calibration)
      menu.addAction('e&Xit', self.close)
