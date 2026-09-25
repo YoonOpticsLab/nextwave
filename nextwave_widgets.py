@@ -543,8 +543,8 @@ class MyBarWidget(pg.PlotWidget):
             try:
                 zernike_val = self.app.engine.zernikes[bar_which-1]
                 self.setToolTip("Z%d=%+0.3f"%(bar_which,zernike_val) )
-            except IndexError:
-                pass # Ok, bad position
+            except (IndexError, TypeError):
+                pass # Ok, bad position, or no zernikes computed yet
 
         return super(MyBarWidget, self).eventFilter(obj, event)
 

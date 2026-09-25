@@ -1337,8 +1337,13 @@ class NextwaveOffline():
         
     def show_dialog(self):
         self.parent.ui.offline_dialog.sc.axes.clear();
-    
+
         keys = sorted( self.saver.data.keys() )
+
+        if len(keys) == 0:
+            log.warning("Dialog all frames: no processed frames to show (run Auto process all frames first)")
+            self.parent.ui.statusBar().showMessage("No processed frames to show yet -- run Auto process all frames first")
+            return
 
         diams=np.array([self.saver.data[key1]['pupil_diam'] for key1 in keys ])
         zerns=np.array([self.saver.data[key1]['zernikes'][0:5] for key1 in keys ])

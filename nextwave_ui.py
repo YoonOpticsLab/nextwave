@@ -59,6 +59,7 @@ class OfflineWorker(QtCore.QObject):
         self.ui = ui_parent
         self.running = False
         self.cancel = False
+        self.error_text = None
 
     def do_finished(self):
         # Move ourselves back to the main thread (main will delete on finished signal handler)
@@ -69,6 +70,7 @@ class OfflineWorker(QtCore.QObject):
     def do_auto(self):
         self.running = True
         self.completed = False # Set when it has done every frame (not cancelled, and no error)
+        self.error_text = None # Set on failure, so the UI can show it (not just the log file)
         self.engine = self.ui.engine
 
         try:
@@ -81,8 +83,9 @@ class OfflineWorker(QtCore.QObject):
             if completed:
                 self.engine.offline.saver.serialize()
                 self.completed = True
-        except Exception:
+        except Exception as e:
             log.exception('Auto process failed') # Report it, but always finish below, or the UI would stay stuck in "processing"
+            self.error_text = str(e) or type(e).__name__
         finally:
             self.do_finished()
 
@@ -249,6 +252,7 @@ class NextWaveMainWindow(QMainWindow):
 
  def offline_finished(self):
     cancelled, completed = self.worker.cancel, self.worker.completed
+    error_text = self.worker.error_text
     self.worker.running = False
     self.worker.cancel = False
 
@@ -257,9 +261,15 @@ class NextWaveMainWindow(QMainWindow):
     self.btn_processing.setText("Auto process all frames")
     self.btn_processing.setStyleSheet("background-color: none;")
     self.btn_processing.setEnabled(True)
-    
+
     self.progress_bar.setValue( 0 )
-    self.offline_move(0) # Updates UI 
+    if error_text:
+        self.statusBar().showMessage("Auto process FAILED: " + error_text)
+    elif cancelled:
+        self.statusBar().showMessage("Auto process cancelled")
+    elif completed:
+        self.statusBar().showMessage("Auto process done: %d frames" % self.engine.offline.max_frame)
+    self.offline_move(0) # Updates UI
     if self.batch:
         self.batch_processed(cancelled, completed)
                
@@ -380,19 +390,23 @@ class NextWaveMainWindow(QMainWindow):
     self.image_pixels = image
 
  def update_progress(self, value):
-    self.progress_bar.setValue(int(value/self.engine.offline.max_frame * 100))
-    self.btn_processing.setText("Processing: %d/%d done (Click to CANCEL)"%(value, self.engine.offline.max_frame ) );
+    total = self.engine.offline.max_frame
+    self.progress_bar.setValue(int(value/total * 100))
+    self.btn_processing.setText("Processing: %d/%d done (Click to CANCEL)"%(value, total) );
     self.btn_processing.setStyleSheet("background-color: green;")
-    
+    self.statusBar().showMessage("Auto processing frame %d/%d..." % (value, total))
+
  def offline_autoall(self):
     if self.worker.running:
         self.worker.cancel = True # This will start a shutdown of current auto at next frame
-        
+
         self.btn_processing.setText("CANCELING..");
         self.btn_processing.setStyleSheet("background-color: yellow;")
         self.btn_processing.setEnabled(False)
+        self.statusBar().showMessage("Cancelling auto process...")
         return
-        
+
+    self.statusBar().showMessage("Auto processing frame 0/%d..." % self.engine.offline.max_frame)
     self.thread = QtCore.QThread()
     self.worker.moveToThread(self.thread)
 
