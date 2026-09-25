@@ -110,10 +110,14 @@ def _process_frame(nframe, image, rotation, center_dirty, flash, dark):
     return _processor.process(nframe, image, rotation, center_dirty, flash, dark)
 
 
+MAX_WINDOWS_WORKERS = 60 # ProcessPoolExecutor raises ValueError above 61 on Windows (WaitForMultipleObjects handle limit)
+
 def default_workers(n_frames):
     n = int(getattr(defaults, 'OFFLINE_WORKERS', 0)) # getattr: user's defaults file may predate this setting
     if n <= 0:
         n = (os.cpu_count() or 2) - 1 # Leave a core for the UI
+    if os.name == 'nt':
+        n = min(n, MAX_WINDOWS_WORKERS)
     return max(1, min(n, n_frames))
 
 
