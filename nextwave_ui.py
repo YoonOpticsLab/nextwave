@@ -28,7 +28,7 @@ from nextwave_sockets import NextwaveSocketComm
 import defaults
 import offline_parallel
 
-from nextwave_widgets import ZernikeDialog, BoxInfoDialog, ActuatorPlot, MyBarWidget, OfflineDialog, FrameGalleryModel, FrameSlider, LogViewer
+from nextwave_widgets import draw_profiles, ZernikeDialog, BoxInfoDialog, ActuatorPlot, MyBarWidget, OfflineDialog, FrameGalleryModel, FrameSlider, LogViewer
 
 from nextwave_build import build_message
 
@@ -144,6 +144,8 @@ class NextWaveMainWindow(QMainWindow):
     self.iterative_first=True
     self.draw_pupil=False
     self.draw_predicted=False
+    self.draw_cross_section=False # Settings->UI "Show cross section"
+    self.cursor_pixel=None # (x,y) image pixel under the mouse in the spot image, or None when it's outside
     self.normalize_contrast=True
     self.box_info = -1
     self.box_info_dlg = BoxInfoDialog("HiINFO",self)
@@ -194,7 +196,8 @@ class NextWaveMainWindow(QMainWindow):
         {'name': 'UI', 'type': 'group', 'title':'User interface', 'children': [
             {'name': 'update_rate', 'type': 'int', 'value': 50, 'title':'Display update rate (ms)', 'limits':[50,2000]},
             {'name': 'update_rate_dm', 'type': 'int', 'value': 100, 'title':'DM Display update rate (ms)', 'limits':[50,2000]},
-            {'name': 'show_boxes', 'type': 'bool', 'value': True, 'title':'Show search boxes'}
+            {'name': 'show_boxes', 'type': 'bool', 'value': True, 'title':'Show search boxes'},
+            {'name': 'show_cross_section', 'type': 'bool', 'value': False, 'title':'Show cross section'}
         ]},
         {'name': 'WF Camera', 'type': 'group', 'children': [
             {'name': 'Offset (%)', 'type': 'int', 'value': 0, 'limits':[0,100]},
@@ -220,6 +223,8 @@ class NextWaveMainWindow(QMainWindow):
     self.p = Parameter.create(name='params', type='group', children=self.params)
     self.params = self.p.saveState()
     self.apply_params()
+    # Takes effect when ticked (no need for Apply)
+    self.p.child('UI','show_cross_section').sigValueChanged.connect(lambda param, val: setattr(self, 'draw_cross_section', bool(val)))
 
     self.p_offline = Parameter.create(name='params_offline', type='group', children=self.params_offline)
     self.params_offline = self.p_offline.saveState()
@@ -589,6 +594,28 @@ class NextWaveMainWindow(QMainWindow):
     cut=np.interp(0.95,cuml,np.arange(256))
     im[im<cut]=0
 
+ def draw_cross_sections(self, painter, image, x, y):
+    """ Profiles of the pixel values through (x,y) (see draw_profiles). The pixmap is drawn full size, then shrunk/enlarged for display """
+    shown = self.scales[self.scale_num] / max(image.shape[:2]) # Display pixels per image pixel
+    draw_profiles(painter, image, x, y, full=getattr(defaults, 'ui_cross_section_height', 150), shown=shown, label_px=32)
+
+ def spot_window_mouse_moved(self, event):
+    """ Remember which image pixel is under the cursor (for the cross section) """
+    pixmap = self.pixmap_label.pixmap()
+    if pixmap is None or pixmap.isNull() or not hasattr(self, 'image'): # (Nothing drawn yet)
+        self.cursor_pixel = None
+        return
+    # The (scaled) pixmap is centered in the label
+    off_x = (self.pixmap_label.width() - pixmap.width()) / 2.0
+    off_y = (self.pixmap_label.height() - pixmap.height()) / 2.0
+    height, width = self.image.height(), self.image.width() # Full size image (before scaling for display)
+    x = int((event.pos().x() - off_x) * width / pixmap.width())
+    y = int((event.pos().y() - off_y) * height / pixmap.height())
+    self.cursor_pixel = (x, y) if (0 <= x < width and 0 <= y < height) else None
+
+ def spot_window_left(self, event):
+    self.cursor_pixel = None
+
  def update_ui(self):
     image_pixels = self.engine.receive_image()
 
@@ -786,6 +813,9 @@ class NextWaveMainWindow(QMainWindow):
                 ]
 
         painter.drawLines(xlines)
+
+    if self.draw_cross_section and self.cursor_pixel is not None:
+        self.draw_cross_sections(painter, image_pixels, *self.cursor_pixel)
 
     if self.draw_pupil:
         pen = QPen(Qt.green, 1.5)
@@ -1230,6 +1260,9 @@ class NextWaveMainWindow(QMainWindow):
      #pixmap = pixmap.scaled(SPOTS_WIDTH_WIN,SPOTS_HEIGHT_WIN, Qt.KeepAspectRatio)
      pixmap_label.setPixmap(pixmap)
      pixmap_label.mousePressEvent = self.spot_window_clicked
+     pixmap_label.setMouseTracking(True) # Move events without a button pressed: for the cross section
+     pixmap_label.mouseMoveEvent = self.spot_window_mouse_moved
+     pixmap_label.leaveEvent = self.spot_window_left
 
      #Scroll Area Properties
      self.scroll_central.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)

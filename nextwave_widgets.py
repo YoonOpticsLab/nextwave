@@ -1,4 +1,5 @@
 import nextwave_log
+import defaults
 from nextwave_log import log
 from PyQt5.QtWidgets import (QMainWindow, QLabel, QSizePolicy, QApplication, QPushButton,
                              QHBoxLayout, QVBoxLayout, QGridLayout, QScrollArea,
@@ -349,7 +350,71 @@ class ZernikeDialog(QDialog):
         self.setLayout(mainLayout)
 
         # ZOOM box
-        
+
+def draw_profiles(painter, image, x, y, zoom=1.0, full=150, shown=1.0, label_px=32, color=Qt.red):
+    """ Profiles of image's pixel values through pixel (x,y): the row drawn upward from row y, the column drawn rightward
+    from column x, each where the brightest value would go off the image the other way. With scales of the values on the
+    top and left edges. The painter draws the image zoom times its size; full: the drawn height (painter pixels) of the
+    image's brightest value. shown: screen pixels per painter pixel (if the result is resized for display), so that the
+    labels are label_px tall on the screen. color: of the lines and labels """
+    height, width = image.shape[:2]
+    if not (0 <= x < width and 0 <= y < height):
+        return
+    w, h = width * zoom, height * zoom
+    px, py = (x + 0.5) * zoom, (y + 0.5) * zoom # The pixel's center
+    vmax = max(float(image.max()), 1.0)
+    scale = full / vmax
+    dir_x = 1 if px + full < w else -1 # Column profile: right, else left
+    dir_y = -1 if py - full >= 0 else 1 # Row profile: up, else down
+    row = image[y, :].astype(float) * scale
+    col = image[:, x].astype(float) * scale
+
+    faint = QColor(color); faint.setAlpha(90)
+    painter.setPen(QPen(faint, 1.0, Qt.DashLine)) # The baselines: row y and column x
+    painter.drawLines([QLineF(0, py, w, py), QLineF(px, 0, px, h)])
+
+    painter.setPen(QPen(color, getattr(defaults, 'ui_cross_section_width', 1.5)))
+    painter.drawPolyline(QPolygonF([QPointF((i + 0.5) * zoom, py + dir_y * row[i]) for i in range(width)]))
+    painter.drawPolyline(QPolygonF([QPointF(px + dir_x * col[j], (j + 0.5) * zoom) for j in range(height)]))
+
+    # Scales (pixel values): along the top for the column profile, down the left side for the row profile
+    font = QFont(painter.font())
+    font.setPixelSize(max(int(label_px / shown), 1))
+    painter.setFont(font)
+    tick = 8 / shown
+    # A round step (1, 2 or 5 x 10^n) giving at most 5 ticks above 0, and far enough apart that the labels don't overlap
+    metrics = QtGui.QFontMetricsF(font)
+    min_gap = max(metrics.width('%g' % vmax), metrics.height()) + 4 / shown
+    step = 10 ** np.floor(np.log10(vmax / 4))
+    mults = (1, 2, 5)
+    n = 0
+    while vmax / step > 5 or step * scale < min_gap:
+        step = step / mults[n % 3] * mults[(n + 1) % 3] * (10 if n % 3 == 2 else 1)
+        n += 1
+    for v in np.arange(0, vmax + step / 2, step):
+        label = '%g' % v
+        tx = px + dir_x * v * scale
+        if 0 <= tx < w:
+            painter.drawLine(QLineF(tx, 0, tx, tick))
+            painter.drawText(QPointF(tx + 2 / shown, tick + font.pixelSize()), label)
+        ty = py + dir_y * v * scale
+        if 0 <= ty < h:
+            painter.drawLine(QLineF(0, ty, tick, ty))
+            painter.drawText(QPointF(tick + 2 / shown, ty + font.pixelSize() / 2.5), label)
+
+ZOOM_SIZE = 200 # The zoom popup's image (screen pixels)
+ZOOM_COLORMAP = 'Spectral_r' # The zoom popup's "Colormap": blue (low) through yellow to red (high). ('Spectral' is the other way round)
+ZOOM_COLORBAR_WIDTH = 60
+
+def nice_step(span, max_ticks=5):
+    """ A round step (1, 2 or 5 x 10^n) giving at most max_ticks ticks across span """
+    span = max(float(span), 1e-9)
+    step = 10 ** np.floor(np.log10(span / max_ticks))
+    for mult in (1, 2, 5, 10):
+        if span / (step * mult) <= max_ticks:
+            return step * mult
+    return step * 10
+
 class BoxInfoDialog(QDialog):
     def __init__(self,titl,ui_parent):
         super().__init__(ui_parent)
@@ -367,8 +432,43 @@ class BoxInfoDialog(QDialog):
         image_label = QLabel()
         image_label.setAlignment(Qt.AlignCenter)
         self.image_label=image_label
-        layout.addWidget(self.image_label)
+        self.colorbar_label = QLabel() # Intensity scale for "Colormap"
+        self.colorbar_label.setFixedWidth(ZOOM_COLORBAR_WIDTH)
+        self.colorbar_label.hide()
+        layout_image = QHBoxLayout()
+        layout_image.addWidget(self.image_label)
+        layout_image.addWidget(self.colorbar_label)
+        layout.addLayout(layout_image)
+        self.chk_profile = QCheckBox("Show profile")
+        layout.addWidget(self.chk_profile)
+        self.chk_colormap = QCheckBox("Colormap (box's min to max)")
+        self.chk_colormap.toggled.connect(self.colorbar_label.setVisible)
+        layout.addWidget(self.chk_colormap)
         self.setLayout(layout)
+
+        import matplotlib
+        self.colormap_lut = (matplotlib.colormaps[ZOOM_COLORMAP](np.linspace(0, 1, 256))[:, :3] * 255).astype(np.uint8)
+
+        # The profile goes through the pixel under the cursor (else through the centroid)
+        self.cursor_pixel = None
+        image_label.setMouseTracking(True)
+        image_label.mouseMoveEvent = self.image_mouse_moved
+        image_label.leaveEvent = self.image_mouse_left
+
+    def image_mouse_moved(self, event):
+        pixmap = self.image_label.pixmap()
+        if pixmap is None or pixmap.isNull() or getattr(self, 'box_pix', None) is None:
+            self.cursor_pixel = None
+            return
+        off_x = (self.image_label.width() - pixmap.width()) / 2.0 # (The image is centered in the label)
+        off_y = (self.image_label.height() - pixmap.height()) / 2.0
+        height, width = self.box_pix.shape[:2]
+        x = int((event.pos().x() - off_x) * width / pixmap.width())
+        y = int((event.pos().y() - off_y) * height / pixmap.height())
+        self.cursor_pixel = (x, y) if (0 <= x < width and 0 <= y < height) else None
+
+    def image_mouse_left(self, event):
+        self.cursor_pixel = None
 
     def set_box(self,n,box_pix, cent_x, cent_y, centroid_x_abs,centroid_y_abs, box_x,box_y):
         line1="n=%d"%n
@@ -385,6 +485,8 @@ class BoxInfoDialog(QDialog):
         self.box_pix=box_pix
         self.cent_x=cent_x
         self.cent_y=cent_y
+        self.box_x=box_x
+        self.box_y=box_y
         self.nbox = n
 
     def update_ui(self):
@@ -394,30 +496,87 @@ class BoxInfoDialog(QDialog):
         width=bits.shape[1]
         height=bits.shape[0]
         bytesPerLine = int(totalBytes/height)
-        qimage = QImage(bits,width,height,bytesPerLine,QImage.Format_Indexed8)
+        use_colormap = self.chk_colormap.isChecked() and bits.size > 0
+        if use_colormap:
+            # The box's own range, so that every level in it is seen
+            vmin, vmax = float(bits.min()), float(bits.max())
+            idx = np.clip((bits.astype(float) - vmin) / max(vmax - vmin, 1e-9) * 255, 0, 255).astype(np.uint8)
+            rgb = np.ascontiguousarray(self.colormap_lut[idx])
+            qimage = QImage(rgb.data, width, height, 3*width, QImage.Format_RGB888)
+        else:
+            qimage = QImage(bits,width,height,bytesPerLine,QImage.Format_Indexed8)
 
-        pixmap = QPixmap(qimage)
+        pixmap = QPixmap(qimage) # (A copy: rgb can go)
 
-        painter = QPainter()
-        painter.begin(pixmap)
+        overlay = Qt.black if use_colormap else Qt.red # (The colormap has red in it)
+        pixmap = pixmap.scaled(ZOOM_SIZE,ZOOM_SIZE,Qt.KeepAspectRatio)
+        zoom = pixmap.width() / width
+        if self.chk_profile.isChecked() and min(bits.shape[:2]) > 0:
+            # Drawn on the enlarged image, so the lines and numbers are sharp
+            if self.cursor_pixel is not None:
+                xy = self.cursor_pixel
+            elif np.isfinite(self.cent_x) and np.isfinite(self.cent_y):
+                xy = (int(round(self.cent_x)), int(round(self.cent_y))) # The pixel the centroid is in
+            else:
+                xy = None # (No centroid: a profile only under the cursor)
+            if xy is not None:
+                painter = QPainter(pixmap)
+                draw_profiles(painter, bits, *xy, zoom=zoom, full=0.4 * ZOOM_SIZE, label_px=13, color=overlay)
+                painter.end()
 
-        pen = QPen(Qt.red, 1.0)
-        painter.setPen(pen)
-        points=[QPointF(self.cent_x,self.cent_y)]
-        painter.drawPoints(points)
+        # Markers, drawn on the enlarged image. Box coordinates are pixel indices (pixel i's center is i), so its center on screen is (i+0.5)*zoom
+        to_screen = lambda x, y: QPointF((x + 0.5) * zoom, (y + 0.5) * zoom)
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.Antialiasing)
+        radius = max(zoom * 0.3, 2.5)
+        if np.isfinite(self.cent_x) and np.isfinite(self.cent_y):
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QColor(overlay))
+            painter.drawEllipse(to_screen(self.cent_x, self.cent_y), radius, radius)
 
-        if self.ui_parent.draw_predicted: 
-            pen2 = QPen(Qt.green, 1.0)
-            painter.setPen(pen2)
-            points_centroids=[QPointF(
-                self.ui_parent.engine.offline.est_x[n],
-                self.ui_parent.engine.offline.est_y[n])
-                              for n in np.arange(self.ui_parent.engine.num_boxes)]
-            painter.drawPoints(points_centroids)
-
+        if self.ui_parent.draw_predicted:
+            # This box's spot position estimated from the Zernikes (whole-image coordinates: the box's upper left is as in the main window)
+            try:
+                bs = self.ui_parent.engine.box_size_pixel
+                est_x = self.ui_parent.engine.offline.est_x[self.nbox] - int(self.box_x - bs//2)
+                est_y = self.ui_parent.engine.offline.est_y[self.nbox] - int(self.box_y - bs//2)
+                if np.isfinite(est_x) and np.isfinite(est_y):
+                    painter.setPen(QPen(Qt.green, 1.5))
+                    painter.setBrush(Qt.NoBrush)
+                    painter.drawEllipse(to_screen(est_x, est_y), radius + 1.5, radius + 1.5)
+            except (AttributeError, IndexError):
+                pass # Nothing estimated yet
         painter.end()
-        pixmap = pixmap.scaled(200,200,Qt.KeepAspectRatio)
+
         self.image_label.setPixmap(pixmap)
+        if use_colormap:
+            self.colorbar_label.setPixmap(self.make_colorbar(vmin, vmax, pixmap.height()))
+
+    def make_colorbar(self, vmin, vmax, height):
+        """ The colormap from vmin (bottom) to vmax (top), with intensity values """
+        bar = QPixmap(ZOOM_COLORBAR_WIDTH, height)
+        bar.fill(self.palette().color(QPalette.Window))
+        painter = QPainter(bar)
+        bar_x, bar_w = 2, 14
+        for row in range(height): # Top row is the max
+            r, g, b = self.colormap_lut[int(round((height - 1 - row) / max(height - 1, 1) * 255))]
+            painter.setPen(QColor(int(r), int(g), int(b)))
+            painter.drawLine(bar_x, row, bar_x + bar_w - 1, row)
+
+        font = QFont(painter.font())
+        font.setPixelSize(11)
+        painter.setFont(font)
+        painter.setPen(self.palette().color(QPalette.WindowText))
+        span = max(vmax - vmin, 1e-9)
+        step = nice_step(span, 5)
+        y_of = lambda v: (height - 1) * (1 - (v - vmin) / span)
+        ticks = list(np.arange(np.ceil(vmin / step) * step, vmax + step * 1e-6, step))
+        for v in ticks:
+            y = y_of(v)
+            painter.drawLine(QLineF(bar_x + bar_w, y, bar_x + bar_w + 4, y))
+            painter.drawText(QPointF(bar_x + bar_w + 7, min(max(y + 4, 10), height - 1)), '%g' % v)
+        painter.end()
+        return bar
 
     def closeEvent(self, event):
         self.ui_parent.box_info = -1

@@ -30,6 +30,9 @@ ui_centroid_size=3.0
 
 ui_normalize_max = 50
 
+ui_cross_section_height = 150 # Settings->UI "Show cross section": height (image pixels) of the brightest pixel in the image. Both profiles share this scale
+ui_cross_section_width = 1.5
+
 ############################################################
 # For offline processing: (originally offline.py)
 ############################################################
