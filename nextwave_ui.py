@@ -1,5 +1,6 @@
 from nextwave_log import log
 import nextwave_log
+import re
 from PyQt5.QtWidgets import (QMainWindow, QLabel, QSizePolicy, QApplication, QPushButton,
                              QHBoxLayout, QVBoxLayout, QGridLayout, QScrollArea, QMessageBox,
                              QWidget, QGroupBox, QTabWidget, QTextEdit, QSpinBox, QDoubleSpinBox, QSlider,
@@ -27,6 +28,7 @@ from nextwave_code import NextwaveEngine
 from nextwave_sockets import NextwaveSocketComm
 import defaults
 import offline_parallel
+import offline as offline_module # (Its file types and helpers. "offline" is a common name here)
 
 from nextwave_widgets import draw_profiles, ZernikeDialog, BoxInfoDialog, ActuatorPlot, MyBarWidget, OfflineDialog, FrameGalleryModel, FrameSlider, LogViewer
 
@@ -255,8 +257,8 @@ class NextWaveMainWindow(QMainWindow):
     return QFileDialog.getOpenFileNames(self, caption, self.load_setting(folder_key), ";;".join(filters), default_filter)
 
  def offline_load_image(self):
-    filters=['Cam1 Images (sweep_cam1_*.bmp)', 'Movies (*.avi)', 'PNGs (*.png)', 'BMP Directory (*.bmp)', 'Binary files (*.bin)', 'files (*.*)']
-    thedir = self.choose_offline_files("Choose file", "ui/folder", filters,
+    filters=[offline_module.LOAD_FILTER, 'All files (*)'] # A movie, or images (several: one sequence, in name order)
+    thedir = self.choose_offline_files("Choose a movie, or images", "ui/folder", filters,
                 getattr(defaults, 'OFFLINE_LOAD_FILTER', filters[0]) )
 
     if len(thedir[0])>0: # (Empty if cancelled)
@@ -366,7 +368,9 @@ class NextWaveMainWindow(QMainWindow):
         self.batch['failed'].append(os.path.basename(self.batch['movies'][self.batch['index']]))
         QTimer.singleShot(0, self.batch_next) # Next movie
         return
-    QMessageBox.warning(self, "Couldn't load", "Loading failed:\n\n" + error_text.strip().splitlines()[-1])
+    message = error_text.strip().splitlines()[-1]
+    message = re.sub(r'^[\w.]+(Error|Exception|Mismatch): ', '', message) # (Without the error's type, e.g. "ValueError: ")
+    QMessageBox.warning(self, "Couldn't load", "Loading failed:\n\n" + message)
 
  @QtCore.pyqtSlot(object)
  def show_first_frame(self, image):
@@ -562,9 +566,8 @@ class NextWaveMainWindow(QMainWindow):
     self.log_viewer.activateWindow()
 
  def offline_load_background(self):
-    #ffilt='Movies (*.avi);; Binary files (*.bin);; BMP Images (*.bmp);; files (*.*)'
-    filters=['Cam1 Images (sweep_cam1_*.bmp)']
-    thedir = self.choose_offline_files("Choose background file", "ui/folder_background", filters,
+    filters=[offline_module.LOAD_FILTER, 'All files (*)']
+    thedir = self.choose_offline_files("Choose the background: a movie, or images", "ui/folder_background", filters,
                 getattr(defaults, 'OFFLINE_BACKGROUND_FILTER', filters[0]) )
     if len(thedir[0])>0: # (Empty if cancelled)
         dirname = os.path.dirname(thedir[0][0])

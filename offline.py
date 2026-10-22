@@ -2,6 +2,7 @@ from nextwave_log import log
 import numpy as np
 import sys
 import os
+import re
 import time
 import pickle
 from pathlib import Path
@@ -46,7 +47,7 @@ os.environ["PATH"] += os.pathsep + current_dir
 import ffmpeg 
 
 import ffmpegcv # Read AVI... Better than OpenCV (built-in ffmpeg?)
-from PIL import Image, TiffImagePlugin # Needed
+from PIL import Image, ImageSequence, TiffImagePlugin # Needed
 
 from PyQt5.QtCore import QObject, pyqtSignal
 
@@ -88,6 +89,44 @@ def limit_zernikes(zernikes):
 FLAG_FLASH = 1 # The frame's mean brightness is over defaults.FLASH_RATIO_THRESHOLD times the movie's median: a flash
 # (Next flag: 2, then 4, ... so they can be combined)
 MAX_EXPORT_ZERNIKES = 65 # Zernike columns (Z1..) of the exported CSV
+
+# What's used when it can't be read from the files' names and folders (see filename_metadata)
+NO_SUBJECT = "NONAME"
+NO_CONDITION = "NONE"
+NO_SCAN_DIR = "X"
+
+MOVIE_EXTENSIONS = ('.avi',)
+IMAGE_EXTENSIONS = ('.png', '.bmp', '.tif', '.tiff')
+LOAD_FILTER = "Movies and images (*.avi *.png *.bmp *.tif *.tiff)" # The load dialogs' file types. (Also readable: .bin, a raw square 8-bit image)
+
+def natural_key(path):
+    """ Sort key: names in order, with their numbers compared as numbers (frame_2 before frame_10) """
+    return [int(t) if t.isdigit() else t.lower() for t in re.split(r'(\d+)', os.path.basename(path))]
+
+def file_number(path):
+    """ The number at the end of a file's name (sweep_cam1_H_1172.bmp: 1172; frame-007.png: 7), or None """
+    m = re.search(r'(\d+)$', Path(path).stem)
+    return int(m.group(1)) if m else None
+
+def filename_metadata(path, scan_dirs):
+    """ (subject, condition, scan direction, where the scan direction came from) of a recording, from its path: the folders
+        .../SUBJECT/CONDITION/SCANDIR/file, if SCANDIR is one of scan_dirs (e.g. H, V, D, D2): 'folders'. Else the scan direction
+        from the name (..._cam1_H_...), if it has one: 'name'. Whatever isn't found is NO_SUBJECT, NO_CONDITION, NO_SCAN_DIR """
+    known = {str(d).upper(): d for d in scan_dirs}
+    parts = Path(path).parts
+    if len(parts) >= 4 and parts[-2].upper() in known:
+        return parts[-4].upper(), parts[-3].upper(), known[parts[-2].upper()], 'folders' # (Upper case, as always)
+    matches = re.findall(r'cam\d+_(D2|H|V|D)(?=_|$)', Path(path).stem, re.IGNORECASE)
+    if matches and matches[-1].upper() in known:
+        return NO_SUBJECT, NO_CONDITION, known[matches[-1].upper()], 'name'
+    return NO_SUBJECT, NO_CONDITION, NO_SCAN_DIR, None
+
+def gray_frame(a):
+    """ One frame as a 2-D array: color (RGB or RGBA) averaged over R, G, B """
+    a = np.asarray(a)
+    if a.ndim == 3:
+        a = a[:, :, :3].mean(2)
+    return a
 
 def classify_frames(movie, flash_ratio, dark_ratio, peak_ratio=0):
     """ (flash frames, dark frames): sets of frame numbers, by mean brightness relative to the movie's median.
@@ -196,13 +235,13 @@ class info_saver():
         n_export = nframe - first_frame + 1 # 1-based, counting from the first frame exported
         t_sec = (n_export-1) / float(getattr(defaults,'FRAME_RATE',100.0))
         if not data_record is None:
-            try:
-                s=("%s,%s,%s,%0.3f,%0.2f,%0.3f,%d,%d,%d,")%(self.offline.sub_id,self.offline.scan_dir,self.offline.fnames[nframe],t_sec,
-                defaults.scan_frame_to_ecc[self.offline.scan_dir][nframe],data_record['pupil_diam'],data_record['cx'],data_record['cy'],
-                data_record.get('flags',0))
-            except: # without the sub_id params
-                s=("%s,%s,%d,%0.3f,%0.2f,%0.3f,%d,%d,%d,")%("","",n_export,t_sec,0.0,data_record['pupil_diam'],data_record['cx'],data_record['cy'],
-                data_record.get('flags',0))
+            off = self.offline
+            numbers = getattr(off, 'fnames', None)
+            frame_num = numbers[nframe] if (numbers is not None and 0 <= nframe < len(numbers)) else n_export # (From the file name, else the count)
+            ecc = off.eccentricity(nframe)
+            s=("%s,%s,%s,%0.3f,%0.2f,%0.3f,%d,%d,%d,")%(off.sub_id,off.scan_dir,frame_num,t_sec,
+                ecc if ecc is not None else 0.0, # (0 when not known, as always)
+                data_record['pupil_diam'],data_record['cx'],data_record['cy'],data_record.get('flags',0))
             for nz1,z1 in enumerate(limit_zernikes(data_record['zernikes'])): # (Also for results saved before this rule)
                 s += "%0.6f,"%(z1)
         else:
@@ -224,6 +263,9 @@ class info_saver():
         except FileNotFoundError:
             self.data = {}
 
+
+class SizeMismatch(ValueError):
+    """ Frames of different sizes in what's being loaded """
 
 class NextwaveOffline():
     """ Class to manage:
@@ -307,11 +349,90 @@ class NextwaveOffline():
         if self.dark_frames:
             log.info("Much darker frames (0-based): %s"%sorted(self.dark_frames), flush=True)
 
-    def _file_kind(self, file_info):
-        """ What to load, as text that contains '.avi', '.bmp', etc. From the file's extension, so it works whatever
-            wildcard the user chose (e.g. "files (*.*)"); if the extension isn't one we know, from the dialog's filter text. """
-        ext = os.path.splitext(file_info[0][0])[1].lower()
-        return ext if ext in ('.bin', '.png', '.bmp', '.avi') else file_info[1]
+    def read_frames(self, files, what="frames", preview=False):
+        """ All the frames of files, in name order (see natural_key), as one sequence: every frame of a movie (.avi), every page
+            of a TIFF, one frame per other image (.png, .bmp; .bin: a raw square 8-bit image). Any mix of them. Frames are made gray
+            (color averaged) and 8-bit: if any is brighter than 255, all are divided by the same power of 2.
+            Returns (frames: array of n x height x width, uint8; numbers: for each frame, the number at the end of its file's
+            name, or None (no number, or a frame of a movie or multi-page TIFF)). preview: show the first frame once it's read """
+        files = sorted(files, key=natural_key)
+        frames, numbers = [], []
+        avi_limit = getattr(defaults, 'AVI_DEBUG_FRAMES', -1)
+        one_file = len(files) == 1
+
+        def add(frame, number, source):
+            if frames and frame.shape != frames[0].shape:
+                raise SizeMismatch("%s is %dx%d, but the frames before it are %dx%d: they must all be the same size" % (
+                    os.path.basename(source), frame.shape[1], frame.shape[0], frames[0].shape[1], frames[0].shape[0]))
+            frames.append(frame)
+            numbers.append(number)
+            if preview and len(frames) == 1:
+                self._preview(np.clip(frame, 0, 255).astype(np.uint8))
+
+        for nfile, path in enumerate(files):
+            ext = os.path.splitext(path)[1].lower()
+            if ext in MOVIE_EXTENSIONS:
+                kinds = ('movie',)
+            elif ext == '.bin':
+                kinds = ('bin',)
+            elif ext in IMAGE_EXTENSIONS:
+                kinds = ('image',)
+            else:
+                kinds = ('image', 'movie') # Not a type we know: whichever can read it (else it's skipped)
+            n_before = len(frames)
+            for kind in kinds:
+                try:
+                    if kind == 'movie':
+                        with ffmpegcv.VideoCapture(path) as vidin:
+                            total = self._frame_count(vidin, avi_limit)
+                            for nf, frame in enumerate(vidin):
+                                if avi_limit > 0 and nf >= avi_limit: # (At most AVI_DEBUG_FRAMES)
+                                    break
+                                add(frame.mean(2).astype(np.uint8), None, path) # (Truncated, as always)
+                                if one_file:
+                                    self.signals.report("Reading %s" % what, nf+1, total)
+                    elif kind == 'bin':
+                        bytez = np.fromfile(path, 'uint8')
+                        width = int(np.sqrt(len(bytez))) # Hopefully it's square
+                        add(bytez[:width*width].reshape(width, width), file_number(path), path)
+                    else:
+                        with Image.open(path) as im:
+                            pages = [page.copy() for page in ImageSequence.Iterator(im)]
+                        for npage, page in enumerate(pages):
+                            if page.mode in ('P', '1', 'LA', 'PA'): # (Palette, 1-bit, with alpha)
+                                page = page.convert('L')
+                            add(gray_frame(page), file_number(path) if len(pages) == 1 else None, path)
+                            if one_file and len(pages) > 1:
+                                self.signals.report("Reading %s" % what, npage+1, len(pages))
+                    break # Read it
+                except SizeMismatch:
+                    raise
+                except Exception as e:
+                    del frames[n_before:], numbers[n_before:] # (Anything from a partly read file)
+                    if kind == kinds[-1]:
+                        if len(kinds) > 1: # Not a type we know (e.g. results, .pkl, chosen with "All files"): leave it out
+                            log.info("Skipped %s: not a movie or an image" % os.path.basename(path), flush=True)
+                            break
+                        raise ValueError("Couldn't read %s: %s" % (os.path.basename(path), str(e).strip().splitlines()[-1] if str(e).strip() else type(e).__name__)) from e
+            if not one_file:
+                self.signals.report("Reading %s" % what, nfile+1, len(files))
+
+        if not frames:
+            raise ValueError("No movie or image frames in " + ", ".join(os.path.basename(f) for f in files[:5]) + (" ..." if len(files) > 5 else ""))
+
+        if all(f.dtype == np.uint8 for f in frames):
+            movie = np.stack(frames)
+        else:
+            # Not all 8-bit (16-bit images, or averaged color). To whole numbers by truncating, as 8-bit color always was; and if
+            # anything is over 255, everything is divided by the same power of 2 (so the frames stay comparable)
+            peak = max(float(np.max(f)) for f in frames)
+            shift = 0
+            while peak / (1 << shift) > 255:
+                shift += 1
+            if shift:
+                log.info("The frames are brighter than 8 bits (max %g): all divided by %d" % (peak, 1 << shift), flush=True)
+            movie = np.stack([np.clip(np.asarray(f, dtype=np.float64) / (1 << shift), 0, 255).astype(np.uint8) for f in frames])
+        return movie, numbers
 
     def _frame_count(self, vidin, limit):
         """ Number of frames we'll read from an open video, for the progress bar. 0 if it can't say. """
@@ -320,7 +441,7 @@ class NextwaveOffline():
         except Exception:
             return 0
         if limit > 0:
-            count = min(count, limit + 1) # (The read loop stops after frame index `limit`)
+            count = min(count, limit) # (At most `limit` frames are read)
         return count
 
     def _preview(self, frame):
@@ -398,83 +519,26 @@ class NextwaveOffline():
         self.finish_load(restore=False)
 
     def load_offline_background_data(self,file_info):
-        # file_info: from dialog. Tuple: (list of files, file types)
-        kind = self._file_kind(file_info)
-        if '.bin' in kind:
-            pass # TODO
-        elif '.avi' in kind:
-            fname=file_info[0][0]
-            #print("Offline movie: ",fname)
+        """ Load a background (any files read_frames can read) and subtract it from the movie: frame by frame if it has as many
+            frames as the movie, else its mean from every frame. file_info: (list of files, the dialog's file type, unused) """
+        background, _ = self.read_frames(file_info[0], "background frames")
+        log.info("Background: read %d frames of %dx%d" % background.shape)
+        if background.shape[1:] != self.offline_movie.shape[1:]:
+            raise ValueError("The background is %dx%d, the movie %dx%d: they must be the same size" % (
+                background.shape[2], background.shape[1], self.offline_movie.shape[2], self.offline_movie.shape[1]))
+        self.offline_background = background
 
-            vidin = ffmpegcv.VideoCapture(fname)
-            buf_movie=None
-
-            with vidin:
-                total = self._frame_count(vidin, 0)
-                for nf,frame in enumerate(vidin):
-                    #f1=frame.mean(2)[0:1024,0:1024] # Avg RGB. TODO: crop hard-code
-                    f1=frame.mean(2)
-                    if buf_movie is None:
-                        buf_movie=np.zeros( (50,f1.shape[0],f1.shape[1]), dtype='uint8') # TODO: grow new chunk if necessary
-                    buf_movie[nf]=f1
-                    log.debug('%04d %03d '%(nf,f1.mean() ),end=' ')
-                    self.signals.report("Reading background frames", nf+1, total)
-
-            log.info("Background: read %d frames of %dx%d"%(nf,f1.shape[0],f1.shape[1]) )
-            buf_movie=buf_movie[0:nf,:,:] # Trim to correct
-            self.offline_background = buf_movie
-
-            self.signals.report("Subtracting background") # (One long step)
-            if self.offline_movie.shape[0] != self.offline_background.shape[0]:
-                log.info("Sub average ")
-                # Different number of frames in background and movie. Subtract mean background from each frame
-                offline_mean = np.array(self.offline_background.mean(0),dtype='int32') # Mean across frames
-                self.offline_movie = self.offline_movie - offline_mean
-                self.offline_movie[ self.offline_movie<0] = 0
-                self.offline_movie = np.array( self.offline_movie, dtype='uint8')
-                self._add_to_ui(self.offline_movie)
-            else:
-                log.info("Sub whole movie")
-                subbed = np.array(self.offline_movie,dtype='int32') - self.offline_background
-                subbed[subbed<0]=0
-                subbed=np.array( subbed, dtype='uint8')
-                self._add_to_ui( subbed)                
-        elif '.bmp' in kind:
-            buf_movie=None
-            nf=0 # USE nf instead of nf_x to allow skipping (e.g. if directory is in there)
-            n_files = sum(".bmp" in frame1 for frame1 in file_info[0])
-            for nf_x,frame1 in enumerate(file_info[0]):
-                if not (".bmp" in frame1):
-                    continue
-                #print("Offline: ",nf,frame1)
-                im = Image.open(frame1)
-                f1 = np.array(im) # TODO: assumes Im is already 8bit monochrome
-                if buf_movie is None:
-                        buf_movie=np.zeros( (50,f1.shape[0],f1.shape[1]), dtype='uint8') # TODO: grow new chunk if necessary
-                buf_movie[nf]=f1
-                nf += 1
-                self.signals.report("Reading background frames", nf, n_files)
-
-            log.info("Read %d frames of %dx%d"%(nf,f1.shape[0],f1.shape[1]) )
-            buf_movie=buf_movie[0:nf,:,:] # Trim to correct
-            self.offline_background = buf_movie
-
-            self.signals.report("Subtracting background") # (One long step)
-            if self.offline_movie.shape[0] != self.offline_background.shape[0]:
-                log.info("Sub average")
-                # Different number of frames in background and movie. Subtract mean background from each frame
-                offline_mean = np.array(self.offline_background.mean(0),dtype='int32') # Mean across frames
-                self.offline_movie = self.offline_movie - offline_mean
-                self.offline_movie[ self.offline_movie<0] = 0
-                self.offline_movie = np.array( self.offline_movie, dtype='uint8')
-                self._add_to_ui(self.offline_movie)
-            else:
-                log.info("Sub each frame from each frame")
-                subbed = np.array(self.offline_movie,dtype='int32') - self.offline_background
-                subbed[subbed<0]=0
-                subbed=np.array( subbed, dtype='uint8')
-                self.offline_movie = subbed                
-                self._add_to_ui( subbed)                
+        self.signals.report("Subtracting background") # (One long step)
+        if self.offline_movie.shape[0] != background.shape[0]:
+            log.info("Different numbers of frames: subtracting the background's mean from each frame")
+            subtract = np.array(background.mean(0), dtype='int32') # Mean across frames
+        else:
+            log.info("Subtracting each background frame from its movie frame")
+            subtract = background
+        subbed = np.array(self.offline_movie, dtype='int32') - subtract
+        subbed[subbed < 0] = 0
+        self.offline_movie = np.array(subbed, dtype='uint8')
+        self._add_to_ui(self.offline_movie)
 
     def load_offline(self,file_info):
         """ Load a movie, all in this thread. (The UI does load_offline_data in a worker, then finish_load.) """
@@ -482,210 +546,25 @@ class NextwaveOffline():
         self.finish_load(restore=True)
 
     def load_offline_data(self,file_info):
+        """ Load the frames to process: any files read_frames can read, as one sequence. file_info: (list of files, the dialog's
+            file type, unused). The subject, condition and scan direction come from the path, if it has them (see
+            filename_metadata); the frame numbers exported, from the file names, if they all end in different numbers """
+        files = sorted(file_info[0], key=natural_key)
+        buf_movie, numbers = self.read_frames(files, "frames", preview=True) # (First: if it fails, what was loaded stays as it was)
+        nf = buf_movie.shape[0]
+
         self.occupancy_template = None # (Made from the movie, so a new movie needs a new one)
-        # file_info: from dialog. Tuple: (list of files, file types)
-        fname = file_info[0][0]
-        self.offline_fname = fname
-        kind = self._file_kind(file_info)
-
+        self.offline_files = files
+        self.offline_fname = files[0] # (Its results are saved next to it, as <name>.pkl)
         self.parent.mode_offline=True
-        
-        self.scan_dir ="X"
-        self.condition="NONE"
-        self.sub_id="NONAME"
-        
-        if '.bin' in kind:
-            log.info("Offline: ",file_info[0][0])
-            #fil=open(file_info[0][0],'rb')
-            bytez=np.fromfile(file_info[0][0],'uint8')
-            width =int(np.sqrt(len(bytez)) ) #  Hopefully it's square
-            log.debug( width )
-
-            dims=np.zeros(2,dtype='uint16')
-            dims[0]=width
-            dims[1]=width
-            self.dims = dims
-            self.parent.comm.write_image(dims,bytez)
-
-        elif '.png' in kind:
-            buf_movie=None
-            pathname = file_info[0][0].upper()
-
-            NO_FILENAME=True
-            GY_RESTRUCTURE=True
-            if NO_FILENAME:
-                self.scan_dir ="X"
-                self.condition="NONE"
-                self.sub_id="NONAME"
-            elif GY_RESTRUCTURE:
-                # Find the last 3 (from the right) subdirs
-                i0=pathname[:].rfind('/')
-                i1=pathname[:i0].find('/')
-                i2=pathname[:i1].find('/')
-                self.scan_dir = pathname[i0+1:]
-                self.condition=pathname[i1+1:i0]
-                self.sub_id=pathname[i2+1:i1]
-                #print( self.scan_dir, self.condition, self.sub_id )
-            else:
-                idxSub=pathname.find("SWS") # TODO
-                if idxSub==-1:
-                    self.sub_id="NONAME"
-                else:
-                    self.sub_id = pathname[idxSub+4:idxSub+8]
-                
-                # For Chloe's file layout    
-                # Condition might exist as a middle directory, between subId and last directory
-                i0=pathname[idxSub:].find('/') + idxSub + 1
-                i1=pathname[i0:].find('/') + i0 + 1
-                i2=pathname[i1:].find('/') + i1 + 1
-                if True or (i1==i2) or -1 in (i0,i1,i2):
-                    self.condition="COND" # There was no directory between subId and last
-                else:
-                    self.condition=pathname[i0:i1-1]
-
-                idxScanDir=pathname.find("CAM") # TODO
-                if idxScanDir==-1:
-                    self.scan_dir='X'
-                else:
-                    idxScanDir += 5
-                    if pathname[idxScanDir:idxScanDir+2] == 'D2':
-                        self.scan_dir = 'D2'
-                    else:
-                        self.scan_dir = pathname[idxScanDir:idxScanDir+1]  
-            
-            nf=0 # USE nf instead of nf_x to allow skipping (e.g. if directory is in there)
-            self.fnames = ["" for n in np.arange( len(file_info[0]) )]
-            n_files = sum(".png" in frame1 for frame1 in file_info[0])
-
-            for nf_x,frame1 in enumerate(file_info[0]):
-                if not (".png" in frame1):
-                    continue
-                #print("Offline: ",nf,frame1)
-                im = Image.open(frame1)
-                f1 = np.array(im) # TODO: assumes Im is already 8bit monochrome
-                if len(f1.shape)==3: # It's an RGB
-                    f1 = f1.mean(2)
-                if buf_movie is None:
-                        buf_movie=np.zeros( (2048,f1.shape[0],f1.shape[1]), dtype='uint8') # TODO: grow new chunk if necessary
-                buf_movie[nf]=f1
-                self.fnames[nf] = frame1
-                if nf == 0:
-                    self._preview(buf_movie[0])
-                nf += 1
-                self.signals.report("Reading frames", nf, n_files)
-
-            buf_movie = buf_movie[0:nf]
-            self.fnames = self.fnames[0:nf]
-            self.rotations = [None]*nf
-            
-            log.info(pathname, self.condition, self.scan_dir, self.sub_id)
-            log.info("Read %d frames of %dx%d"%(nf,f1.shape[0],f1.shape[1]) )
-            buf_movie=buf_movie[0:nf,:,:] # Trim to correct
-            self.offline_movie = buf_movie
-            self._add_to_ui(buf_movie)
-            self.dims=np.array([buf_movie.shape[1],buf_movie.shape[2]])
-
-        elif '.bmp' in kind:
-            buf_movie=None
-            pathname = file_info[0][0].upper()
-
-            GY_RESTRUCTURE=True
-            if GY_RESTRUCTURE:
-                # Find the last 3 (from the right) subdirs
-                i0=pathname[:].rfind('/')
-                i1=pathname[:i0].rfind('/')
-                i2=pathname[:i1].rfind('/')
-                i3=pathname[:i2].rfind('/')
-                self.scan_dir = pathname[i1+1:i0]
-                self.condition=pathname[i2+1:i1]
-                self.sub_id=pathname[i3+1:i2]
-                #print( i0, i1, i2, i3, self.scan_dir, self.condition, self.sub_id )
-            else:
-                idxSub=pathname.find("SWS") # TODO
-                if idxSub==-1:
-                    self.sub_id="NONAME"
-                else:
-                    self.sub_id = pathname[idxSub+4:idxSub+8]
-                
-                # For Chloe's file layout    
-                # Condition might exist as a middle directory, between subId and last directory
-                i0=pathname[idxSub:].find('/') + idxSub + 1
-                i1=pathname[i0:].find('/') + i0 + 1
-                i2=pathname[i1:].find('/') + i1 + 1
-                if True or (i1==i2) or -1 in (i0,i1,i2):
-                    self.condition="COND" # There was no directory between subId and last
-                else:
-                    self.condition=pathname[i0:i1-1]
-
-                idxScanDir=pathname.find("CAM") # TODO
-                if idxScanDir==-1:
-                    self.scan_dir='X'
-                else:
-                    idxScanDir += 5
-                    if pathname[idxScanDir:idxScanDir+2] == 'D2':
-                        self.scan_dir = 'D2'
-                    else:
-                        self.scan_dir = pathname[idxScanDir:idxScanDir+1]  
-                        
-            nf=0 # USE nf instead of nf_x to allow skipping (e.g. if directory is in there)
-            self.fnames = ["" for n in np.arange( len(file_info[0]) )]
-            n_files = sum(".bmp" in frame1 for frame1 in file_info[0])
-            for nf_x,frame1 in enumerate(file_info[0]):
-                if not (".bmp" in frame1):
-                    continue
-                #print("Offline: ",nf,frame1)
-                im = Image.open(frame1)
-                f1 = np.array(im) # TODO: assumes Im is already 8bit monochrome
-                if buf_movie is None:
-                        buf_movie=np.zeros( (50,f1.shape[0],f1.shape[1]), dtype='uint8') # TODO: grow new chunk if necessary
-                buf_movie[nf]=f1
-                if nf == 0:
-                    self._preview(buf_movie[0])
-                
-                # Assume fname is xxxx_nnn.bmp : extract nnn
-                idx_number=frame1.rfind('_')+1
-                idx_number_after=frame1[idx_number:].find('.')+idx_number
-                #print( frame1, idx_number, frame1[idx_number:idx_number_after] )
-                self.fnames[nf] = int(frame1[idx_number:idx_number_after])
-
-                nf += 1
-                self.signals.report("Reading frames", nf, n_files)
-
-            log.info(pathname, self.condition, self.scan_dir, self.sub_id, self.fnames)
-            log.info("Read %d frames of %dx%d"%(nf,f1.shape[0],f1.shape[1]) )
-
-        elif '.avi' in kind:
-            fname=file_info[0][0]
-            log.info("Offline movie: ",fname)
-            vidin = ffmpegcv.VideoCapture(fname)
-            buf_movie=None
-
-            debug_nframes = defaults.AVI_DEBUG_FRAMES
-
-            with vidin:
-                total = self._frame_count(vidin, debug_nframes)
-                for nf,frame in enumerate(vidin):
-                    f1=frame.mean(2)
-                    if buf_movie is None:
-                        buf_movie=np.zeros( (defaults.MOVIE_MAX_FRAMES,f1.shape[0],f1.shape[1]), dtype='uint8') # TODO: grow new chunk if necessary
-                    buf_movie[nf]=f1
-                    log.debug('%04d %03d\n'%(nf,f1.mean() ),end=' ', flush=True)
-                    if nf == 0:
-                        self._preview(buf_movie[0])
-                    self.signals.report("Reading frames", nf+1, total)
-
-                    #if nf<100: # For e.g. debugging
-                    #    np.save("img_%02d.npy"%nf,f1)
-                        
-                    if debug_nframes>0 and nf>=debug_nframes:
-                        break
-
-            log.info("Read %d frames of %dx%d"%(nf,f1.shape[0],f1.shape[1]) )
-            self.fnames = ["%03d" for n in np.arange(nf)]
-
-        buf_movie=buf_movie[0:nf,:,:] # Trim to correct
-        self.fnames = self.fnames[0:nf]
+        self.sub_id, self.condition, self.scan_dir, self.scan_dir_from = filename_metadata(files[0], getattr(defaults, 'scan_frame_to_ecc', {}).keys())
+        # Each frame's number for the export: from the file names if every frame has one, all different. Else None: the frame's
+        # position (1, 2, ...) is used
+        self.fnames = numbers if (None not in numbers and len(set(numbers)) == nf) else None
         self.rotations = [None]*nf
+        log.info("Loaded %s%s: %d frames of %dx%d. Subject %s, condition %s, scan direction %s" % (
+            os.path.basename(files[0]), " (and %d more files)" % (len(files) - 1) if len(files) > 1 else "",
+            nf, buf_movie.shape[2], buf_movie.shape[1], self.sub_id, self.condition, self.scan_dir), flush=True)
 
         # Threshold anything too bright
         self.signals.report("Removing saturated pixels") # (One long step)
@@ -704,25 +583,39 @@ class NextwaveOffline():
         self.saver.unserialize() # Load previous if they exist
         # (finish_load fills in the frame list and shows the first frame's saved results)
 
+    def eccentricity(self, nframe):
+        """ The frame's eccentricity (deg) from defaults.scan_frame_to_ecc, for the scan direction; None if it isn't known. The
+            table is by position in a whole sweep, so for a scan direction from the file name (not the folders) only if there
+            are as many frames as the table has: the names may be of a few frames picked from a sweep """
+        table = getattr(defaults, 'scan_frame_to_ecc', {}).get(self.scan_dir)
+        if table is None or not (0 <= nframe < len(table)):
+            return None
+        if getattr(self, 'scan_dir_from', 'folders') == 'name' and self.max_frame != len(table):
+            return None
+        return float(table[nframe])
+
+    def export_name(self):
+        """ The exported CSV's name (no folder or .csv): a movie's own name; zc_<subject>_<condition>_<scan direction> if the
+            path has them all; else a single file's name, or the folder of several """
+        files = getattr(self, 'offline_files', [self.offline_fname])
+        if len(files) == 1 and self.offline_fname.lower().endswith(MOVIE_EXTENSIONS):
+            return Path(self.offline_fname).stem
+        if self.sub_id != NO_SUBJECT and self.condition != NO_CONDITION and self.scan_dir != NO_SCAN_DIR:
+            return "zc_%s_%s_%s" % (self.sub_id, self.condition, self.scan_dir)
+        if len(files) == 1:
+            return Path(files[0]).stem
+        return Path(files[0]).parent.name or "frames"
+
     def export_all_zernikes(self,dir1=".",overwrite=False):
         """ Export every frame's Zernikes as a CSV in dir1 (made if it isn't there); returns the CSV's path. If the file exists,
             a new one is made with _01, _02... added to its name, unless overwrite. """
         idx=0
         #out_fname = self.offline_fname + "_zern_%02d.csv"%idx        
-        stem = None
-        if self.offline_fname.lower().endswith('.avi'): # An AVI's CSV is named for it (only an AVI: the others are many files, or not named for the movie)
-            stem = "%s/%s"%(dir1,Path(self.offline_fname).stem)
-            out_fname = stem + ".csv"
-        else:
-            out_fname = "%s/zc_%s_%s_%s.csv"%(dir1,self.sub_id,self.condition,self.scan_dir)
-
+        stem = "%s/%s"%(dir1,self.export_name())
+        out_fname = stem + ".csv"
         while not overwrite and Path(out_fname).exists():
             idx += 1
-            #out_fname = self.offline_fname + "_zern_%02d.csv"%idx
-            if stem:
-                out_fname = "%s_%02d.csv"%(stem,idx)
-            else:
-                out_fname = "%s/zc_%s_%s_%s_%02d.csv"%(dir1,self.sub_id,self.condition,self.scan_dir,idx)
+            out_fname = "%s_%02d.csv"%(stem,idx)
 
         first_frame = 0 # Start this many frames before the first flash, if there is one
         trim = int(getattr(defaults,'TRIM_TO_FIRST_FLASH',0) or 0)
