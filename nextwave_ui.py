@@ -171,12 +171,23 @@ class NextWaveMainWindow(QMainWindow):
     self.worker_connected = False # Its signals are connected (see offline_autoall)
 
 
- def params_json(self):
-    f=open("./config.json")
-    self.json_data = json.load(f)
-    f.close()
+ def read_config_json(self, filename="./config.json"):
+    with open(filename) as f:
+        json_data = json.load(f)
 
+    # A relative file named in the config is relative to the current directory (as always), or else to the config's directory
+    config_dir = os.path.dirname(os.path.abspath(filename))
+    for key in ("xml_file", "influence_file"):
+        name = json_data["params"].get(key)
+        if name and not os.path.isabs(name) and not os.path.exists(name) and os.path.exists(os.path.join(config_dir, name)):
+            json_data["params"][key] = os.path.join(config_dir, name)
+
+    self.json_data = json_data
+    self.config_filename = filename
     self.pupil_diam=self.json_data["params"]["pupil_diam"]
+
+ def params_json(self):
+    self.read_config_json()
     self.offline_only=self.json_data["params"]["offline_only"]
 
     self.params = [
@@ -1068,9 +1079,49 @@ class NextWaveMainWindow(QMainWindow):
     except:
      return # cancel
 
-    clear_widget_list(self.layout_config)
+    self.show_xml_config(filename)
+
+ def show_xml_config(self, filename):
+    """ Read the XML file and show its parameters in the Config tab, replacing the ones shown """
+    self.xml_param_tree.setParent(None) # Remove the old tree from the tab
     self.reload_config(filename)
+    self.init_config_ui()
     self.edit_xml_filename.setText(filename)
+
+ def load_config_json(self):
+    """ File menu: use another config.json (instead of the one read at startup from the current directory) """
+    if self.batch or self.loading or self.worker.running:
+        QMessageBox.information(self, "Busy", "Wait for the current loading or processing to finish first.")
+        return
+    start = self.load_setting("ui/folder_config") or "."
+    filename, _ = QFileDialog.getOpenFileName(self, "Load config file", start, "Config files (*.json);;All files (*)")
+    if not filename:
+        return # cancel
+
+    old_json = self.json_data
+    old_filename = self.config_filename
+    try:
+        self.read_config_json(filename)
+        self.show_xml_config(self.json_data["params"]["xml_file"])
+    except Exception as e:
+        log.error("Couldn't load config %s: %s" % (filename, e))
+        QMessageBox.warning(self, "Load config", "Couldn't load %s:\n%s" % (filename, e))
+        self.json_data = old_json
+        self.config_filename = old_filename
+        self.pupil_diam = self.json_data["params"]["pupil_diam"]
+        return
+    self.save_setting("ui/folder_config", os.path.dirname(filename))
+
+    if self.json_data["params"]["offline_only"] != self.offline_only:
+        QMessageBox.information(self, "Load config", "offline_only differs in this config. That change takes effect only "
+                                "when NextWave is started with this config (as config.json in its directory).")
+
+    # The engine reads its optics from the XML params (see init_params): rebuild the search boxes at the config's center
+    self.engine.cx = self.json_data["params"]["cx"]
+    self.engine.cy = self.json_data["params"]["cy"]
+    self.line_pupil_diam.setText(str(self.get_param_xml("OPTICS_PupilDiameter")))
+    self.mode_init()
+    log.info("Loaded config %s (XML: %s)" % (filename, self.json_data["params"]["xml_file"]))
 
  def reload_config(self,filename=None):
      if filename is None:
@@ -1610,6 +1661,8 @@ class NextWaveMainWindow(QMainWindow):
      self.setCentralWidget(self.widget_main)
 
      menu=self.menuBar().addMenu('&File')
+     menu.addAction('L&oad config file...', self.load_config_json)
+     menu.addSeparator()
      menu.addAction('&Export Centroids + Zernikes', self.export)
      menu.addAction('Export All &Zernikes', self.export_all)
      menu.addAction('Process &directory of AVIs...', self.process_directory)
