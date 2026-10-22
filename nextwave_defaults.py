@@ -45,9 +45,9 @@ ITERATIVE_SKIP_ENLARGE=1 # 1: skip the "enlarge pupil" steps (growing from ITERA
 ITERATIVE_PUPIL_STOP_FORCE=4.0 # mm. If >0, always use this as the max pupil (as if typed into the UI's max box) instead of estimating it from each image. 0=estimate
 
 GAUSS_SD=3
-BLUR_FLOAT=0 # 1: blur each search box (by GAUSS_SD, before finding its spot) in floating point. 0: in 8 bits, as before: rounded to whole counts, which can flatten dim spots (a 30-count spot blurs to ~3) so they score below BOX_THRESH. 1 is better for dim spots, and changes centroids of bright ones slightly (~0.1-0.3 px)
-BOX_INNER_PEAK=0 # 1: if a box's brightest (blurred) point is too close to its edge to fit (background left over, a neighbor's light), use the highest peak inside the box. 0: give up on the box (NaN), as before
-BOX_THRESH=2.0 # A box whose spot (blurred by GAUSS_SD) rises less than this above the box's minimum is NaN. For dim spots, with BLUR_FLOAT=1: 1.5 (model-eye spots of ~25 counts score ~2; empty boxes < 1)
+BLUR_FLOAT=1 # 1: blur each search box (by GAUSS_SD, before finding its spot) in floating point. 0: in 8 bits, as before 2026-10: rounded to whole counts, which can flatten dim spots (a 30-count spot blurs to ~3) so they score below BOX_THRESH. 1 is better for dim spots, and changes centroids of bright ones slightly (~0.1-0.3 px). For results like those before, 0 (and BOX_INNER_PEAK=0, BOX_THRESH=2.0)
+BOX_INNER_PEAK=1 # 1: if a box's brightest (blurred) point is too close to its edge to fit (background left over, a neighbor's light), use the highest peak inside the box. 0: give up on the box (NaN), as before
+BOX_THRESH=1.5 # A box whose spot (blurred by GAUSS_SD) rises less than this above the box's minimum is NaN. 1.5 with BLUR_FLOAT=1: model-eye spots of ~25 counts score ~2, empty boxes < 1. (2.0 before 2026-10, with BLUR_FLOAT=0)
 SUBSET_FIT_SIZE=5  # Size of pixel subset to fit a Gaussian to for centroiding
 SHRINK_MIN=20 # DEtermined empirically for Chloe's movies TODO
 SHRINK_PIXELS=2 # Num. pixels to shrink search boxes by each iteration
