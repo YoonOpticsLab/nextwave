@@ -770,6 +770,17 @@ class NextwaveOffline():
             return 0,0, -997
             
         ind_max = np.unravel_index(np.argmax(box_pix, axis=None), box_pix.shape)
+        inner_peak = False # Found inside, instead of the brightest (see below)
+        if conservative_threshold and getattr(defaults,'BOX_INNER_PEAK',0) and min(box_pix.shape) > 2*sizo and (
+                min(ind_max) < sizo or ind_max[0] >= box_pix.shape[0]-sizo or ind_max[1] >= box_pix.shape[1]-sizo):
+            # The brightest is too close to the edge to fit. It may not be this box's spot, though: a neighbor's light or
+            # background left over (broad, so the blur hardly dims it) can be brighter than a dim sharp spot. If there's a
+            # peak inside (where the fit window fits: higher than all its neighbors, not just rising toward the edge), use the highest
+            peaks = (box_pix == ndimage.maximum_filter(box_pix, size=3, mode='nearest'))
+            peaks[:sizo, :] = False; peaks[-sizo:, :] = False; peaks[:, :sizo] = False; peaks[:, -sizo:] = False
+            if peaks.any():
+                ind_max = np.unravel_index(np.argmax(np.where(peaks, box_pix, -np.inf), axis=None), box_pix.shape)
+                inner_peak = True
         local_pix=box_pix[ind_max[0]-sizo:ind_max[0]+sizo+1,ind_max[1]-sizo:ind_max[1]+sizo+1]
 
         if conservative_threshold:
@@ -836,6 +847,9 @@ class NextwaveOffline():
         goody=(2*soln[A]*soln[E]-soln[D]*soln[B])/det1
         goodx=(2*soln[C]*soln[D]-soln[E]*soln[B])/det1
 
+        if inner_peak and not (abs(goodx) <= sizo and abs(goody) <= sizo):
+            return ind_max[1], ind_max[0],-999 # The fitted peak is outside the fit window: the spot is at the box's edge. Give up
+
         # Peak location inside entire box:
         goodx = goodx + ind_max[1]
         goody = goody + ind_max[0]
@@ -885,7 +899,10 @@ class NextwaveOffline():
                 ceny[nbox] = np.nan
                 self.box_metrics[nbox]=-990               
             else:
-                pix=gaussian_filter(pix,defaults.GAUSS_SD)
+                if getattr(defaults,'BLUR_FLOAT',0):
+                    pix=gaussian_filter(pix.astype(float),defaults.GAUSS_SD) # In float: on the 8-bit image it is rounded to whole counts, which flattens dim spots
+                else:
+                    pix=gaussian_filter(pix,defaults.GAUSS_SD)
                 #print( '%03d %s %s'%(nbox, str(pix.shape), str(box_size_pixel) ) )
                 centroids=self.box_fit_gauss(pix, defaults.SUBSET_FIT_SIZE, nbox, conservative_threshold=conservative_threshold)
                 cenx[nbox] = centroids[0] + xUL
@@ -1034,6 +1051,8 @@ class NextwaveOffline():
 
     def offline_auto_shrink(self):
         size_before = self.parent.box_size_pixel
+        if self.parent.box_size_pixel <= defaults.SHRINK_MIN: # Already small enough (e.g. few pixels per lenslet): still measure this frame
+            self.offline_centroids(conservative_threshold=False)
         while self.parent.box_size_pixel > defaults.SHRINK_MIN:
             self.offline_auto_shrink1()
         #self.parent.box_size_pixel = size_before
