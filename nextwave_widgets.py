@@ -421,7 +421,8 @@ class BoxInfoDialog(QDialog):
         #self.setWindowFlag(Qt.FramelessWindowHint) 
         #self.setWindowTitle(titl)
         self.ui_parent = ui_parent
-
+        self.engine = ui_parent.engine
+        
         layout=QVBoxLayout()
         self.text_num = QLabel()
         layout.addWidget(self.text_num)
@@ -478,10 +479,26 @@ class BoxInfoDialog(QDialog):
             line1 += "(NONE)"
         line1 += "(%dx%d)" % (self.ui_parent.engine.box_size_pixel,
             self.ui_parent.engine.box_size_pixel)
+        try:
+            line1 += "(V=%f) (M=%f)"%(
+                self.ui_parent.engine.centroid_valid[n],self.ui_parent.engine.centroid_metric[n] )
+        except:
+            pass
 
         self.text_num.setText(line1)
         self.text_box.setText("box center=(%0.3f,%0.3f)"%(box_x,box_y))
-        self.text_centroid.setText("centroid=(%0.3f,%0.3f)"%(centroid_x_abs,centroid_y_abs))
+        if hasattr(self.engine, 'centroids_delta_x'): # (Realtime: the deltas come from the C++ engine)
+            self.text_centroid.setText("centroid=(%0.3f,%0.3f)\n{%+0.3f,%+0.3f}\ndx,dy={%+0.3f,%+0.3f}dif={%+0.3f,%+0.3f}"%(
+                centroid_x_abs,centroid_y_abs,
+                centroid_x_abs - self.engine.ref_x[n], centroid_y_abs - self.engine.ref_y[n],
+                self.engine.centroids_delta_x[n], self.engine.centroids_delta_y[n],
+                centroid_x_abs - self.engine.ref_x[n]-self.engine.centroids_delta_x[n],
+                centroid_y_abs - self.engine.ref_y[n]-self.engine.centroids_delta_y[n]
+                ))
+        else:
+            self.text_centroid.setText("centroid=(%0.3f,%0.3f)\n{%+0.3f,%+0.3f}"%(
+                centroid_x_abs,centroid_y_abs,
+                centroid_x_abs - self.engine.ref_x[n], centroid_y_abs - self.engine.ref_y[n]))
         self.box_pix=box_pix
         self.cent_x=cent_x
         self.cent_y=cent_y
@@ -533,6 +550,18 @@ class BoxInfoDialog(QDialog):
             painter.setPen(Qt.NoPen)
             painter.setBrush(QColor(overlay))
             painter.drawEllipse(to_screen(self.cent_x, self.cent_y), radius, radius)
+
+        if self.ui_parent.draw_refs and self.ui_parent.engine.num_boxes>0:
+            # This box's reference position (whole-image coordinates: the box's upper left is as in the main window). A cross
+            try:
+                bs = self.ui_parent.engine.box_size_pixel
+                ref = to_screen(self.ui_parent.engine.ref_x[self.nbox] - int(self.box_x - bs//2),
+                                self.ui_parent.engine.ref_y[self.nbox] - int(self.box_y - bs//2))
+                painter.setPen(QPen(Qt.green, 1.5))
+                painter.drawLine(QLineF(ref.x() - radius - 2, ref.y(), ref.x() + radius + 2, ref.y()))
+                painter.drawLine(QLineF(ref.x(), ref.y() - radius - 2, ref.x(), ref.y() + radius + 2))
+            except (AttributeError, IndexError):
+                pass # No references yet
 
         if self.ui_parent.draw_predicted:
             # This box's spot position estimated from the Zernikes (whole-image coordinates: the box's upper left is as in the main window)
@@ -640,7 +669,7 @@ class ActuatorPlot(QLabel):
     def paintEvent_manual(self): #, p, *args):
         #mirror_vals=np.array(np.random.normal(size=(97)) )
         #mirror_vals=np.linspace(-0.99,0.99,97)
-        mirror_vals = self.ui_parent.engine.mirror_voltages 
+        mirror_vals = self.ui_parent.engine.comm.mirror_voltages 
         self.bits[ self.map_cols,self.map_rows] = mirror_vals * 128 + 128
         #for y in np.arange(11):
             #for x in np.arange(11):
@@ -664,6 +693,7 @@ class ActuatorPlot(QLabel):
         self.qi.setColorTable(self.act_colors)
         self.pixmap1 = QPixmap.fromImage(self.qi).scaled(self.height(),self.width(),Qt.KeepAspectRatio)
         self.setPixmap( self.pixmap1 )
+        #self.pixmap1.mousePressEvent = self.button_clicked # Didn't work
 
         #qp = QPainter(self.qi)
         #qp.setBrush(br)
@@ -717,7 +747,7 @@ class MyBarWidget(pg.PlotWidget):
         return
 
 import matplotlib
-matplotlib.use('Qt5Agg')
+matplotlib.use('Qt5Agg') # TODO: Better/more central place for ?
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
 
@@ -729,8 +759,8 @@ class MplCanvas(FigureCanvasQTAgg):
         super(MplCanvas, self).__init__(fig)
 
 class OfflineDialog(QDialog):
-    def __init__(self):
-        super().__init__()
+    def __init__(self,parent):
+        super().__init__(parent)
 
         self.setWindowTitle("Low order aberrations across frames")
 
@@ -859,3 +889,19 @@ class LogViewer(QWidget):
             bar.setValue(bar.maximum())
         else:
             bar.setValue(keep)
+
+
+class IntensityDialogX(QDialog):
+    def __init__(self,parent):
+        super().__init__(parent)
+
+        self.setWindowTitle("IntensityX")
+
+        self.sc = MplCanvas(self, width=8, height=1, dpi=100)
+
+        # Create a layout for the dialog
+        layout = QVBoxLayout()
+        layout.addWidget(self.sc)
+
+        # Set the layout for the dialog
+        self.setLayout(layout)

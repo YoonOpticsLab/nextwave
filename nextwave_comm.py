@@ -30,7 +30,7 @@ class NextwaveEngineComm():
     def init(self):
         self.layout=extract_memory.get_header_format('memory_layout.h')
         self.layout_boxes=extract_memory.get_header_format('layout_boxes.h')
-        self.fields=self.layout_boxes[1] # TODO: fix
+        self.fields=self.layout[1] # TODO: fix
 
         # Could be math in the defines for sizes, use eval
         MEM_LEN=int( eval(self.layout[2]['SHMEM_HEADER_SIZE'] ) )
@@ -131,22 +131,31 @@ class NextwaveEngineComm():
         shmem_boxes.write(buf)
         shmem_boxes.flush()
 
-        if True:
+        try: # TODO: Better to have an "if ready"
+            if True:
+                buf = ByteStream()
+                for item in self.parent.influence.T.flatten():
+                    buf.append(item, 'd')
+                shmem_boxes.seek(fields['influence']['bytenum_current'])
+                shmem_boxes.write(buf)
+                shmem_boxes.flush()
+
             buf = ByteStream()
-            for item in self.parent.influence.T.flatten():
+            for item in self.parent.influence_inv.T.flatten():
                 buf.append(item, 'd')
-            shmem_boxes.seek(fields['influence']['bytenum_current'])
+            shmem_boxes.seek(fields['influence_inv']['bytenum_current'])
             shmem_boxes.write(buf)
             shmem_boxes.flush()
+        except AttributeError:
+            pass # Probably missing influence function. Hasn't been calc'ed yet.
 
         buf = ByteStream()
-        #print(  "INF_INV %f"%np.max( self.influence_inv ) )
-        for item in self.parent.influence_inv.T.flatten():
-            buf.append(item, 'd')
-        shmem_boxes.seek(fields['influence_inv']['bytenum_current'])
+        for item in self.parent.omits:
+            buf.append(item)
+        shmem_boxes.seek(fields['centroid_omit']['bytenum_current'])
         shmem_boxes.write(buf)
         shmem_boxes.flush()
-
+        
         # Write header last, so the engine knows when we are ready
         buf = ByteStream()
         buf.append(1)
@@ -154,10 +163,14 @@ class NextwaveEngineComm():
         buf.append(num_boxes, 'H') # unsigned short
         buf.append(self.parent.ccd_pixel,'d')
         buf.append(self.parent.box_um, 'd')
-        buf.append(self.parent.pupil_radius_pixel/self.parent.ccd_pixel, 'd')
+        buf.append(self.parent.pupil_radius_pixel*self.parent.ccd_pixel, 'd')
+        buf.append(self.parent.focal*1000.0, 'd')
 
-        buf.append(self.parent.nTerms, 'H')
-        buf.append(self.parent.nActuators, 'H')
+        try: #TODO: Better to have a "if Ready"
+            buf.append(self.parent.nTerms, 'H')
+            buf.append(self.parent.nActuators, 'H')
+        except AttributeError:
+            pass # Ok if these aren't ready yet
 
         shmem_boxes.seek(0)
         shmem_boxes.write(buf)
@@ -189,6 +202,7 @@ class NextwaveEngineComm():
         self.width=self.parent.width
 
         self.parent.total_frames=extract_memory.get_array_item2(self.layout,self.shmem_hdr,'total_frames',0, False)
+        self.parent.record_frames=extract_memory.get_array_item2(self.layout,self.shmem_hdr,'log_index',0, False)
 
         nwhich_buffer=extract_memory.get_array_item2(self.layout,self.shmem_hdr,'current_frame',0, False)
 
@@ -215,49 +229,85 @@ class NextwaveEngineComm():
     def write_mirrors(self,data):
         bytez =np.array(data, dtype="double").tobytes() 
         fields=self.layout_boxes[1] # TODO: fix
-        self.shmem_boxes.seek(self.fields['mirror_voltages']['bytenum_current'])
+        self.shmem_boxes.seek(fields['mirror_voltages']['bytenum_current'])
         self.shmem_boxes.write(bytez)
         self.shmem_boxes.flush()
-
+        self.set_mode( 
+            self.read_mode() | 0x20 )  # MODE_FORCE_AO_START TODO. Possible race condition.
+            
+    def write_mirrors_offsets(self,data):
+        self.write_mirrors( data + self.mirror_voltages )
+ 
     def zero_do(self):
-        self.write_mirrors( np.zeros(97) ) # TODO
+        self.write_mirrors( np.zeros(97) ) # TODO: # of mirrors
 
     def flat_do(self):
         self.write_mirrors( self.mirror_state_flat )
-
+        
     def flat_save(self):
         self.mirror_state_flat = np.copy(self.mirror_voltages)
-
+    
+    def zero_log_index(self):
+        buf = ByteStream()
+        fields=self.layout[1]
+        buf.append(0)
+        buf.append(0)
+        buf.append(0)
+        buf.append(0)
+        self.shmem_hdr.seek(fields['log_index']['bytenum_current'])
+        self.shmem_hdr.write(buf)
+        self.shmem_hdr.flush()  
+        
     def do_snap(self, mode):
         buf = ByteStream()
         buf.append(mode) # TODO: MODE_CENTROIDING
         self.shmem_hdr.seek(2) #TODO: get address
         self.shmem_hdr.write(buf)
         self.shmem_hdr.flush()    
-
+        
+    def do_record_toggle(self,state):
+        buf = ByteStream()
+        buf.append(state) # TODO: MODE_CENTROIDING
+        self.shmem_hdr.seek(3) #TODO: get address
+        self.shmem_hdr.write(buf)
+        self.shmem_hdr.flush()    
+        
     def receive_centroids(self):
         SIZEOF_DOUBLE=8
         fields=self.layout_boxes[1]
         num_boxes=self.parent.num_boxes
-        self.shmem_boxes.seek(self.fields['centroid_x']['bytenum_current'])
+        
+        self.shmem_boxes.seek(fields['centroid_x']['bytenum_current'])
         buf=self.shmem_boxes.read(num_boxes*SIZEOF_DOUBLE)
-        self.parent.centroids_x=struct.unpack_from(''.join((['d']*num_boxes)), buf)
-
-        self.shmem_boxes.seek(self.fields['centroid_y']['bytenum_current'])
+        self.parent.centroids_x=np.array( struct.unpack_from(''.join((['d']*num_boxes)), buf) )
+        self.shmem_boxes.seek(fields['centroid_y']['bytenum_current'])
         buf=self.shmem_boxes.read(num_boxes*SIZEOF_DOUBLE)
-        self.parent.centroids_y=struct.unpack_from(''.join((['d']*num_boxes)), buf)
+        self.parent.centroids_y=np.array( struct.unpack_from(''.join((['d']*num_boxes)), buf) )
 
-        self.shmem_boxes.seek(self.fields['delta_x']['bytenum_current'])
+        self.shmem_boxes.seek(fields['delta_x']['bytenum_current'])
         buf=self.shmem_boxes.read(num_boxes*SIZEOF_DOUBLE)
-        self.parent.delta_x=struct.unpack_from(''.join((['d']*num_boxes)), buf)
-
+        self.parent.centroids_delta_x=struct.unpack_from(''.join((['d']*num_boxes)), buf)
         self.shmem_boxes.seek(fields['delta_y']['bytenum_current'])
         buf=self.shmem_boxes.read(num_boxes*SIZEOF_DOUBLE)
-        self.parent.delta_y=struct.unpack_from(''.join((['d']*num_boxes)), buf)
+        self.parent.centroids_delta_y=struct.unpack_from(''.join((['d']*num_boxes)), buf)
+    
+        self.parent.centroid_valid = np.frombuffer(self.shmem_boxes, dtype=np.uint8,
+            offset=fields['centroid_valid']['bytenum_current'], count=num_boxes)
 
-        self.shmem_boxes.seek(self.fields['mirror_voltages']['bytenum_current'])
+        self.parent.centroid_metric = np.frombuffer(self.shmem_boxes, dtype=np.uint8,
+            offset=fields['centroid_metric']['bytenum_current'], count=num_boxes)
+    
+        # TODO: For some reason, clearing the invalids (esp. with metric) was hard from C++
+        self.parent.centroids_x[ np.array(self.parent.centroid_valid)==False ] = np.nan
+
+        self.shmem_boxes.seek(fields['mirror_voltages']['bytenum_current'])
+        buf=self.shmem_boxes.read(self.parent.nActuators*SIZEOF_DOUBLE)
+        self.mirror_voltages=np.array( struct.unpack_from(''.join((['d']*self.parent.nActuators)), buf) )
+
+        # Debugging
+        self.shmem_boxes.seek(fields['box_x_normalized']['bytenum_current'])
         buf=self.shmem_boxes.read(num_boxes*SIZEOF_DOUBLE)
-        #self.mirror_voltages=np.array( struct.unpack_from(''.join((['d']*self.nActuators)), buf) )
+        self.slopes_debug=np.array( struct.unpack_from(''.join((['d']*num_boxes)), buf) )
 
         DEBUGGING=False
         if DEBUGGING:
@@ -287,7 +337,6 @@ class NextwaveEngineComm():
             #self.ui.image_pixels = bytez
             self.parent.image_bytes = bytez
         else:
-            fields=self.layout[1] # TODO: fix
             self.shmem_hdr.seek(self.fields['dimensions']['bytenum_current']) #TODO: nicer
             self.shmem_hdr.write(dims)
             self.shmem_hdr.flush()

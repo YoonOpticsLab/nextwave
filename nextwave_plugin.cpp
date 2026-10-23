@@ -1,6 +1,6 @@
 #include <json.hpp>
 using json=nlohmann::json;
-#include "../include/spdlog/spdlog.h"
+#include "spdlog/spdlog.h"
 
 #if _WIN64
 #include <windows.h>

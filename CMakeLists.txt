@@ -6,6 +6,9 @@
 # you pick up the best policies.
 cmake_minimum_required(VERSION 3.1...3.27)
 
+# Not sure if/why this is needed. E.g., might be easier to deploy with this included:
+set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+
 # This is your project statement. You should always list languages;
 # Listing the version is nice here since it sets lots of useful variables
 project(
@@ -19,6 +22,7 @@ if (UNIX) # For Dan
   SET(CMAKE_CXX_FLAGS  ${CMAKE_CXX_FLAGS} ${GCC_OPT} )
   SET(CMAKE_EXE_LINKER_FLAGS  ${CMAKE_EXE_LINKER_FLAG} ${GCC_OPT} )
 else() # For Windows, need AF here
+	set(ArrayFire_DIR "C:/Program Files/ArrayFire/v3/cmake")
 	find_package(ArrayFire REQUIRED)
 
 	include_directories(${ArrayFire_INCLUDE_DIRS})
@@ -53,11 +57,11 @@ endif()
 # add_subdirectory(plugin_ximea)
 # add_subdirectory(plugin_fileplayer)
 add_subdirectory(plugin_rawplayer)
-add_subdirectory(plugin_centroiding)
+#add_subdirectory(plugin_centroiding)
 
 if (WIN32)
     include_directories(.)
-    include_directories(..)
+    include_directories(../nextwave_include)
 	add_executable(engine engine.cpp plugin_centroiding/plugin_centroiding.cpp)
 	#add_executable(engine engine.cpp plugin_centroiding/plugin_centroiding.cpp)
 	#target_link_libraries(engine ${ArrayFire_Unified_LIBRARIES} )

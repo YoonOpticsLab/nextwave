@@ -1,0 +1,20 @@
+{
+    "plugin_flir":
+    {"mode": "inline",
+     "type": "generator",
+     "filename": "../shifted.bin"},
+
+    "plugin_centroiding":
+    {"method": "single_pass"},
+	
+	"plugin_alpao": {},
+	
+	"params":
+	{"cx":474,
+    	"cy":512,
+		"pupil_diam":6,
+		"offline_only":0,
+		"xml_file":"c:/MiniWave/MiniWaveConfiguration/aoDemoPointGrey.xml",
+		"influence_file":"c:/MiniWave/MiniWaveConfiguration/myInvMatrix_DM1_90.dat"}
+
+}

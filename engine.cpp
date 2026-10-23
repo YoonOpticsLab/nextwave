@@ -286,8 +286,11 @@ int main(int argc, char** argv)
  
   // Clear this before start anything since use as a sentinel
   pShmemBoxes->num_boxes=0;
+  pShmem1->log_index=0;
+  pShmem1->total_frames=0;
+  pShmem1->recording=0;
 
-#define REP_LOG 20
+#define REP_LOG 10
 
 #define CLOCK_MULT 1e5
   typedef boost::chrono::duration<long long, boost::micro> microseconds_type;
@@ -295,9 +298,17 @@ int main(int argc, char** argv)
 
   pShmem1->frames_left=-1; // Since unsigned, this will actually be a huge number
 
+#define START_TIMEOUT 10 // Automatically stop if we don't start within 10 seconds
+  boost::chrono::high_resolution_clock::time_point time_wait_sync = boost::chrono::high_resolution_clock::now();
   while ( pShmem1->mode==MODE_OFF || pShmemBoxes->num_boxes==0 ) {
     // sleep until the UI is ready to tell us to do something
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    boost::chrono::high_resolution_clock::time_point time_now = boost::chrono::high_resolution_clock::now();
+	boost::chrono::duration<double>time_waiting = (time_now - time_wait_sync);
+	if (time_waiting.count() > START_TIMEOUT) {
+		spdlog::error("Timeout waiting for UI" );
+		goto exit;
+	}
   }
 
   // TODO: Call proper init here somehow?
@@ -308,6 +319,7 @@ int main(int argc, char** argv)
   char str_message[64] = "    "; //.c_str();
   long int pipeline_count=0;
   uint8_t bRunning=0;
+  uint8_t nAOSkipFrames=0;
   boost::chrono::high_resolution_clock::time_point time_start = boost::chrono::high_resolution_clock::now();
 
   while ( pShmem1->mode!=MODE_QUIT  ) {
@@ -316,18 +328,34 @@ int main(int argc, char** argv)
 
     if (pShmem1->mode > MODE_READY ) {
 
-      if (pShmem1->mode == MODE_RUNONCE_CENTROIDING_AO) {
+      if (pShmem1->mode & MODE_FORCE_AO_START )  {
+        nAOSkipFrames=2; // Fall immediately into next block, dec, then done. So 1 iter. of AO
+        pShmem1->mode ^= MODE_FORCE_AO_START;
+        pShmem1->mode |= MODE_FORCE_AO_DURING;
+        spdlog::info("Force Start");
+      }
+	  
+      if (pShmem1->mode & MODE_FORCE_AO_DURING )  { // During this, centroiding will not write mirrors
+        nAOSkipFrames--;
+        spdlog::info("Force During");
+        if (nAOSkipFrames==0) {
+          pShmem1->mode ^= MODE_FORCE_AO_DURING;
+          spdlog::info("Force Out");
+        }
+      }
+
+      if ( ( (pShmem1->mode&MODE_AO) && (pShmem1->mode&MODE_SNAP)) || (pShmem1->mode & MODE_FORCE_AO_DURING) ) {
         str_message[0]='I'; // Re-init on "snap"
-        str_message[1]='C'; // Re-init on "snap"
+        str_message[1]='C'; // Closed loop
         bRunning=0;
-      } else if (pShmem1->mode == MODE_RUNONCE_CENTROIDING) {
+      } else if ( pShmem1->mode&MODE_SNAP ) {
         str_message[0]='I'; // Re-init on "snap"
-        str_message[1]=' '; // Re-init on "snap"
+        str_message[1]=' '; // 
         bRunning=0;
-      } else if (pShmem1->mode == MODE_CALIBRATING) {
+      } else if (pShmem1->mode & MODE_AO) {
         str_message[0]=' ';
         str_message[1]='C'; //"closed loop" (==apply AO)
-        bRunning=0;		
+        bRunning=0;			
       } else {
         str_message[0]=' ';
         str_message[1]=' ';
@@ -343,40 +371,46 @@ int main(int argc, char** argv)
       boost::chrono::high_resolution_clock::time_point time_start_frame = boost::chrono::high_resolution_clock::now();
 
       int modnum=0;
-      int logidx=pipeline_count % REP_LOG;
+      int logidx_ns=pipeline_count % REP_LOG;
 
       uint16_t times_local[4]; //TODO
       double dur;
       uint16_t ms_times_100;
       double times_before[4]; //TODO
       for (struct module it: listModules) {
-        //spdlog::info("Before {} {} {}", pShmem1->total_frames, modnum, it.name );
-          boost::chrono::high_resolution_clock::time_point time_before = boost::chrono::high_resolution_clock::now();
+			//spdlog::info("Before {} {} {}", pShmem1->total_frames, modnum, it.name );
+			boost::chrono::high_resolution_clock::time_point time_before = boost::chrono::high_resolution_clock::now();
 
-          int result=(*it.fp_do_process)((const char*)str_message);
+			int result=0;
+			
+			result=(*it.fp_do_process)((const char*)str_message);
 
-          boost::chrono::high_resolution_clock::time_point time_after = boost::chrono::high_resolution_clock::now();
-          boost::chrono::duration<double>micros = time_after - time_before;
+			boost::chrono::high_resolution_clock::time_point time_after = boost::chrono::high_resolution_clock::now();
+			boost::chrono::duration<double>micros = time_after - time_before;
 
-          dur = micros.count();
-          ms_times_100 = (uint16_t)(dur*CLOCK_MULT);
+			dur = micros.count();
+			ms_times_100 = (uint16_t)(dur*CLOCK_MULT);
 
-          ns[logidx*3+modnum] = ms_times_100;
-          times_local[modnum] = ms_times_100;
+			ns[logidx_ns*3+modnum] = ms_times_100;
+			times_local[modnum] = ms_times_100;
 
-          boost::chrono::duration<double>time_since_start = time_before - time_start;
-          times_before[modnum] = time_since_start.count();
+			boost::chrono::duration<double>time_since_start = time_before - time_start;
+			times_before[modnum] = time_since_start.count();
 
-          //spdlog::info("After {} {} {}", pShmem1->total_frames, modnum, it.name );
+			//spdlog::info("After {} {} {}", pShmem1->total_frames, modnum, it.name );
 
-          modnum++;
+			modnum++;
         }
 
-        pShmemLog[pShmem1->total_frames].frame_number=pShmem1->current_frame;
-        pShmemLog[pShmem1->total_frames].total_frame_number=pShmem1->total_frames;
-        pShmemLog[pShmem1->total_frames].time0=times_before[0];
-        pShmemLog[pShmem1->total_frames].time1=times_before[1];
-        pShmemLog[pShmem1->total_frames].time2=times_before[2];
+		int logidx = pShmem1->log_index;
+        pShmemLog[logidx].frame_number=pShmem1->current_frame;
+        pShmemLog[logidx].total_frame_number=pShmem1->total_frames;
+        pShmemLog[logidx].time0=times_before[0];
+        pShmemLog[logidx].time1=times_before[1];
+        pShmemLog[logidx].time2=times_before[2];
+  		if ( pShmem1->recording) {
+			pShmem1->log_index = (pShmem1->log_index + 1 ) % SHMEM_LOG_MAX;
+		};	
 
         boost::chrono::high_resolution_clock::time_point time_now = boost::chrono::high_resolution_clock::now();
         //boost::chrono::duration<double> time_span = duration_cast<duration<double>>(time_now - time_total_before);
@@ -401,7 +435,7 @@ int main(int argc, char** argv)
         //spdlog::info("Frames lefT: {}", pShmem1->frames_left);
 
       // Ran once, unarm
-        if ( (pShmem1->mode & MODE_RUNONCE_CENTROIDING) ||
+        if ( (pShmem1->mode & MODE_SNAP) ||
 			(pShmem1->mode == MODE_CALIBRATING) || // Run calibration one-by-one (1 iteration per mirror)
 			(pShmem1->frames_left<1)
 			) {
@@ -415,8 +449,8 @@ int main(int argc, char** argv)
 
     } else { // Not running at all. Sleep a bit until summoned.
 
-      if (pShmem1->mode == MODE_OFF)
-        pShmem1->total_frames=0; // TODO: not sure if we want this long-term
+     // if (pShmem1->mode == MODE_OFF)
+     //   pShmem1->total_frames=0; // TODO: not sure if we want this long-term
 
       bRunning=0;
       std::this_thread::sleep_for(std::chrono::milliseconds(5));
@@ -427,13 +461,14 @@ int main(int argc, char** argv)
 	spdlog::info("Quit");
 	for (int pipeline_count=0; pipeline_count<REP_LOG; pipeline_count++)
     {
-      int modnum=0;
-      for (struct module it: listModules) {
-        spdlog::info("{}",ns[pipeline_count*2+modnum]);
-        modnum++;
-      }
+      //int modnum=0;
+      //for (struct module it: listModules) {
+        spdlog::info("{} {} {}",ns[pipeline_count*3+0],ns[pipeline_count*3+1],ns[pipeline_count*3+2]);
+        //modnum++;
+      //}
     }
 
+exit:
   // iterate the array
   for (struct module it: listModules) {
 	char str_nothing[64] = ""; //.c_str();

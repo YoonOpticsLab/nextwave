@@ -15,11 +15,12 @@
 
 #define MODE_OFF 0
 #define MODE_READY 1
-#define MODE_RUNONCE_CENTROIDING 2
-#define MODE_RUNONCE_CENTROIDING_AO 3
-#define MODE_LOOP_CENTROIDING 0x10
-#define MODE_LOOP_AO 0x11
-#define MODE_CALIBRATING 0x40
+#define MODE_SNAP 2
+#define MODE_RUN  4
+#define MODE_AO   8
+#define MODE_FORCE_AO_START 0x20
+#define MODE_FORCE_AO_DURING 0x40
+#define MODE_CALIBRATING 0x80
 #define MODE_QUIT 0xFF
 
 struct shmem_header
@@ -27,6 +28,7 @@ struct shmem_header
 	uint8_t lock=0;
 	uint8_t header_version=NW_HEADER_VERSION;
 	uint8_t mode=MODE_OFF;
+	uint8_t recording=0;	
 	uint16_t manager_port_num;
 	uint16_t dimensions[4];
 	uint16_t datatype_code;
@@ -35,6 +37,7 @@ struct shmem_header
 	uint8_t current_frame;
 	uint64_t total_frames;
 	uint64_t frames_left;
+	uint64_t log_index;	
 	uint8_t max_frames=NW_MAX_FRAMES;
 	uint64_t timestamps[NW_MAX_FRAMES];
 	uint64_t statuses[NW_MAX_FRAMES];

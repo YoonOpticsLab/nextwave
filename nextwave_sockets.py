@@ -37,7 +37,7 @@ class SocketComponent():
 
     def send(self,msg):
         if not self.s is None:
-            self.s.send(msg)
+            self.s.send(msg+b'\x00')
 
 class NextwaveSocketComm():
     """ Class to manage:
@@ -61,7 +61,7 @@ class NextwaveSocketComm():
         if "plugin_alpao" in self.ui.json_data:
             self.alpao = SocketComponent(SOCKET_ALPAO)
         else:
-            log.info("loaded Dumpmy AO")
+            log.info("loaded Dummy AO")
             self.alpao = SocketDummy(SOCKET_ALPAO)
         self.alpao.init()
 

@@ -47,10 +47,13 @@
 #include <Windows.h>
 
 // For NextWave Plugin
-#include "nextwave_plugin.hpp"
-#pragma pack(push,1)
-#include "memory_layout.h"
-#pragma pack(pop) // restore previous setting
+#include "nextwave_plugin.cpp"
+
+#include "nextwave_plugin.hpp" // Just DECL
+
+//#pragma pack(push,1)
+//#include "memory_layout.h"
+//#pragma pack(pop) // restore previous setting
 
 // Add this directory (right-click on project in solution explorer, etc.)
 //#include "C:\Users\drcoates\Documents\code\nextwave\boost_1_83_0"
@@ -58,14 +61,15 @@
 #include "boost/interprocess/mapped_region.hpp"
 using namespace boost::interprocess;
 
-#define NUM_IMAGES 10
+// TODO: Make this a settable parameter?
+#define ACQUIRE_TIMEOUT_MS 100
 
 using namespace Spinnaker;
 using namespace Spinnaker::GenApi;
 using namespace Spinnaker::GenICam;
 using namespace std;
 
-#include "../include/spdlog/spdlog.h"
+#include "spdlog/spdlog.h"
 
 // UI Socket communication
 #include <cstring>
@@ -362,9 +366,6 @@ int DisableGVCPHeartbeat(CameraPtr pCam)
     return ConfigureGVCPHeartbeat(pCam, false);
 }
 
-
-
-	
 // Global variable:
 CameraPtr pCam = nullptr;
 CameraList camList;
@@ -373,22 +374,75 @@ SystemPtr mySystem;
 ImageProcessor processor;
 
 uint16_t nCurrRing = 0; //persist across calls
-		
-// This function acquires and saves 10 images from a device.
-int AcquireImages(CameraPtr pCam) //, INodeMap& nodeMap, INodeMap& nodeMapTLDevice)
+
+int Acquire1Image(void)
+{
+    int result = 0;
+    ImagePtr pResultImage;
+
+    try {
+      pResultImage = pCam->GetNextImage(ACQUIRE_TIMEOUT_MS);
+    } catch (Spinnaker::Exception& e)
+    {
+      cout << "Acq1 Error: " << e.what() << endl;
+      return -1;
+    };
+
+    // Ensure image completion
+    if (pResultImage->IsIncomplete())
+    {
+        // Retrieve and print the image status description
+        cout << "Image incomplete: " << Image::GetImageStatusDescription(pResultImage->GetImageStatus())
+            << "..." << endl
+            << endl;
+        return -2;
+    }
+    else
+    {
+        const size_t width = pResultImage->GetWidth();
+        const size_t height = pResultImage->GetHeight();
+
+        nCurrRing += 1;
+        if (nCurrRing >= NW_MAX_FRAMES) nCurrRing = 0;
+
+        ImagePtr convertedImage = processor.Convert(pResultImage, PixelFormat_Mono8);
+
+        //struct shmem_header* pShmem = (struct shmem_header*) shmem_region.get_address();
+
+        gpShmemHeader->lock = (uint8_t)1; // Everyone keep out until we are done!
+
+        // Don't need to write these each time:
+        gpShmemHeader->header_version = (uint8_t)NW_HEADER_VERSION;
+        gpShmemHeader->dimensions[0] = (uint16_t)height;
+        gpShmemHeader->dimensions[1] = (uint16_t)width;
+        gpShmemHeader->dimensions[2] = (uint16_t)0;
+        gpShmemHeader->dimensions[3] = (uint16_t)0;
+        gpShmemHeader->datatype_code = (uint8_t)7;
+        gpShmemHeader->max_frames = (uint8_t)NW_MAX_FRAMES;
+
+        // For current frame:
+        gpShmemHeader->current_frame = (uint8_t)nCurrRing;
+        gpShmemHeader->timestamps[nCurrRing] = (uint8_t)NW_STATUS_READ;
+        gpShmemHeader->timestamps[nCurrRing] = convertedImage->GetTimeStamp();
+
+        memcpy( ((uint8_t *)(shmem_region2.get_address())+height*width*nCurrRing),
+            (void*)convertedImage->GetData(),
+            height*width);
+
+        gpShmemHeader->lock = (uint8_t)0; // Keep out until we are done!
+
+//spdlog::info("Acquired: {}",nCurrRing);
+    }
+
+    pResultImage->Release();
+    return 0;
+}
+
+int AcquireImage(CameraPtr pCam) //, INodeMap& nodeMap, INodeMap& nodeMapTLDevice)
 {
     int result = 0;
 
-#if 1
-    windows_shared_memory shmem(open_or_create, SHMEM_HEADER_NAME, read_write, (size_t)SHMEM_HEADER_SIZE);
-    mapped_region shmem_region{ shmem, read_write };
-
-    windows_shared_memory shmem2(open_or_create, SHMEM_BUFFER_NAME, read_write, (size_t)SHMEM_BUFFER_SIZE);
-    mapped_region shmem_region2{ shmem2, read_write };
-#endif //0
-
 		INodeMap& nodeMap = pCam->GetNodeMap();
-
     // Execute software trigger
     CCommandPtr ptrSoftwareTriggerCommand = nodeMap.GetNode("TriggerSoftware");
     if (!IsWritable(ptrSoftwareTriggerCommand))
@@ -397,75 +451,20 @@ int AcquireImages(CameraPtr pCam) //, INodeMap& nodeMap, INodeMap& nodeMapTLDevi
         return -1;
       }
 
-	// Fire software trigger to start acquisition of new image
-    ptrSoftwareTriggerCommand->Execute();
+  // Fire software trigger to start acquisition of new image
+  ptrSoftwareTriggerCommand->Execute();
 
-	try {
+  if (Acquire1Image()<0) { // Some kind of error, try to restart device
+    pCam->EndAcquisition();
+    pCam->BeginAcquisition();
+    if (Acquire1Image()==0) { 
+      spdlog::info("NW/FLIR End/begin succeeded.");
+    } else {
+      spdlog::error("NW/FLIR Didn't recover.");
+	}
+  }
 
-        {
-            try
-            {
-                ImagePtr pResultImage = pCam->GetNextImage(1000);
-
-                // Ensure image completion
-                if (pResultImage->IsIncomplete())
-                {
-                    // Retrieve and print the image status description
-                    cout << "Image incomplete: " << Image::GetImageStatusDescription(pResultImage->GetImageStatus())
-                        << "..." << endl
-                        << endl;
-                }
-                else
-                {
-                    const size_t width = pResultImage->GetWidth();
-                    const size_t height = pResultImage->GetHeight();
-
-                    ImagePtr convertedImage = processor.Convert(pResultImage, PixelFormat_Mono8);
-
-                    struct shmem_header* pShmem = (struct shmem_header*) shmem_region.get_address();
-
-                    pShmem->lock = (uint8_t)1; // Everyone keep out until we are done!
-
-                    // Don't need to write these each time:
-                    pShmem->header_version = (uint8_t)NW_HEADER_VERSION;
-                    pShmem->dimensions[0] = (uint16_t)height;
-                    pShmem->dimensions[1] = (uint16_t)width;
-                    pShmem->dimensions[2] = (uint16_t)0;
-                    pShmem->dimensions[3] = (uint16_t)0;
-                    pShmem->datatype_code = (uint8_t)7;
-                    pShmem->max_frames = (uint8_t)NW_MAX_FRAMES;
-
-                    // For current frame:
-                    pShmem->current_frame = (uint8_t)nCurrRing;
-                    pShmem->timestamps[nCurrRing] = (uint8_t)NW_STATUS_READ;
-                    pShmem->timestamps[nCurrRing] = convertedImage->GetTimeStamp();
-
-                    memcpy( ((uint8_t *)(shmem_region2.get_address())+height*width*nCurrRing),
-                        (void*)convertedImage->GetData(),
-                        height*width);
-
-                    pShmem->lock = (uint8_t)0; // Keep out until we are done!
-
-                    nCurrRing += 1;
-                    if (nCurrRing >= NW_MAX_FRAMES) nCurrRing = 0;
-                }
-
-                pResultImage->Release();
-            }
-            catch (Spinnaker::Exception& e)
-            {
-                cout << "Error: " << e.what() << endl;
-                result = -1;
-            }
-        }
-    }
-    catch (Spinnaker::Exception& e)
-    {
-        cout << "Error: " << e.what() << endl;
-        return -1;
-    }
-
-    return result;
+  return result;
 }
 
 // This function prints the device information of the camera from the transport
@@ -627,6 +626,8 @@ int ConfigureExposure(INodeMap& nodeMap, double exposureTimeToSet)
 // comments on preparing and cleaning up the system.
 DECL init(void)
 {
+	 plugin_access_shmem();
+	 
     // Print application build information
     cout << "Application build date: " << __DATE__ << " " << __TIME__ << endl << endl;
 
@@ -734,10 +735,17 @@ DECL init(void)
 
         //cout << "Acquisition mode set to continuous..." << endl;
 
-		ConfigureExposure(nodeMap, 50);
+		// TODO: Make a general "init" function for us
+		ConfigureTrigger(nodeMap);
+		
+		ConfigureExposure(nodeMap, 80000); // TODO: Default
+		
+		//CIntegerPtr ptrSetter = nodeMap.GetNode("BinningHorizontal");
+        //ptrSetter->SetValue(2);
+		//CIntegerPtr ptrSetter = nodeMap.GetNode("BinningVertical");
+        //ptrSetter->SetValue(0);
 
-    ConfigureTrigger(nodeMap);
-
+		
         //
         // Begin acquiring images
         //
@@ -780,7 +788,7 @@ DECL init(void)
         // By default, if no specific color processing algorithm is set, the image
         // processor will default to NEAREST_NEIGHBOR method.
         //
-        processor.SetColorProcessing(SPINNAKER_COLOR_PROCESSING_ALGORITHM_HQ_LINEAR);
+        //processor.SetColorProcessing(SPINNAKER_COLOR_PROCESSING_ALGORITHM_HQ_LINEAR);
 	}
     catch (Spinnaker::Exception& e)
     {
@@ -791,7 +799,8 @@ DECL init(void)
 	return 0;
 }
 
-DECL process(void) {
+//PLUGIN_API(flir,process,char *params)
+DECL process(char *params) {
     int result = 0;
 
     // Run example on each camera
@@ -802,7 +811,13 @@ DECL process(void) {
 
         //cout << endl << "Running example for camera " << i << "..." << endl;
 
-        result = result | AcquireImages(pCam);
+		try {
+			result = result | AcquireImage(pCam);
+		} catch (Spinnaker::Exception& e)
+            {
+                cout << "Error: " << e.what() << endl;
+                result = -1;
+            } 
     }
 
   pCam=camList.GetByIndex(0);
@@ -813,7 +828,7 @@ INodeMap& nodeMap = pCam->GetNodeMap();
   
   char *msg=socket_check(CAMERA_SOCKET);
   if (msg!=NULL) {
-    spdlog::info("RAW: {}",msg);
+    //spdlog::info("RAW: {}",msg);
     if (msg[0]=='E'){
         double dVal = atof(msg+2);
         //spdlog::info("exposure: {}",dVal);

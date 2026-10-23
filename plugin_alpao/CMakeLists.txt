@@ -7,10 +7,10 @@ list(APPEND SOURCES
   VERSION 1.0
   LANGUAGES CXX)
 
-include_directories(../include)
 include_directories(..)
-include_directories(include)
-#include_directories(include/boost_1_83_0)
+include_directories(../../nextwave_include)
+include_directories(../../nextwave_include/boost)
+
 include_directories("C:/Program Files/Alpao/SDK/Include")
 include_directories(C:/Program Files/Alpao/SDK)
 
@@ -25,13 +25,12 @@ add_library(plugin_alpao SHARED plugin_alpao.cpp)
 link_libraries(ASDK)
 target_link_libraries(plugin_alpao "C:/Program Files/Alpao/SDK/lib/x64/asdk.lib")
 	
-set_target_properties(plugin_alpao PROPERTIES RUNTIME_OUTPUT_DIRECTORY "c:/nextwave/build"  )
+#set_target_properties(plugin_alpao PROPERTIES RUNTIME_OUTPUT_DIRECTORY "c:/nextwave/build"  )
 	
-#if (WIN32)
-#  set_target_properties(plugin_alpao PROPERTIES LIBRARY_OUTPUT_DIRECTORY "c:/nextwave/build"  )
-#  set_target_properties(plugin_alpao PROPERTIES RUNTIME_OUTPUT_DIRECTORY "c:/nextwave/build"  )
+if (WIN32)
+  set_target_properties(plugin_alpao PROPERTIES RUNTIME_OUTPUT_DIRECTORY ".."  )
 #else()
 #  set_target_properties(plugin_alpao PROPERTIES
 #    LIBRARY_OUTPUT_DIRECTORY "../../build"
 #    RUNTIME_OUTPUT_DIRECTORY "../../build"  )
-#endif()
+endif()

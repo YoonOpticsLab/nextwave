@@ -1,6 +1,27 @@
 from nextwave_log import log
 import numpy as np
 
+MAX_ZERNIKES=65 # Absolute max for 10th order: np.sum( np.arange(10+1+1))-1 .first of 11th order is np.sum(np.arange(12)) )
+MAX_ORDER=10 #What is this for?
+NUM_ZCS=21 # What is this for?
+#0=horizontal, 1=vertical,3=defocus?
+
+'''
+Zernike order, first mode in that order:
+0 0
+1 1
+2 3
+3 6
+4 10
+5 15
+6 21
+7 28
+8 36
+9 45
+10 55
+11 66
+'''
+
 # Order copied from MATLAB code
 CVS_to_OSA_map = np.array([ 3, 2,
                             5, 4, 6,
@@ -222,3 +243,46 @@ def LCA_z4_correction(wavelength,wavelength_ref,pupil_radius):
     LCA_um = (value * pupil_radius**2)/(4*np.sqrt(3))
     log.debug( "LCA_D=",value, "LCA_m=",LCA_um, wavelength, wavelength_ref, pupil_radius)
     return LCA_um
+from numpy.linalg import svd,lstsq,pinv
+
+def slopes_to_zern(box_centers_norm, box_width_norm,  pupil_radius_mm, box_subset=None,OSA_order=False):
+        lefts =    box_centers_norm[0] - box_width_norm/2 # (or 0.5 * self.box_size_pixel/self.pup)
+        rights =   box_centers_norm[0] + box_width_norm/2
+        ups =    -(box_centers_norm[1] + box_width_norm/2)
+        downs =  -(box_centers_norm[1] - box_width_norm/2)
+    
+        # Compute all integrals for all box corners 
+        lenslet_dx,lenslet_dy=zernike_integral_average_from_corners(
+            lefts, rights, ups, downs, pupil_radius_mm )
+
+        nvalid_z=65+1# Up
+    
+        # 1: to remove piston
+        if box_subset is None:
+            dx_subset = lenslet_dx[1:nvalid_z,:]
+            dy_subset = lenslet_dy[1:nvalid_z,:]
+        else:
+            dx_subset = lenslet_dx[1:nvalid_z,box_subset]
+            dy_subset = lenslet_dy[1:nvalid_z,box_subset]
+
+    
+        #  Compute SVD of stacked X and Y
+        zpoly = np.hstack( (dx_subset, dy_subset ) ).T
+        # Switch to OSA order
+        if OSA_order:
+            zpoly = zpoly[:,CVS_to_OSA_map[0:zpoly.shape[1]]]
+
+        # Pre-compute&save the zterms that are multiplied with the slopes in realtime
+        [uu,ss,vv] = svd(zpoly,False)
+
+        # Need to prevent over/underflow. Tiny ss's lead to huge/problematic zterms.
+        # https://scicomp.stackexchange.com/questions/26763/how-much-regularization-to-add-to-make-svd-stable
+        ss[ ss < 1e-10 ]=0
+
+        ss_full = np.eye(ss.shape[0])*ss
+        leftside = lstsq(ss_full, vv, rcond=0)[0].T # Python equiv to MATLAB's vv/ss (solving system of eqns) is lstsq
+        # https://stackoverflow.com/questions/1001634/array-division-translating-from-matlab-to-python
+        zterms = np.matmul( leftside, uu.T)
+        zterms_inv = pinv(zterms)
+
+        return zpoly,zterms,zterms_inv

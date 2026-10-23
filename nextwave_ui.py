@@ -1,20 +1,34 @@
 from nextwave_log import log
 import nextwave_log
 import re
+try:
+    import joystickapi # (Realtime: a gamepad. Optional: not installed everywhere)
+except ImportError:
+    joystickapi = None
+
 from PyQt5.QtWidgets import (QMainWindow, QLabel, QSizePolicy, QApplication, QPushButton,
                              QHBoxLayout, QVBoxLayout, QGridLayout, QScrollArea, QMessageBox,
                              QWidget, QGroupBox, QTabWidget, QTextEdit, QSpinBox, QDoubleSpinBox, QSlider,
                              QFileDialog, QCheckBox, QDialog, QFormLayout, QDialogButtonBox, QLineEdit)
+
+from PyQt5.QtGui import QKeySequence
+from PyQt5.QtWidgets import QShortcut
+
 from PyQt5.QtGui import QPixmap, QImage, QPainter, QPen, QFont
-from PyQt5.QtCore import Qt, QTimer, QEvent, QLineF, QPointF, pyqtSignal 
+from PyQt5.QtCore import Qt, QTimer, QEvent, QLineF, QPointF, QPoint, pyqtSignal, pyqtSlot
 from PyQt5.QtCore import QSettings
 import PyQt5.QtWidgets as QtWidgets
 import PyQt5.QtGui as QtGui
 import PyQt5.QtCore as QtCore
+from PyQt5.QtWidgets import QApplication
 
 
 import pyqtgraph as pg
 from pyqtgraph.parametertree import Parameter, ParameterTree
+try:
+    from pyqtkeybind import keybinder # (Realtime: a global hotkey. Optional: not installed everywhere)
+except ImportError:
+    keybinder = None
 
 import numpy as np
 import sys
@@ -25,24 +39,44 @@ import traceback
 import matplotlib.cm as cmap
 
 from nextwave_code import NextwaveEngine
+from nextwave_ui_create import (createUI as _createUI, QIMAGE_HEIGHT, QIMAGE_WIDTH,
+                               MAIN_HEIGHT_WIN, MAIN_WIDTH_WIN,
+                               CAM_EXPO_MIN, CAM_EXPO_MAX, CAM_GAIN_MIN, CAM_GAIN_MAX)
 from nextwave_sockets import NextwaveSocketComm
 import defaults
 import offline_parallel
 import offline as offline_module # (Its file types and helpers. "offline" is a common name here)
 
-from nextwave_widgets import draw_profiles, ZernikeDialog, BoxInfoDialog, ActuatorPlot, MyBarWidget, OfflineDialog, FrameGalleryModel, FrameSlider, LogViewer
+from nextwave_widgets import draw_profiles, ZernikeDialog, BoxInfoDialog, ActuatorPlot, MyBarWidget, OfflineDialog, FrameGalleryModel, FrameSlider, LogViewer, IntensityDialogX
 
 from nextwave_build import build_message
+try:
+    from nextwave_midi import nextwave_midi # (Realtime: a MIDI controller. Optional: needs the midi module, not installed everywhere)
+except Exception as _e:
+    nextwave_midi = None
+    log.info("No MIDI (%s)" % _e)
 
 from threading import Thread
 
 from zernike_functions import calc_rms
+
+import scipy # For scipy.stats.mode: auto background
 
 import xml.etree.ElementTree as ET
 import glob
 import zernike_plot
 
 WINDOWS=(os.name == 'nt')
+
+# TODO: Configurable?
+# These not used anymore:
+SPOTS_HEIGHT_WIN=768
+SPOTS_WIDTH_WIN=768
+
+# This is used, but should be based on image, not hard-coded:
+SPOTS_WIDTH_WIN_MINIMUM=1024
+
+ARROW_MAGNITUDE=10
 
 def clear_widget_list(layout1,nkeep=0):
   idx=layout1.count()
@@ -123,8 +157,15 @@ class LoadWorker(QtCore.QObject):
         self.done.emit()
 
 class NextWaveMainWindow(QMainWindow):
+ signal_static_set = pyqtSignal(int, float)
+ signal_zero = pyqtSignal()
+ signal_loop_toggle = pyqtSignal()
+ signal_command_record = pyqtSignal()
+
  def __init__(self):
     super().__init__(parent=None)
+
+    self.engine = NextwaveEngine(self)
 
     # self.worker=Worker();
     #self.worker_thread=QThread()
@@ -136,6 +177,13 @@ class NextWaveMainWindow(QMainWindow):
 
     self.updater_dm = QTimer(self);
     self.updater_dm.timeout.connect(self.update_ui_dm)
+
+    self.midi1 = None # (Realtime: a MIDI controller, if the midi module is installed and one is connected)
+    if nextwave_midi is not None:
+        try:
+            self.midi1 = nextwave_midi(self)
+        except Exception as e:
+            log.info("No MIDI controller: %s" % e)
 
     self.draw_refs = False
     self.draw_boxes = True
@@ -154,8 +202,18 @@ class NextWaveMainWindow(QMainWindow):
 
     self.chkLoop = QCheckBox("Close AO Loop") # This is needed for engine.mode_init, called in our init. Will be replaced by chkbox widget in our InitUI
 
-    self.offline_dialog = OfflineDialog()
+    self.offline_dialog = OfflineDialog(self)
+    #self.dialog_intensityX = IntensityDialogX(self)
 
+    self.static = 0;
+    self.static2= 0;
+    self.static4= 0;
+    self.static12= 0;
+    self.command_record=False;
+    
+    self.defocus_pos0=0;
+    self.defocus_pos1=0;
+    
     self.scale_num=2
     self.scales=[512,768,1024,1536,2048]
 
@@ -174,6 +232,13 @@ class NextWaveMainWindow(QMainWindow):
     self.worker = OfflineWorker(self)
     self.worker_connected = False # Its signals are connected (see offline_autoall)
 
+    if keybinder is not None:
+        keybinder.init()
+        keybinder.register_hotkey(self.winId(), "F7", self.on_hotkey_pressed)
+
+ def on_hotkey_pressed(self):
+     # THIS IS NOT WORKING
+     log.info("Global hotkey activated!")
 
  def read_config_json(self, filename="./config.json"):
     with open(filename) as f:
@@ -196,8 +261,8 @@ class NextWaveMainWindow(QMainWindow):
 
     self.params = [
         {'name': 'UI', 'type': 'group', 'title':'User interface', 'children': [
-            {'name': 'update_rate', 'type': 'int', 'value': 50, 'title':'Display update rate (ms)', 'limits':[50,2000]},
-            {'name': 'update_rate_dm', 'type': 'int', 'value': 100, 'title':'DM Display update rate (ms)', 'limits':[50,2000]},
+            {'name': 'update_rate', 'type': 'int', 'value': 200, 'title':'Display update rate (ms)', 'limits':[50,2000]},
+            {'name': 'update_rate_dm', 'type': 'int', 'value': 80, 'title':'DM Display update rate (ms)', 'limits':[50,2000]},
             {'name': 'show_boxes', 'type': 'bool', 'value': True, 'title':'Show search boxes'},
             {'name': 'show_cross_section', 'type': 'bool', 'value': False, 'title':'Show cross section'}
         ]},
@@ -620,7 +685,20 @@ class NextWaveMainWindow(QMainWindow):
     self.cursor_pixel = None
 
  def update_ui(self):
+    if joystickapi is not None: # (Realtime: the gamepad)
+        ret, info = joystickapi.joyGetPosEx(id)
+        if ret:
+            btns = [(1 << i) & info.dwButtons != 0 for i in range(caps.wNumButtons)]
+            if btns[1]:
+                #chkLoop.setChecked( False )
+                chkActivateMetric.setChecked( False )
+                print("GOT IT")
+
     image_pixels = self.engine.receive_image()
+
+    if not (self.engine.mode_offline or self.offline_only): # (Realtime) A log-scaled copy
+      with np.errstate(divide='ignore'): # (log of 0)
+        self.image_pixels = np.log10(image_pixels) / np.log10(255) * 255
 
     if not (self.engine.mode_offline or self.offline_only): # TODO: Put offline intelligence into engine itself
       self.engine.receive_centroids()
@@ -714,7 +792,16 @@ class NextWaveMainWindow(QMainWindow):
                        self.engine.box_y[n]+box_size_pixel//2-BOX_BORDER) for n in np.arange(self.engine.box_x.shape[0])]
         painter.drawLines(boxes1)
 
-        idx_bads=np.where(np.isnan(self.engine.centroids_x))[0]
+        valid = getattr(self.engine, 'centroid_valid', None) # (Realtime: from the C++ engine. Offline: only NaN centroids are bad)
+        if valid is None or len(valid) != len(self.engine.centroids_x):
+            idx_bads=np.where(np.isnan(self.engine.centroids_x))[0]
+        else:
+            idx_bads=np.where(np.any(
+                (np.isnan(self.engine.centroids_x),
+                np.array(valid)==0),0) )[0]
+        pen = QPen(Qt.red, 1.00, Qt.SolidLine)
+        painter.setPen(pen)
+        #print( idx_bads, end='')        
         bad_boxes=[QLineF(self.engine.box_x[n]-box_size_pixel//2-BOX_BORDER,
                        self.engine.box_y[n]-box_size_pixel//2+BOX_BORDER,
                        self.engine.box_x[n]+box_size_pixel//2-BOX_BORDER,
@@ -793,12 +880,6 @@ class NextWaveMainWindow(QMainWindow):
         points_centroids=[QPointF(self.engine.centroids_x[n],self.engine.centroids_y[n]) for n in np.arange(self.engine.num_boxes)]
         painter.drawPoints(points_centroids)
 
-    if self.draw_predicted: # and self.engine.mode>1:
-         pen = QPen(Qt.green, 1.0)
-         painter.setPen(pen)
-         points_centroids=[QPointF(self.engine.offline.est_x[n],self.engine.offline.est_y[n]) for n in np.arange(self.engine.num_boxes)]
-         painter.drawPoints(points_centroids)
-
     if self.draw_crosshair:
         pen = QPen(Qt.red, 1.5)
         painter.setPen(pen)
@@ -819,8 +900,19 @@ class NextWaveMainWindow(QMainWindow):
 
     if self.draw_cross_section and self.cursor_pixel is not None:
         self.draw_cross_sections(painter, image_pixels, *self.cursor_pixel)
+    # OFFLINE:
+    if self.draw_predicted: # and self.engine.mode>1:
+         pen = QPen(Qt.green, 1.0)
+         painter.setPen(pen)
+         points_centroids=[QPointF(self.engine.offline.est_x[n],self.engine.offline.est_y[n]) for n in np.arange(self.engine.num_boxes)]
+         painter.drawPoints(points_centroids)
 
     if self.draw_pupil:
+        pen = QPen(Qt.red, 1.5)
+        painter.setPen(pen)
+        painter.drawEllipse( QPoint(self.cx,self.cy),  self.engine.pupil_radius_pixel, self.engine.pupil_radius_pixel ) 
+       
+    if self.draw_pupil and False: # OLD CODE.. Offline prediction?
         pen = QPen(Qt.green, 1.5)
         painter.setPen(pen)
         CROSSHAIR_SIZE=50
@@ -846,9 +938,38 @@ class NextWaveMainWindow(QMainWindow):
                        cx+rx/2**0.5,
                        cy-rx/2**0.5)
                 ]
+                
         painter.drawLines(xlines)
 
-        #im_buf=self.shmem_data.read(width*height)
+
+    painter.setFont( QFont("Arial",70) );
+    #painter.drawText( QPoint(10, 60), "%03d"%np.max( self.engine.image_bytes) );
+    if not(self.static2==0):
+        painter.drawText( QPoint(10, 80), "2=%0.3f"%( self.static2) );
+    if not(self.static==0):
+        painter.drawText( QPoint(10, 160), "3=%0.3f"%( self.static) );
+    if not(self.static4==0):
+        painter.drawText( QPoint(10, 240), "4=%0.3f"%( self.static4) );
+    if not(self.engine.defocus==0):
+        painter.drawText( QPoint(10, 350), "%0.3f"%( self.engine.defocus) );
+
+    if not (self.engine.mode_offline or self.offline_only): # (Realtime: the info page, and its numbers on the console)
+        vectors=[np.sqrt( (self.engine.centroids_x[n]-self.engine.ref_x[n])**2 +
+                   (self.engine.centroids_y[n]-self.engine.ref_y[n])**2
+                   ) for n in np.arange(0,self.engine.num_boxes)]
+
+        print( np.nanmean( vectors), np.nanstd(vectors) )
+        # HTML INFO PAGE
+        t='<!DOCTYPE html><html lang="en"><body>\n'
+        t += f"Depth:{self.engine.defocus}\n"
+        t += f"RMS:{np.nanmean(vectors)}\n"
+        t += f"do_record:{int(self.command_record)}\n"
+        t += "</body></html>"
+        fil=open("index.html","wt")
+        fil.writelines(t)
+        fil.close()
+
+    #im_buf=self.shmem_data.read(width*height)
     #bytez =np.frombuffer(im_buf, dtype='uint8', count=width*height )
     #ql1=[QLineF(100,100,150,150)]
     #painter.drawLines(ql1)
@@ -887,12 +1008,16 @@ class NextWaveMainWindow(QMainWindow):
     if not self.engine.zernikes is None:
         rms,rms5p,cylinder,sphere,axis=calc_rms(self.engine.zernikes, self.engine.pupil_radius_mm)
         left_chars=15
-        str_stats=f"{'RMS':<15}= {rms:3.2f}\n"
+        str_stats=f"{'RMS':<15}= {rms:3.4f}\n"
         str_stats+=f"{'HORMS':<15}= {rms5p:3.2f}\n"
         str_stats+=f"{'Sphere(+cyl)':<15}= {sphere:3.2f}\n"
         #str_stats+=f"{'Sphere(-cyl)':<15}= {sphere:3.2f}\n"
-        str_stats+=f"{'Cylinder':<15}= {cylinder:3.2f}\n"
-        str_stats+=f"{'Axis(-cyl)':<15}= {axis:3.2f}\n"
+        #str_stats+=f"{'Cylinder':<15}= {cylinder:3.2f}\n"
+        #str_stats+=f"{'Axis(-cyl)':<15}= {axis:3.2f}\n"
+        
+        str_stats += f"Mean (x,y): {self.engine.mean_displacements[0]:4.2f},{self.engine.mean_displacements[1]:4.2f}\n" 
+        str_stats += f" Zs: {self.engine.zernikes[0]:4.3f},{self.engine.zernikes[1]:4.3f}" 
+        
         self.text_stats.setText(str_stats)
         #self.text_stats.setHtml(str_stats) # TODO: To get other colors, can embed <font color="red">TEXT</font><br>, etc.
 
@@ -912,7 +1037,7 @@ class NextWaveMainWindow(QMainWindow):
           if self.chkLoop.isChecked():
               s += "(AO) "
           s+="%3.2f FPS (%04.2f ms: %04.1f+%04.2f ms)"%(1000/self.engine.fps0,self.engine.fps0, float(self.engine.fps1), float(self.engine.fps2)  )
-          s+="\nFrames: %d"%self.engine.total_frames
+          s+="\nFrames: %d %d "%( self.engine.total_frames, self.engine.record_frames )
       else:
           s="Offline. %d boxes. %d zern terms"%(self.engine.num_boxes, self.engine.zterms_full.shape[0] )
     else:
@@ -924,13 +1049,28 @@ class NextWaveMainWindow(QMainWindow):
         else:
           s="Ready."
 
+    if hasattr(self.engine, 'influence_inv'): # (Realtime: once the influence matrix is loaded)
+        s+=" command:" + str(self.engine.influence_inv.shape)
     self.label_status0.setText(s)
     self.label_status0.setStyleSheet("color: rgb(0, 255, 0); background-color: rgb(0,0,0);")
+
+    # TODO: Is this the right place for these? They could be in our setters/slider callback
+    self.label_defocus.setText( 'Defocus: %0.3f'%self.engine.defocus )
+    self.label_aogain.setText(  'AO Gain: %0.3f'%self.engine.aogain )
+    self.label_aorate.setText(  'AO Delay: %d'%self.engine.aorate )
+    self.label_aobleed.setText(  'AO Bleed: %0.3f'%self.engine.aobleed )
+    self.label_dmfill.setText(  'DM Fill: %0.3f'%self.engine.dmfill )
+    self.label_condition.setText(  'Cond #: %0.3f'%self.engine.condition )
+
+    self.label_valid_acts.setText(  'Valid: %d+%d'%(len(self.engine.acts_inside), len(self.engine.acts_outside) ) )
 
     if not self.engine.zernikes is None:
      if len(self.engine.zernikes)>0:
       self.show_zernike_plot()
 
+    if self.chkZonal.isChecked():
+        self.engine.do_zonal( int(self.zonal_modes.value()), int(self.zs_for_apply.value()) )
+        
  def show_zernike_plot(self):
     # TODO: Perhaps move all this code into the bar_plot object itself??
     self.bar_plot.clear()
@@ -993,12 +1133,13 @@ class NextWaveMainWindow(QMainWindow):
             itm=pg.ScatterPlotItem([ntrunc],[minval],symbol="arrow_down",size=40)
             self.bar_plot.addItem(itm)
 
-    if self.bar_plot.ylim_manual is None:
-        if not np.isnan(maxval):
-            lim = np.max( (np.abs(minval), np.abs(maxval)) )
-            self.bar_plot.setYRange(-lim, lim)
-    else:
-        self.bar_plot.setYRange(-self.bar_plot.ylim_manual, self.bar_plot.ylim_manual)
+    if False:
+        if self.bar_plot.ylim_manual is None:
+            if not np.isnan(maxval):
+                lim = np.max( (np.abs(minval), np.abs(maxval)) )
+                self.bar_plot.setYRange(-lim, lim)
+        else:
+            self.bar_plot.setYRange(-self.bar_plot.ylim_manual, self.bar_plot.ylim_manual)
 
     #self.bar_plot.getAxis('left').setTickSpacing(1, 0.1)
     #self.bar_plot.getAxis('left').setTickDensity(2)
@@ -1009,7 +1150,11 @@ class NextWaveMainWindow(QMainWindow):
     self.bar_plot.showGrid(x=False,y=True)
 
  def update_ui_dm(self):
-    if self.chkLoop.isChecked():
+     
+    if self.midi1 is not None:
+        self.midi1.check_and_process()
+    
+    if not self.offline_only and hasattr(self.engine.comm, 'mirror_voltages'): # (Realtime: the voltages come from the C++ engine)
         self.actuator_plot.paintEvent_manual()
 
     # New method is to send the command somewhere else
@@ -1044,9 +1189,15 @@ class NextWaveMainWindow(QMainWindow):
                 return(node["value"])
 
  def get_param_xml(self,name):
-     #print( self.params_xml)
+     #print( self.params_xml_state )
      #print( self.params_params)
-     return float( self.params_xml_state["children"][name]["value"] )
+     val = self.params_xml_state["children"][name]["value"]
+     try:
+        val = float(val)
+     except ValueError:
+        pass # String. Keep as-is.
+        
+     return val
 
  def get_param(self,name_parent,name,offline=False):
      if name=="pupil_diam":
@@ -1155,6 +1306,14 @@ class NextWaveMainWindow(QMainWindow):
     self.line_pupil_diam.setText(str(self.get_param_xml("OPTICS_PupilDiameter")))
     self.mode_init()
     log.info("Loaded config %s (XML: %s)" % (filename, self.json_data["params"]["xml_file"]))
+ def load_mirror_file(self):
+    ffilt='Mirror file (*.mir);;'
+    thedir = QFileDialog.getOpenFileNames(self, "Choose file", ".", ffilt );
+    try:
+        filename = thedir[0][0]
+    except:
+        return # cancel   
+    self.engine.load_mirror_file(filename)
 
  def reload_config(self,filename=None):
      if filename is None:
@@ -1239,484 +1398,7 @@ class NextWaveMainWindow(QMainWindow):
 
  # PANELS/layouts, etc.
  def initUI(self):
-
-     self.key_control = False 
-
-     self.setWindowIcon(QtGui.QIcon("./resources/wave_icon.png"))
-     self.setWindowTitle('NextWave')
-     #self.setWindowTitle("Icon")
-
-     self.widget_centrals = QWidget()
-     self.scroll_central = QScrollArea()
-     layout=QVBoxLayout()
-     pixmap_label = QLabel()
-     #pixmap_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
-     #pixmap_label.resize(SPOTS_WIDTH_WIN,SPOTS_HEIGHT_WIN)
-     pixmap_label.setAlignment(Qt.AlignCenter)
-     self.pixmap_label=pixmap_label
-
-     im_np = np.ones((defaults.QIMAGE_HEIGHT,defaults.QIMAGE_WIDTH),dtype='uint8')
-     #im_np = np.transpose(im_np, (1,0,2))
-     qimage = QImage(im_np, im_np.shape[1], im_np.shape[0],
-                     QImage.Format_Mono)
-     pixmap = QPixmap(qimage)
-     #pixmap = pixmap.scaled(SPOTS_WIDTH_WIN,SPOTS_HEIGHT_WIN, Qt.KeepAspectRatio)
-     pixmap_label.setPixmap(pixmap)
-     pixmap_label.mousePressEvent = self.spot_window_clicked
-     pixmap_label.setMouseTracking(True) # Move events without a button pressed: for the cross section
-     pixmap_label.mouseMoveEvent = self.spot_window_mouse_moved
-     pixmap_label.leaveEvent = self.spot_window_left
-
-     #Scroll Area Properties
-     self.scroll_central.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
-     self.scroll_central.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
-     self.scroll_central.setWidgetResizable(True)
-     self.scroll_central.setWidget(self.pixmap_label)
-     layout.addWidget(self.scroll_central,15)
-
-     self.bar_plot = MyBarWidget()
-     self.bar_plot.app = self
-     layout.addWidget(self.bar_plot,5)
-     self.widget_centrals.setLayout(layout)
-
-     if False: # Skip extra display windows
-         self.widget_displays = QWidget()
-         layout=QVBoxLayout(self.widget_displays)
-         layout.addWidget(QGroupBox('Pupil'))
-         #layout.addWidget(QGroupBox('DM'))
-         self.actuator_plot = ActuatorPlot(self)
-         self.actuator_plot.resize(200,200)
-         #layout.addWidget(QGroupBox('Wavefront'))
-         #layout.addWidget(QGroupBox('PSF'))
-         #self.ap = pg.plot()
-         #self.ap.addItem( self.actuator_plot )
-         layout.addWidget(self.actuator_plot)
-
-     self.widget_controls = QWidget()
-     layout=QVBoxLayout()
-     tabs = QTabWidget()
-     tabs.setTabPosition(QTabWidget.North)
-     tabs.setMovable(True)
-     self.tabs = tabs
-
-     l1 = QHBoxLayout()
-
-     self.widget_op = QWidget()
-     layout_op = QVBoxLayout()
-     self.ops_pupil = QGroupBox('Pupil')
-     self.ops_pupil.setStyleSheet(":title {font-weight: bold}") # Doesn't work
-     
-     layout_op.addWidget(self.ops_pupil)
-     self.ops_source = QGroupBox('Camera/Source')
-     self.ops_dm = QGroupBox('DM')
-     self.ops_boxes = QGroupBox('Boxes/Centroids')
-     self.ops_offline = QGroupBox('Offline')
-     if not self.offline_only:     
-        layout_op.addWidget(self.ops_boxes)
-        layout_op.addWidget(self.ops_source)
-        layout_op.addWidget(self.ops_dm)
-     else:
-        layout_op.addWidget(self.ops_boxes)
-        layout_op.addWidget(self.ops_offline)
-     self.widget_op.setLayout(layout_op)
-
-     panel_names = ["Operation", "Settings", "Config"] #, "Offline"]
-     pages = [QWidget(tabs) for nam in panel_names]
-     for n, tabnames in enumerate(panel_names):
-         tabs.addTab(pages[n], tabnames)
-
-     pages[0].setLayout(layout_op)
-     ### Pupil ops
-     layout1 = QGridLayout(self.ops_pupil)
-
-     ### Arrows pad 
-     self.m = 1
-     btnL = QPushButton("\u2190") # l
-     layout1.addWidget(btnL,1,4)
-     btnL.clicked.connect(lambda: self.move_center(-1,0) )
-     btnU = QPushButton("\u2191") # u
-     layout1.addWidget(btnU,0,5)
-     btnU.clicked.connect(lambda: self.move_center(0,-1) )
-     btnR = QPushButton("\u2192") # r
-     layout1.addWidget(btnR,1,6)
-     btnR.clicked.connect(lambda: self.move_center(1,0) )
-     btnD = QPushButton("\u2193") # d
-     layout1.addWidget(btnD,2,5)
-     btnM = QPushButton() # d
-     self.chkMove = QCheckBox("")
-     layout1.addWidget(self.chkMove,1,5,alignment=Qt.AlignCenter)
-     btnD.clicked.connect(lambda: self.move_center(0,1) )
-
-     self.chkMove.clicked.connect(lambda: self.set_move_amount(self.chkMove.isChecked()) )
-
-     lbl = QLabel("Center X:")
-     layout1.addWidget(lbl,0,0)
-     lbl = QLabel("Center Y:")
-     layout1.addWidget(lbl,1,0)
-     lbl = QLabel("Diameter (mm):")
-     layout1.addWidget(lbl,2,0)
-     self.line_centerx = QLineEdit()
-     self.line_centerx.setMaxLength(6)
-     layout1.addWidget(self.line_centerx,0,1)
-     self.line_centery = QLineEdit()
-     self.line_centery.setMaxLength(6)
-     layout1.addWidget(self.line_centery,1,1)
-     self.line_pupil_diam = QLineEdit()
-     self.line_pupil_diam.setMaxLength(6)
-     layout1.addWidget(self.line_pupil_diam,2,1)
-
-     self.line_pupil_diam.textChanged.connect(self.pupil_changed)
-     #btnFind = QPushButton("Find center")
-     #btnFind.setStyleSheet("color : orange")
-     #layout1.addWidget(btnFind,2,1)
-
-     self.it_start = QLineEdit(str(defaults.ITERATIVE_PUPIL_START)) # TODO: grab from defaults
-     layout1.addWidget(self.it_start,4,0)
-     self.it_step = QLineEdit(str(defaults.ITERATIVE_PUPIL_STEP_SIZE))
-     layout1.addWidget(self.it_step,4,1)
-     self.it_stop = QLineEdit(str(self.engine.offline.it_stop)) # (Forced value, if any, else the default)
-     layout1.addWidget(self.it_stop,4,2)
-     self.it_start.textEdited.connect(self.it_start_edited)
-     self.it_step.textEdited.connect(self.it_step_edited)
-     self.it_stop.textEdited.connect(self.it_stop_edited)
-     self.it_stop.editingFinished.connect(self.it_stop_changed)
-
-     btn = QPushButton("Start")
-     layout1.addWidget(btn,4,3)
-     btn.clicked.connect(lambda: self.engine.offline.offline_startbox() )
-
-     btn = QPushButton("Run")
-     layout1.addWidget(btn,4,4)
-     btn.clicked.connect(lambda: self.iterative_run() )
-
-     btn = QPushButton("Step")
-     layout1.addWidget(btn,4,5)
-     btn.clicked.connect(lambda: self.iterative_step() )
-
-     btn = QPushButton("Reset")
-     layout1.addWidget(btn,4,6)
-     btn.clicked.connect(lambda: self.iterative_reset() )
-
-#     btn = QPushButton("Dialog2")
-     #layout1.addWidget(btn,6,3)
-     #btn.clicked.connect(lambda: self.engine.offline.show_dialog_debug() )
-
-     #btnIt1 = QPushButton("Step It+=0.5")
-     #layout1.addWidget(btnIt1,3,1)
-     #btnIt1.clicked.connect(self.run_iterative)
-
-     #self.lblIt = QLabel("3.2")
-     #layout1.addWidget(self.lblIt,4,5)
-
-     ### Camera Ops
-     layout1 = QGridLayout(self.ops_source)
-
-     self.chkBackSubtract = QCheckBox("Subtract background")
-     self.chkBackSubtract.stateChanged.connect(self.sub_background)
-     layout1.addWidget(self.chkBackSubtract,0,0)
-     btnBackSet = QPushButton("Set background")
-     layout1.addWidget(btnBackSet,0,1)
-     btnBackSet.clicked.connect(self.set_background) 
-
-     self.chkReplaceSubtract = QCheckBox("Replace subtracted")
-     self.chkReplaceSubtract.stateChanged.connect(self.replace_background)
-     #layout1.addWidget(self.chkReplaceSubtract,0,2)
-
-     self.slider_threshold = QSlider(orientation=Qt.Horizontal)
-     self.slider_threshold.setMinimum(0) # TODO: Get from camera
-     self.slider_threshold.setMaximum(100) # TODO: Get from camera
-     layout1.addWidget(self.slider_threshold,1,1)
-     self.slider_threshold.valueChanged.connect(self.slider_threshold_changed) # TODO
-
-     self.chkApplyThreshold = QCheckBox("Apply Thresholding")
-     self.chkApplyThreshold.stateChanged.connect(self.click_apply_threshold)
-     layout1.addWidget(self.chkApplyThreshold,1,0)
-
-     self.threshold_val = QDoubleSpinBox()
-     layout1.addWidget(self.threshold_val,1,2)
-     self.threshold_val.setDecimals(2)
-
-     lbl = QLabel("Exposure time (ms)")
-     layout1.addWidget(lbl,2,0)
-
-     self.slider_exposure = QSlider(orientation=Qt.Horizontal)
-     self.slider_exposure.setMinimum(0) # TODO: Get from camera
-     self.slider_exposure.setMaximum(100) # TODO: Get from camera
-     layout1.addWidget(self.slider_exposure,2,1)
-     self.slider_exposure.valueChanged.connect(self.slider_exposure_changed)
-
-     self.exposure = QDoubleSpinBox()
-     layout1.addWidget(self.exposure,2,2)
-     self.exposure.setDecimals(4)
-     self.exposure.setMinimum(defaults.CAM_EXPO_MIN)
-     self.exposure.setMaximum(defaults.CAM_EXPO_MAX)
-
-     lbl = QLabel("Gain (dB)")
-     layout1.addWidget(lbl,3,0)
-
-     self.slider_gain = QSlider(orientation=Qt.Horizontal)
-     self.slider_gain.setMinimum(0) # TODO: Get from camera
-     self.slider_gain.setMaximum(100) # TODO: Get from camera
-     layout1.addWidget(self.slider_gain,3,1)
-     self.slider_gain.valueChanged.connect(self.slider_gain_changed)
-
-     self.gain = QDoubleSpinBox()
-     layout1.addWidget(self.gain,3,2)
-     self.gain.setMinimum(defaults.CAM_GAIN_MIN)
-     self.gain.setMaximum(defaults.CAM_GAIN_MAX)
-
-     ### DM Ops
-     layout1 = QGridLayout(self.ops_dm)
-     #self.chkLoop = QCheckBox("Close AO Loop")
-     layout1.addWidget(self.chkLoop,0,0)
-
-     btn = QPushButton("Save flat")
-     btn.clicked.connect(self.flat_save)
-     layout1.addWidget(btn, 0,3 )
-
-     btn = QPushButton("Do flat")
-     btn.clicked.connect(self.flat_do)
-     layout1.addWidget(btn, 0,1 )
-
-     btn = QPushButton("Do zero")
-     btn.clicked.connect(self.zero_do)
-     layout1.addWidget(btn, 0,2 )
-
-     self.widget_mode_buttons = QWidget()
-     layoutStatusButtons = QHBoxLayout(self.widget_mode_buttons)
-
-     self.mode_btn1 = QPushButton("Init")
-     layoutStatusButtons.addWidget(self.mode_btn1)
-     self.mode_btn1.clicked.connect(self.mode_init)
-
-     self.mode_btn2 = QPushButton("Snap")
-     layoutStatusButtons.addWidget(self.mode_btn2)
-     self.mode_btn2.clicked.connect(self.mode_snap)
-
-     self.mode_btn3 = QPushButton("Run")
-     layoutStatusButtons.addWidget(self.mode_btn3)
-     self.mode_btn3.clicked.connect(self.mode_run)
-
-     self.mode_btn4 = QPushButton("Stop")
-     layoutStatusButtons.addWidget(self.mode_btn4)
-     self.mode_btn4.clicked.connect(self.mode_stop)
-
-     self.edit_num_runs = QLineEdit("-1")
-     self.edit_num_runs.setMaxLength(6)
-     layoutStatusButtons.addWidget(self.edit_num_runs)
-
-     self.mode_btn2.setEnabled( True )
-     self.mode_btn3.setEnabled( True )
-     #self.mode_btn4.setEnabled( False )
-
-     # Config
-     layout1 = QGridLayout(pages[2])
-     lbl = QLabel("XML Config: ")
-     layout1.addWidget(lbl, 0,0)
-     self.edit_xml_filename = QLineEdit(self.json_data["params"]["xml_file"])
-     layout1.addWidget(self.edit_xml_filename, 0,1)
-     btn = QPushButton("Select")
-     layout1.addWidget(btn, 0,2)
-     btn.clicked.connect(self.load_config)
-     #btn = QPushButton("Edit")
-     #layout1.addWidget(btn, 0,3)
-     #btn.clicked.connect(self.reload_config)
-     self.layout_config = layout1
-     self.init_config_ui()
-
-     # Settings
-     layout1 = QGridLayout(pages[1])
-     self.param_tree = ParameterTree()
-     self.param_tree.setParameters(self.p, showTop=False)
-     layout1.addWidget(self.param_tree,0,0)
-     btn = QPushButton("Apply")
-     btn.clicked.connect(self.params_apply_clicked)
-     layout1.addWidget(btn,1,0)
-
-     #self.widget_status_buttons.setLayout(layoutStatusButtons)
-     layout.addWidget(self.widget_mode_buttons,1)
-
-     self.label_status0 = QLabel("Status: ")
-     layout.addWidget(self.label_status0, 1)
-
-     self.text_status = QTextEdit()
-     self.text_status.setReadOnly(True)
-
-     #layout.addWidget(self.text_status, 1)
-     layout.addWidget(tabs, 20)
-
-     #self.widget_controls = QGroupBox('Controls')
-     self.widget_controls.setLayout(layout)
-
-     font=QFont("Courier",18,QFont.Bold);
-     #font.setStyleHint(QFont::TypeWriter);
-
-     #layout.addWidget(QGroupBox('Statistics'), 20)
-     self.text_stats = QTextEdit()
-     self.text_stats.setCurrentFont(font)
-     self.text_stats.setReadOnly(True)
-     layout.addWidget(self.text_stats)
-
-     layout1 = QGridLayout(self.ops_boxes) #pages[3])
-     
-     lbl = QLabel("Box size:")
-     layout1.addWidget(lbl,0,0)
-     self.widget_boxsize = QDoubleSpinBox()
-     layout1.addWidget(self.widget_boxsize,0,1)
-     self.widget_boxsize.setDecimals(2)
-     self.widget_boxsize.valueChanged.connect(self.boxsize_changed)
-
-     btn = QPushButton("Search box shift")
-     btn.clicked.connect(lambda: self.show_zernike_dialog("Shift search boxes", self.engine.shift_search_boxes ) )
-     layout1.addWidget(btn, 1,0 )
-
-     btn = QPushButton("Reference shift")
-     btn.clicked.connect(lambda: self.show_zernike_dialog("Shift references", self.engine.reset_references ) )
-     layout1.addWidget(btn, 2,0 )
-
-     self.chkFollow = QCheckBox("Boxes follow centroids")
-     self.chkFollow.stateChanged.connect(lambda:self.set_follow(self.chkFollow.isChecked()))
-     layout1.addWidget(self.chkFollow, 1,3 )
-
-     btn = QPushButton("Search box RESET")
-     btn.clicked.connect(self.engine.reset_search_boxes )
-     layout1.addWidget(btn, 1,1 )
-
-     btn = QPushButton("Reference RESET")
-     btn.clicked.connect(self.engine.reset_references )
-     layout1.addWidget(btn, 2,1 )
-
-     btn = QPushButton("Shrink+Shift1")
-     layout1.addWidget(btn,0,2)
-     btn.clicked.connect(lambda: self.engine.offline.offline_auto_shrink1() )
-
-     btn = QPushButton("Shrink+Autoshift")
-     layout1.addWidget(btn,0,3)
-     btn.clicked.connect(lambda: self.engine.offline.offline_auto_shrink() )
-
-
-     # OFFLINE
-     layout1 = QGridLayout(self.ops_offline) #pages[3])
-     #btn1 = QPushButton("Load spot image")
-     #btn1.setStyleSheet("color : orange")
-     #layout1.addWidget(btn1,3,0,0,-1)
-     #btn1.clicked.connect(self.offline_load_image)
-
-     #lbl = QLabel("Spot image: ")
-     #layout1.addWidget(lbl, 1,0)
-     #self.offline_image_name = QLineEdit("spots.bin")
-     #layout1.addWidget(self.offline_image_name, 1,0)
-     self.btn_off = QPushButton("Load Offline Source")
-     self.btn_off.clicked.connect(self.offline_load_image)
-     layout1.addWidget(self.btn_off, 1,0)
-
-     self.btn_off_back = QPushButton("Load Offline Background")
-     self.btn_off_back.clicked.connect(self.offline_load_background)
-     layout1.addWidget(self.btn_off_back, 2,0)
-
-     # Choose the frame to show. Above the arrows, spanning their three columns
-     self.frame_slider = FrameSlider()
-     self.frame_slider.valueChanged.connect(self.offline_goto)
-     layout1.addWidget(self.frame_slider, 2,1, 1,3)
-
-     # OFfline iteration offline_next prev.
-     btn = QPushButton("\u2190") # left arrow
-     layout1.addWidget(btn,3,1)
-     btn.clicked.connect(lambda: self.offline_move(-1,True) )
-     self.lbl_frame_curr = QLabel()
-     layout1.addWidget(self.lbl_frame_curr,3,2)
-     btn = QPushButton("\u2192") # right arrow
-     layout1.addWidget(btn,3,3)
-     btn.clicked.connect(lambda: self.offline_move (1,True) )
-     
-     self.progress_bar = QtWidgets.QProgressBar(self)
-     layout1.addWidget(self.progress_bar,3,0)
-    
-     self.btn_processing = QPushButton("Auto process all frames")
-     layout1.addWidget(self.btn_processing,4,0)
-     self.btn_processing.clicked.connect(lambda: self.offline_autoall() )
-
-     #self.chkAutorotate = QPushButton("Autorotate each")
-     #layout1.addWidget(self.chkAutorotate,1,1)
-    # btn.clicked.connect(lambda: self.engine.offline.offline_rotation_fix() )
-
-     btn = QPushButton("Rotate this frame")
-     layout1.addWidget(btn,6,2)
-     btn.clicked.connect(lambda: self.engine.offline.offline_rotation_fix() )
-
-     btn = QPushButton("Process this frame")
-     layout1.addWidget(btn,6,1)
-     btn.clicked.connect(lambda: self.engine.offline.offline_manual1() )
-
-     btn = QPushButton("Save this frame")
-     layout1.addWidget(btn,4,2)
-     btn.clicked.connect(lambda: self.engine.offline.offline_serialize() )
-
-     btn = QPushButton("Dialog all frames")
-     layout1.addWidget(btn,5,0)
-     btn.clicked.connect(lambda: self.engine.offline.show_dialog() )
-
-    # Dumb: Don't expand and shrink. Best for e.g. calibration images
-     btn = QPushButton("Auto simple")
-     layout1.addWidget(btn,6,0)
-     btn.clicked.connect(lambda: self.engine.offline.offline_auto_dumb() )
-
-     # Offline frame gallery: small thumbnails, wrapping across the panel's width. Virtual (a thumbnail is made when it is shown),
-     # since movies can have thousands of frames
-     self.frame_model = FrameGalleryModel(self)
-     self.frame_gallery = QtWidgets.QListView()
-     self.frame_gallery.setModel(self.frame_model)
-     self.frame_gallery.setViewMode(QtWidgets.QListView.IconMode)
-     self.frame_gallery.setResizeMode(QtWidgets.QListView.Adjust) # Re-wrap when the width changes
-     self.frame_gallery.setMovement(QtWidgets.QListView.Static)
-     self.frame_gallery.setUniformItemSizes(True) # (All the same size: much faster with thousands)
-     self.frame_gallery.setIconSize(QtCore.QSize(FrameGalleryModel.THUMB_SIZE, FrameGalleryModel.THUMB_SIZE))
-     self.frame_gallery.setSpacing(3)
-     self.frame_gallery.setSelectionMode(QtWidgets.QAbstractItemView.NoSelection)
-     self.frame_gallery.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
-     self.frame_gallery.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
-     self.frame_gallery.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-
-     layout1.addWidget(self.frame_gallery,7,0, 1,4) # Across all the columns of the panel
-
-     self.chkOfflineAlgorithm = QCheckBox("Use offline algorithm")
-     self.chkOfflineAlgorithm.stateChanged.connect(self.offline_algorithm)
-     layout1.addWidget(self.chkOfflineAlgorithm,8,0)
-
-     self.param_tree_offline = ParameterTree()
-     self.param_tree_offline.setParameters(self.p_offline, showTop=False)
-
-     # Main Widget
-     self.widget_main = QWidget()
-     layoutCentral = QHBoxLayout()
-     layoutCentral.addWidget(self.widget_centrals, stretch=3)
-     #layoutCentral.addWidget(self.widget_displays, stretch=2)
-     layoutCentral.addWidget(self.widget_controls, stretch=1)
-     self.widget_main.setLayout(layoutCentral)
-
-     self.setCentralWidget(self.widget_main)
-
-     menu=self.menuBar().addMenu('&File')
-     menu.addAction('L&oad config file...', self.load_config_json)
-     menu.addSeparator()
-     menu.addAction('&Export Centroids + Zernikes', self.export)
-     menu.addAction('Export All &Zernikes', self.export_all)
-     menu.addAction('Process &directory of AVIs...', self.process_directory)
-     menu.addAction('Make summary &plot from a directory of CSVs...', self.summary_plot_directory)
-     menu.addAction('Show &Log', self.show_log)
-     menu.addAction('Run &Calibration', self.do_calibration)
-     menu.addAction('e&Xit', self.close)
-
-     menu=self.menuBar().addMenu('&Help')
-     menu.addAction('&About', self.show_about)
-
-     pixmap_label.setFocus()
-
-     self.connect_offline_signals()
-
-     self.setGeometry(2,2,defaults.MAIN_WIDTH_WIN,defaults.MAIN_HEIGHT_WIN)
-     self.setWindowFlags(Qt.Window | Qt.WindowTitleHint | Qt.WindowMinimizeButtonHint | Qt.WindowMaximizeButtonHint | Qt.WindowCloseButtonHint)
-     self.show()
+     _createUI(self) # (See nextwave_ui_create.py)
 
  def calibration_status(self,s):
     log.info( s )
@@ -1737,7 +1419,29 @@ class NextWaveMainWindow(QMainWindow):
  def boxsize_changed(self):
     self.engine.init_params( {'box_size_pixel': self.widget_boxsize.value(), 'pupil_diam':None })
     #self.engine.make_searchboxes() #cx,cy,pupil_radius_pixel=self.size/2.0*1000/self.ccd_pixel)
+ 
+ def slider_metric_changed(self):
+    val=self.slider_metric.value()/1000.0
+    self.label_metric.setText('Metric (%0.3f): '%val)
+    self.engine.metric_set( val  )
+
+ def slider_aobleed_changed(self):
+    self.engine.aobleed_set( self.slider_aobleed.value()/100.0 )
+
+ def slider_aogain_changed(self):
+    self.engine.aogain_set( self.slider_aogain.value()/100.0 )
+
+ def slider_aorate_changed(self):
+    self.engine.aorate_set( self.slider_aorate.value() )
     
+ def slider_defocus_changed(self):
+     scaled = (self.slider_defocus.value()-1000)/200.0
+     self.engine.defocus_set(scaled)
+
+ def slider_dmfill_changed(self):
+     scaled = self.slider_dmfill.value()/1000.0
+     self.engine.dmfill_set(scaled)
+     
  def slider_threshold_changed(self):
      scaled = self.slider_threshold.value()/100.0
      self.threshold_val.setValue(scaled)
@@ -1746,21 +1450,67 @@ class NextWaveMainWindow(QMainWindow):
      scaled = 10**( float( self.slider_exposure.value())/100.0
         *np.log10(defaults.CAM_EXPO_MAX/defaults.CAM_EXPO_MIN)+np.log10(defaults.CAM_EXPO_MIN))
      self.exposure.setValue(scaled)
-     self.sockets.camera.send(b"E=%f\x00"%(scaled*1000) ) # Convert to usec
+     msg=b"E=%f"%(scaled*1000)
+     self.sockets.camera.send( msg ) # Convert to usec
 
  def slider_gain_changed(self):
      scaled = self.slider_gain.value()/100.0*CAM_GAIN_MAX
      self.gain.setValue(scaled)
+     msg=b"G=%f"%(scaled)
+     self.sockets.camera.send( msg ) 
 
+ def loop_changed(self,state):
+     self.engine.loop_changed(self.chkLoop.isChecked() )  
+     
  def flat_save(self):
      self.engine.flat_save()
      return
  def flat_do(self):
      self.engine.flat_do()
+     self.static_clear()
      return
+     
  def zero_do(self):
      self.engine.zero_do()
+     self.static_clear()
      return
+ 
+ def do_static(self):
+    zs = np.zeros(65)
+    zs[2:5] = [self.static2, self.static, self.static4]
+    zs[11] = self.static12
+    self.engine.apply_static_mirror(zs)
+    
+
+ @pyqtSlot(int, float)
+ def set_static(self, which, incr):
+     if which==3:
+         self.static += incr
+     elif which==2:
+         self.static2 += incr
+     elif which==4:
+         self.static4 += incr
+     elif which==12:
+         self.static12 += incr
+         
+     self.do_static()
+
+ @pyqtSlot()
+ def do_loop_toggle(self):
+    chkLoop.setChecked( not chkLoop.getChecked() )
+ @pyqtSlot()
+ def do_command_record(self):
+    self.command_record = True #not self.command_record
+    QTimer.singleShot(2000, self.do_command_record_off) # Set timer to turn off after two seconds
+ 
+ def do_command_record_off(self):
+     self.command_record = False
+ 
+ def static_clear(self):
+    self.static2=0
+    self.static=0
+    self.static4=0
+    self.static12=0
 
  def offline_algorithm(self):
   self.engine.mode_offline = self.chkOfflineAlgorithm.isChecked()
@@ -1777,22 +1527,74 @@ class NextWaveMainWindow(QMainWindow):
  def autoshift_search_boxes(self):
      self.engine.autoshift_search_boxes()
 
+ def toggle_record(self):
+    self.engine.comm.do_record_toggle( self.chkRecord.isChecked() )
+
  def set_move_amount(self, doit):
      if doit:
          self.m = round( self.engine.lenslet_size_pixel )
      else:
          self.m=1
+         
+ def activate_metric(self):
+    try:
+        self.metric_active = not self.metric_active
+    except:
+        self.metric_active = True
+        
+    # TODO: Don't allow subtract if it hasn't been set once
+    if self.metric_active:
+        self.sockets.centroiding.send(b"M\x00")
+    else:
+        self.sockets.centroiding.send(b"m\x00")
+ 
+ def do_remove_tiptilt(self):
+    if self.chkRemoveTipTilt.isChecked():
+        self.sockets.centroiding.send(b"P\x00")
+    else:
+        self.sockets.centroiding.send(b"p\x00")
 
+ def do_modal_edges(self):
+    if self.chkModalEdges.isChecked():
+        self.sockets.centroiding.send(b"O\x00")
+    else:
+        self.sockets.centroiding.send(b"o\x00")
+
+ def set_defocus_pos0(self):
+    self.defocus_pos0=self.slider_defocus.value()
+ def set_defocus_pos1(self):
+    self.defocus_pos1=self.slider_defocus.value()
+    
+ def do_ao_precondition(self):
+    self.engine.ao_precondition = self.chkAOPrecondition.isChecked()
+
+ def do_midi(self):
+     # TODO: Remove?
+     return
+     
+     if self.chkMidi.isChecked():
+        self.midi1=midi.midi_control()
+        self.midi1.init_midi(0)
+     else:
+        self.midi1.close()
+        self.midi1 = None
+         
  def sub_background(self):
     # TODO: Don't allow subtract if it hasn't been set once
     if (self.chkBackSubtract.isChecked()):
         self.sockets.centroiding.send(b"B\x00")
     else:
         self.sockets.centroiding.send(b"b\x00")
+        
+ def set_background_auto(self):
+    mode1= scipy.stats.mode( self.engine.image_bytes.flatten() )
+    print( mode1 )
+    self.sockets.centroiding.send(b"s=%d"%mode1[0])
+    
  def set_background(self):
     self.sockets.centroiding.send(b"S\x00")
  def replace_background(self):
-    if (self.chkBackSubtract.isChecked()):
+    if (self.chkReplaceSubtract.isChecked()):
         self.sockets.centroiding.send(b"R\x00")
     else:
         self.sockets.centroiding.send(b"r\x00")
@@ -1804,6 +1606,17 @@ class NextWaveMainWindow(QMainWindow):
         self.sockets.centroiding.send(b"t\x00")
 
  def move_center(self, dx, dy, m=1, do_update=True):
+    if not self.offline_only and self.chkMoveTipTilt.isChecked(): # (Realtime) Move by tip/tilt, in the centroiding plugin
+        if (dx<0):
+            self.sockets.centroiding.send(b"x-0.01\x00");
+        if (dx>0):
+            self.sockets.centroiding.send(b"x+0.01\x00");
+        if (dy<0):
+            self.sockets.centroiding.send(b"y-0.01\x00");
+        if (dy>0):
+            self.sockets.centroiding.send(b"y+0.01\x00");
+        return;
+
     self.engine.offline.center_dirty = True
     m = self.m
     self.engine.cx += (dx * m)
@@ -1829,6 +1642,11 @@ class NextWaveMainWindow(QMainWindow):
     x_scaled = event.pos().x() / width * self.image_pixels.shape[1]
     y_scaled = event.pos().y() / height * self.image_pixels.shape[0]
     # print("scaled: x,y ", x_scaled, y_scaled)
+
+    if QApplication.keyboardModifiers() & Qt.ControlModifier and not self.offline_only:
+        # Ctrl key is currently pressed: (realtime) tell the centroiding plugin
+        self.sockets.centroiding.send(b"E%04d\n%04d"%(x_scaled,y_scaled) )
+        return
 
     which_box = np.where(np.all(
         ( (self.engine.box_x-self.engine.box_size_pixel/2)<x_scaled,
@@ -1902,6 +1720,14 @@ class NextWaveMainWindow(QMainWindow):
     elif event.key()==Qt.Key_Down:
         self.engine.cy += 1 + 10 * self.key_control
         update_search_boxes=True
+        
+    elif event.key()==Qt.Key_7:
+        self.engine.null_tip_tilt()
+    elif event.key()==Qt.Key_0:
+        self.engine.zero_do()
+    elif event.key()==Qt.Key_9:
+        self.engine.mode_snap()
+        
     else:
         log.debug( "Uknown Key:", event.key() )
 
@@ -1933,6 +1759,9 @@ class NextWaveMainWindow(QMainWindow):
     #self.sockets.camera.send(b"E=3.14")
     #self.engine.update_searchboxes()
 
+ def reset_counts(self):
+    self.engine.comm.zero_log_index()
+
  def export(self):
     default_filename="centroids.dat"
     filename, _ = QFileDialog.getSaveFileName(
@@ -1952,6 +1781,9 @@ class NextWaveMainWindow(QMainWindow):
     self.engine.offline.export_all_zernikes(dir1)
 
  def close(self):
+    if not( self.midi1 is None):
+        self.midi1.close()
+        self.midi=None
     self.engine.send_quit() # Send stop command to engine
     self.app.exit()
 
@@ -1959,12 +1791,11 @@ class NextWaveMainWindow(QMainWindow):
     self.close()
 
  def initEngine(self):
-    self.engine = NextwaveEngine(self)
     self.engine.init()
     if not self.offline_only:
        self.engine.make_searchboxes(self.engine.cx,self.engine.cy)
        self.sockets = NextwaveSocketComm(self)
-       self.engine.mode_init()
+       self.engine.mode_init() # Needed to let the C engine run
 
 #     self.reload_config() # Load last selected XML
 #     #self.tabs.setCurrentIndex(2) # Doesn't allocate enough space: first tab is better
@@ -2018,6 +1849,19 @@ def start_backdoor(win):
 def main():
   nextwave_log.setup()
   log.info('NextWave started. ' + build_message.replace('\n', ' | '))
+  if joystickapi is not None:
+    num = joystickapi.joyGetNumDevs()
+    ret, caps, startinfo = False, None, None
+    for idj in range(num*0):
+      ret, caps = joystickapi.joyGetDevCaps(id)
+      if ret:
+          print("gamepad detected: " + caps.szPname)
+          print("ID: " + idj)
+          ret, startinfo = joystickapi.joyGetPosEx(id)
+          break
+      else:
+        print("no gamepad detected")
+
   app = QApplication(sys.argv)
   win = NextWaveMainWindow()
   win.app = app
@@ -2027,8 +1871,27 @@ def main():
   win.initEngine()
   win.initUI()
 
+  #keybinder.init()
+  #keybinder.register_hotkey(win, "Ctrl+A", win.mode_snap)  
+
   if not win.offline_only:
       win.sockets.init()
+        
+  if not win.offline_only: # (Realtime: these talk to the C++ engine and the camera)
+    # Set defaults: TODO: pull from XML
+    win.slider_defocus.setValue(1000)
+    win.slider_aogain.setValue(50)
+    win.slider_dmfill.setValue(1000)
+
+    expo=win.get_param_xml("CAMERA1_CameraExposure")
+    sliderval = int( (np.log10(expo) - np.log10(CAM_EXPO_MIN) ) / (np.log10(CAM_EXPO_MAX) - np.log10(CAM_EXPO_MIN) )  * 100 )
+    win.slider_exposure.setValue(sliderval)
+#  print( expo, sliderval )
+  
+  win.signal_static_set.connect(win.set_static)
+  win.signal_zero.connect(win.zero_do)
+  win.signal_loop_toggle.connect(win.do_loop_toggle)
+  win.signal_command_record.connect(win.do_command_record)
   start_backdoor(win)
 
   import traceback

@@ -4,6 +4,8 @@ beautifulsoup4
 lxml
 rpyc
 pyqt5
+numpy
+scipy
 matplotlib
 Pillow
 ffmpeg

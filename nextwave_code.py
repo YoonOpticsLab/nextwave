@@ -6,7 +6,7 @@ import time
 
 import matplotlib.cm as cmap
 #from numba import jit
-from numpy.linalg import svd,lstsq
+from numpy.linalg import svd,lstsq,pinv
 import scipy
 from scipy.optimize import minimize
 
@@ -19,6 +19,7 @@ import extract_memory
 
 import zernike_functions
 import iterative
+import functions_grid
 
 from nextwave_comm import NextwaveEngineComm
 from offline import NextwaveOffline
@@ -63,21 +64,39 @@ class NextwaveEngine():
         # TODO:
         self.ui = ui
         self.mode = 0
-        self.cx = ui.json_data["params"]["cx"] # Center of the pupil (pixels)
-        self.cy = ui.json_data["params"]["cy"]
+        self.cx = 0 # Center of the pupil (pixels): from the config, in init (the window makes us before reading the config)
+        self.cy = 0
         self.mode_offline = False # True: process images offline, don't get centroids from the C++ engine
         self.comm = NextwaveEngineComm(self)
         self.offline = NextwaveOffline(self)
         self.num_boxes = 0
         self.zernikes = None
+        self.defocus = 0
+        self.aogain = 1.0
+        self.aobleed = 0.0
+        self.aorate = 1.0
+        self.dmfill = 1.0
         self.omits = np.zeros( 0, dtype='uint8' ) # Need to do early
-
+        
+        self.acts_inside = np.arange(97,dtype='int') # TODO
+        self.acts_outside = np.array([],dtype='int')
+        self.modes = 97
+        self.condition = 9999
+        
+        self.ao_precondition = True # Fancy Tikhonov preconditioning
+        
     def init(self):
+        self.cx = self.ui.json_data["params"]["cx"] # The starting center
+        self.cy = self.ui.json_data["params"]["cy"]
         if not self.ui.offline_only:
             self.comm.init()
+            self.comm.set_mode(0)
         self.init_params()
 
     def init_params(self, overrides=None):
+    
+        print("Init params")
+
         #self.ccd_pixel = self.ui.get_param("system","pixel_pitch",True)
         #self.pupil_diam = self.ui.get_param("system","pupil_diam",True)
         #self.box_um = self.ui.get_param("system","lenslet_pitch",True)
@@ -114,9 +133,17 @@ class NextwaveEngine():
 
         bytez =np.array([self.ccd_pixel, self.box_um, self.pupil_radius_mm], dtype='double').tobytes() 
 
-        if not self.ui.offline_only:
-            self.comm.write_params(overrides)
+        self.send_params_to_engine()
 
+    def send_params_to_engine(self):
+        if not self.ui.offline_only:
+            self.comm.write_params(True) # "Overrides" : FIXME!! TODO
+
+    def null_tip_tilt(self):
+        dx=int( -round(self.mean_displacements[0] ) )
+        dy=int( round(self.mean_displacements[1] ) )
+        self.move_searchboxes(dx,dy)
+        
     def move_searchboxes(self,dx,dy):
         self.box_x += dx
         self.box_y += dy
@@ -155,6 +182,9 @@ class NextwaveEngine():
 
         if pupil_radius_pixel is None:
             pupil_radius_pixel=self.pupil_radius_pixel
+        else:
+            self.pupil_radius_pixel = pupil_radius_pixel
+            self.pupil_radius_mm = self.pupil_radius_pixel / 1000.0 * self.ccd_pixel
 
         box_size_pixel=self.box_size_pixel
         if box_spacing_pixel is None:
@@ -207,7 +237,9 @@ class NextwaveEngine():
         self.num_boxes= num_boxes
         self.centroids_x = np.full(num_boxes, np.nan)
         self.centroids_y = np.full(num_boxes, np.nan)
-
+        
+        self.box_spacing_pixel = box_spacing_pixel
+        
         self.update_zernike_svd() # Precompute
 
         log.debug( "Make SB ",pupil_radius_pixel, box_size_pixel, box_spacing_pixel, ri_ratio, num_boxes, self.zterms_full.shape )
@@ -218,10 +250,51 @@ class NextwaveEngine():
             distances = (self.box_x - self.box_x[nidx])**2 + (self.box_y - self.box_y[nidx])**2
             self.neighbors[nidx]=np.argsort( distances)[1:5] # Take 4 nearest, excluding self (which will be 0)
 
+        self.a = np.zeros( num_boxes, dtype='uint8' )
         self.omits = np.zeros( num_boxes, dtype='uint8' )
-        self.update_searchboxes()
-
+        self.load_omits()
+        self.update_searchboxes(send_to_engine=True)        
+        
         return self.ref_x,self.ref_y,self.norm_x,self.norm_y
+
+    def load_omits(self):
+        try:
+            #fil=open("omits.txt","rt")
+            #lins=fil.readlines();
+            omits = np.loadtxt("omits.txt", dtype='int')
+            print( "OMITS!", end=' ' )
+            for omit1 in omits:
+                self.omits[omit1]=1
+                print( omit1, end=' ');
+            print()
+        except:
+            pass
+
+    def do_zonal(self, num_modes, num_zern ):
+        # This matches what is shown on the screen
+        spot_displace_x = self.centroids_x - self.ref_x  
+        spot_displace_y = self.centroids_y - self.ref_y
+        
+        spot_displace_y -= spot_displace_y.mean()
+        spot_displace_x -= spot_displace_x.mean()
+        spot_displace_y = -spot_displace_y
+
+        slope = np.concatenate( (spot_displace_y, spot_displace_x)) * (
+            self.pupil_radius_mm /  self.focal)
+        coeff=np.matmul(self.zterms_full,slope)
+        zernikes=coeff[zernike_functions.CVS_to_OSA_map[0:len(coeff)]] # Return value will is OSA
+        
+        zt_inv2 = pinv(self.zterms_full[0:num_zern] )
+        slopes_est =np.matmul( zt_inv2, zernikes[zernike_functions.OSA_to_CVS_map[0:num_zern]] )
+                
+        halfway = slopes_est.shape[0]//2
+        slope_reshape = np.vstack( (slopes_est[halfway:],slopes_est[:halfway]) ).T.flatten()
+        mirs_delta = np.matmul(self.zonal_influence_inv.T, slope_reshape/1000.0)
+        
+        zonal_gain = 0.2
+        print( mirs_delta )        
+        self.comm.write_mirrors_offsets ( -zonal_gain * mirs_delta )
+        
 
     def dump_vars(self):
         fil=open("dump_vars.py","wt")
@@ -240,11 +313,12 @@ class NextwaveEngine():
     def offline_frame(self,nframe):
         self.offline.offline_frame(nframe)
 
-    def update_searchboxes(self):
+    def update_searchboxes(self,send_to_engine=True):
         self.update_zernike_svd()
         if not self.ui.offline_only:
             self.update_influence();
-            self.comm.send_searchboxes(self.box_x, self.box_y)
+            if send_to_engine:
+                self.comm.send_searchboxes(self.box_x, self.box_y)
         #self.dump_vars() # DEBUGGING
 
     def update_zernike_svd(self):
@@ -292,6 +366,10 @@ class NextwaveEngine():
             #  Compute SVD of stacked X and Y
             zpoly = np.hstack( (dx_subset, dy_subset ) ).T
 
+            bads = np.where( np.isnan(zpoly) )
+            print( bads )
+            #zpoly[ bads] = np.random.normal(0,0.0001, bads.shape )
+                
             # Pre-compute&save the zterms that are multiplied with the slopes in realtime
             [uu,ss,vv] = svd(zpoly,False)
 
@@ -303,43 +381,171 @@ class NextwaveEngine():
             leftside = lstsq(ss_full, vv, rcond=0)[0].T # Python equiv to MATLAB's vv/ss (solving system of eqns) is lstsq
             # https://stackoverflow.com/questions/1001634/array-division-translating-from-matlab-to-python
             zterms = np.matmul( leftside, uu.T)
-            zterms_inv = np.linalg.pinv(zterms)
+            zterms_inv = pinv(zterms)
 
             if nsubset==0:
                 self.zterms_full=zterms
                 self.zterms_full_inv=zterms_inv
+                zpoly_full = zpoly.copy()
             elif nsubset==1:
                 self.zterms_20=zterms
                 self.zterms_20_inv=zterms_inv
+                zpoly_20 = zpoly.copy()
 
         # DBG:
         self.lenslet_dx=lenslet_dx # Debugging
         self.lenslet_dy=lenslet_dy
-        #np.save('zterms_full.npy',self.zterms_full)
-        #np.save('zterms_20.npy',self.zterms_20)
-        #np.save('zpoly.npy',zpoly)
+        if not (self.ui.offline_only or self.mode_offline): # (Debugging files, realtime only: offline, frames are processed in parallel)
+            print(f"Resave zterms. shape={self.zterms_full.shape}")
+            np.save('zterms_full.npy',self.zterms_full)
+            np.save('zterms_full_inv.npy',self.zterms_full_inv)
+            np.save('zterms_20.npy',self.zterms_20)
+            np.save('zterms_20_inv.npy',self.zterms_20_inv)
+            np.save('zpoly_20.npy',zpoly_20)
+            np.save('zpoly_full.npy',zpoly_full)
 
+    def apply_zernikes(self,zs,from_dialog=True):
+        #print( zs )
+        if False:
+            dx,dy = self.get_deltas(np.array(zs),from_dialog)
+            slopes_desired = np.vstack( (-dx,dy) ).T.flatten()
+            slopes_desired *= (self.ccd_pixel/self.focal) # To undo whatever get_deltas is doing
+            slopes_desired /= (self.focal*1000/self.ccd_pixel) # This seems correct
+            act_new = np.matmul( self.influence_inv.T, slopes_desired )
+            self.comm.write_mirrors(act_new)
+        
+        if True:
+            # This is more like the static defocus that was working before:
+            dx,dy = self.get_deltas(np.array(zs),False)        
+            #dx -= np.mean(dx)
+            #dy -= np.mean(dy)
+            deltas1 = np.vstack( (dx,dy) ).T.flatten()
+            #deltas1 = np.hstack( (-dy,dx) )
+            #deltas1 *= (self.ccd_pixel/self.focal) # To undo whatever get_deltas is doing
+            deltas1 /= (self.focal*1000/self.ccd_pixel)
+            act_new = np.matmul ( deltas1, self.influence_inv )
+            self.comm.write_mirrors(-act_new)
+        
+#        self.comm.write_mirrors_offsets(-mirs)        
+        print( act_new )
+        #print( self.ui.zs_for_apply.value() )
+        # Displacements that would be expected from the current Zs (for ALL actuators)
+        #slopes_desired = np.matmul( zterms_inv, Zs )
+        
+        return
+        
     def update_influence(self):
-       # return # TODO: Check for AO and pull correct file
-        #try:
-        influence = np.loadtxt(self.ui.json_data["params"]["influence_file"], skiprows=1)
-        #except:
-            #influence = np.random.normal ( loc=0, scale=0.01, size=(97, self.num_boxes * 2)  )
-        valid_idx=np.sum(influence**2,0)>0 # TODO... base on pupil size or something?
-        self.influence = influence[:, valid_idx]
-        self.influence_inv = np.linalg.pinv(self.influence) # pseudoinverse
+        filename_influence =self.ui.get_param_xml("MIRROR1_MirrorInfluenceMatrix") # TODO: Don't reload every time
+        skips = 1 if '.dat' in filename_influence else 0
+        
+        self.influence_full = np.loadtxt(filename_influence, skiprows=skips)
+        #nonzero_idxs = np.sum(influence_full**2,0)>0 
+        #self.influence = influence_full[:,nonzero_idxs]
+
+        max_boxes = np.sqrt( self.influence_full.shape[1] / 2.0 )
+        boxes_x = np.arange(-(max_boxes-1)/2,(max_boxes-1)/2+1) # +1 to include +max_boxes number
+        boxes_y = np.arange(-(max_boxes-1)/2,(max_boxes-1)/2+1)
+        
+        # Determine outer edge of each box using corners away from the center:
+        # 0.5*sign: positive adds 0.5, negative substracts 0.5
+        XX,YY = np.meshgrid(boxes_x, boxes_y )
+        aperture = self.pupil_radius_pixel / self.box_spacing_pixel * 1.0
+        RR = np.sqrt( (XX+0.5*np.sign(XX))**2 + (YY+0.5*np.sign(YY))**2 )
+        valid_boxes = np.where(RR.flatten()<aperture)[0]
+        # For each valid index, need to make both the X and Y component
+#        valid_indices = np.concatenate( (valid_boxes*2, valid_boxes*2+1) )
+        valid_indices = np.vstack( (valid_boxes*2, valid_boxes*2+1) ).T.flatten()       
+        self.influence = self.influence_full[:,valid_indices]
+        np.save('infl', self.influence )
+
+        if True: # This is all for zonal, which we may not use
+            zonal_modes = 85
+            U, s, V = np.linalg.svd(self.influence, full_matrices=True)
+            s_recip = 1/s
+            s_recip[ s<1e-10 ] = 0 # Set any tinies (or 0) to zero
+            print( max_boxes, len(valid_boxes), self.influence.shape, s.max(), valid_boxes[0:10], RR.shape )
+            if zonal_modes < len(s):
+                s_recip[zonal_modes:] = 0 # Clear all the modes from x up
+                
+            self.zonal_condition = s[0]/s[zonal_modes-1]
+            self.zonal_influence_inv = ( (U * s_recip) @ V[0:97,:] ).T
+            np.save('zonal_infl_inv', self.zonal_influence_inv )
+        
+        if len(self.acts_outside)>0:
+            self.influence[self.acts_outside,:] = 0 # Zero them out, if any
+            
+        if self.ao_precondition:
+            # New method using Tikhonov preconditioning, etc.
+            grid_act=functions_grid.sparse_grid(97)
+            L=grid_act.build_laplacian_sparse()
+
+            D=self.influence.T
+            R=L
+            R_ridge = R + 1e-6 * np.eye(R.shape[0] )
+            QR,S=np.linalg.qr(R_ridge,mode='reduced')
+            S_inv=np.linalg.pinv(S)
+            D_w = D @ S_inv
+
+            U,sv,Vt = np.linalg.svd(D_w,full_matrices=False)
+            alpha=0.01
+            ff=sv/(sv**2+alpha)
+
+            ff[self.modes:] = 0
+            C_w = Vt.T @ np.diag(ff) @ U.T
+
+            self.influence_inv=S_inv @ C_w
+            self.influence_inv=self.influence_inv.T
+   
+            self.condition = sv[0]/sv[self.modes-1]
+            
+        else:
+            U, s, V = np.linalg.svd(self.influence, full_matrices=True)
+            s_recip = 1/s
+            s_recip[ s<1e-10 ] = 0 # Set any tinies (or 0) to zero
+            
+            print( max_boxes, len(valid_boxes), self.influence.shape, s.max(), valid_boxes[0:10], RR.shape )
+
+            if self.modes < len(s):
+                s_recip[self.modes:] = 0 # Clear all the modes from x up
+                
+            self.condition = s[0]/s[self.modes-1]
+            self.influence_inv = ( (U * s_recip) @ V[0:97,:] ).T
+            
+        #self.influence_inv = self.influence_inv.T
+        np.save('command', self.influence_inv )
+        
+        self.influence_inv[:,self.acts_outside] = 0
+
         self.nActuators=self.influence.shape[0]
         self.nTerms=self.influence.shape[1]
+        np.save('infl_reduced', self.influence )
+       
+        self.ui.offline_dialog.sc.axes.clear();
+        self.ui.offline_dialog.sc.axes.plot(np.arange(len(s))+1, s[0]/s, 'o-')
+        self.ui.offline_dialog.sc.axes.axvline( self.modes, color='r' )
+        self.ui.offline_dialog.sc.axes.set_yscale('log')  # Set x-axis to logarithmic scale
+        
+        self.ui.offline_dialog.sc.axes.set_ylim(0, s[0]/s[s>1e-10][-1]*1.25 )
+        
+        self.ui.offline_dialog.sc.draw()
+        self.ui.offline_dialog.show()
 
     def compute_zernikes(self):
         # find slope
         spot_displace_x =   self.ref_x - self.centroids_x
-        spot_displace_y = -(self.ref_y - self.centroids_y)
+        spot_displace_y = (self.ref_y - self.centroids_y)
 
         # Not sure whether should do this:
-        #spot_displace_x -= spot_displace_x.mean()
-        #spot_displace_y -= spot_displace_y.mean()
+        # DRC: I am restoring this on 2026/03/06 (!) Breaking?
+        # Realtime only: offline, tip/tilt is measured (and moves the search boxes between steps), so it's kept
+        if not (self.mode_offline or self.ui.offline_only):
+            spot_displace_x -= np.nanmean( spot_displace_x )
+            spot_displace_y -= np.nanmean( spot_displace_y )
+        
+        spot_displace_y = -spot_displace_y;
+        
         #print( spot_displace_y.mean(), spot_displace_x.mean() )
+        self.mean_displacements = [np.nanmean(spot_displace_x), np.nanmean(spot_displace_y) ]
 
         self.spot_displace_interpolated = np.zeros( self.num_boxes )
         
@@ -363,18 +569,41 @@ class NextwaveEngine():
                 self.spot_displace_interpolated[nidx] = 2
                 log.debug("BAD interp: %d %f %f"%(nidx,spot_displace_x[nidx], spot_displace_y[nidx]  ) )
 
+        # DRC: x and y were switched here 2025/05/29. Hmm, Not so sure 9/14/25
         slope = np.concatenate( (spot_displace_y, spot_displace_x)) * (self.ccd_pixel/self.focal);
+        coeff=np.matmul(self.zterms_full,slope)
+        self.zernikes=coeff[zernike_functions.CVS_to_OSA_map[0:len(coeff)]] # Return value will is OSA
 
         self.spot_displace_x = spot_displace_x # debugging
         self.spot_displace_y = spot_displace_y
         self.slope = slope
-
-        coeff=np.matmul(self.zterms_full,slope)
-        #print( coeff.shape )
-        self.zernikes=coeff[zernike_functions.CVS_to_OSA_map[0:len(coeff)]] # Return value will is OSA
-
         #print ("CompZ spot means:",np.mean(self.spot_displace_x), np.mean(self.spot_displace_y))
 
+    def apply_static_mirror(self,zerns_new,Z_TERMS=65):
+        # TODO: see also apply_zernikes
+        
+        slopes = self.slope * 0
+        #coeff=np.matmul(self.zterms_full,slopes)
+        #zernikes=coeff[zernike_functions.CVS_to_OSA_map[0:len(coeff)]]
+        
+        zernikes = np.zeros(Z_TERMS)
+        zernikes += zerns_new
+    
+        # TODO: get_deltas might already do this:
+        #slopes_est2 =np.matmul( self.zterms_full_inv, zernikes[zernike_functions.OSA_to_CVS_map[0:Z_TERMS]] )
+        dx,dy = self.get_deltas(zerns_new,False)
+        
+        # Want to convert back to numerical units (not microns)
+        dx *=  (self.ccd_pixel/self.focal)
+        dy *=  (self.ccd_pixel/self.focal)
+        
+        slope_reshape = np.vstack( (dx,dy) ).T.flatten()
+        #print( np.max( slope_reshape )/1000.0 )
+        #mirs_new = np.matmul(slope_reshape/1000.0, self.influence_inv )
+        mirs_new = np.matmul( self.influence_inv.T, slope_reshape/1000.0 )        
+        mirs_new -= mirs_new.mean()
+        self.comm.write_mirrors(mirs_new)
+        
     def autoshift_searchboxes(self):
         #shift_search_boxes(self,zs,from_dialog=True):
         pass
@@ -398,7 +627,9 @@ class NextwaveEngine():
         #print(len(zs), len(idxs_remap), len(valid_idxs), idxs_remap)
         zern_new=zs[valid_idxs] [idxs_remap ]
         #zern_new[0:2]=0 # Remove tip/tilt TODO: Need to move the pupil center?
-
+        #zern_new[0:2] = [-0.5,0.2] #
+        # DRC: This doesn't work because tip/tilt (meanx/meany) are subtracted as part of centroiding.
+        
         delta=np.matmul(mat1,zern_new)
         num_boxes = self.box_x.shape[0]
         delta_y = delta[0:num_boxes] / (self.ccd_pixel/self.focal)
@@ -407,8 +638,109 @@ class NextwaveEngine():
         self.delta_y=delta_y
         self.zern_new = zern_new
         self.zs = zs
+
+        if not (self.ui.offline_only or self.mode_offline): # (Debugging files, realtime only)
+            np.savetxt('zs_delta_x.txt',delta_x );
+            np.savetxt('zs_delta_y.txt',delta_y );
+        
         return delta_x,delta_y
 
+    def do_ao1(self):
+        self.comm.set_mode( 
+            self.comm.read_mode() | 0x20 )  # MODE_FORCE_AO_START TODO
+            
+    def defocus_do(self):
+        zs= np.zeros(20)
+        zs[3] = self.defocus
+        
+        if False: # For open loop, doesn't work (not linear)
+            dx,dy = self.get_deltas(zs, False)
+            
+            # As Reference Shift:
+            #self.ref_x = self.initial_x - dx
+            #self.ref_y = self.initial_y + dy
+            #self.comm.send_searchboxes(self.box_x, self.box_y)
+            
+            # Method2: Take current deltas, then add futher by dx
+            dx -= np.mean(dx)
+            dy -= np.mean(dy)
+            deltas1 = np.vstack( (dx,-dy) ).T.flatten()
+            deltas1 /= (self.focal*1000/self.ccd_pixel)
+            mirs = np.matmul ( deltas1, self.influence_inv )
+
+            #print( np.mean( mirs), mirs[0:10] )
+            self.comm.write_mirrors_offsets(-mirs)
+            #print(self.defocus)
+        else:
+            self.shift_references(zs,False)
+            self.comm.send_searchboxes(self.box_x, self.box_y)
+            self.do_ao1()
+            
+    def defocus_start(self):
+        # One idea was to save a local copy of the "current" centroids, and use those in entire
+        # inverse calculations. Think it's not necessary though; can just add the mirror deltas.
+        self.centroids_x_save = self.centroids_x 
+        self.centroids_y_save = self.centroids_y
+    
+    def defocus_plus01(self):
+        self.defocus += 0.01
+        self.defocus_do();
+    def defocus_plus10(self):
+        self.defocus += 0.1
+        self.defocus_do();
+    def defocus_minus01(self):
+        self.defocus -= 0.01
+        self.defocus_do();
+    def defocus_minus10(self):
+        self.defocus -= 0.1
+        self.defocus_do();
+
+    def defocus_plus(self):
+        self.defocus += 0.01
+        self.defocus_do();
+        
+    def defocus_minus(self):
+        self.defocus -= 0.01
+        self.defocus_do();
+        
+    def defocus_set(self,val):
+        self.defocus = val
+        self.defocus_do();
+
+    def metric_set(self,val):
+        self.metric = val
+        self.ui.sockets.centroiding.send(b"W%f\x00"%(self.metric) )
+        
+    def aobleed_set(self,val):
+        self.aobleed = val
+        self.ui.sockets.centroiding.send(b"L%f\x00"%(val) )
+    
+    def aogain_do(self):
+        self.ui.sockets.centroiding.send(b"G%f\x00"%(self.aogain) )
+    def aogain_set(self,val):
+        self.aogain = val
+        self.aogain_do();
+
+    def aorate_do(self):
+        self.ui.sockets.centroiding.send(b"D%d\x00"%(self.aorate) )
+    def aorate_set(self,val):
+        self.aorate = val
+        self.aorate_do();
+
+    def modes_set(self,val):
+        self.modes = int( val )
+
+    def dmfill_set(self,val):
+        self.dmfill = val
+        filename_pattern =self.ui.get_param_xml("MIRROR1_MirrorPatternArrayFile") # TODO: Don't reload every time
+        self.act_positions = np.loadtxt(filename_pattern) 
+        
+        act_norm_x = (self.act_positions[:,1]-0.5)*2
+        act_norm_y =(1-self.act_positions[:,0]-0.5)*2 # Notsure need to negate
+        r=np.sqrt( act_norm_x**2 + act_norm_y**2)
+        self.acts_inside = np.where( r<= val )[0]
+        self.acts_outside = np.where( r>val )[0]
+   
 
     def shift_search_boxes(self,zs,from_dialog=True):
         #print( zs )
@@ -429,7 +761,8 @@ class NextwaveEngine():
         self.update_searchboxes()    
 
     def reset_references(self):
-        return
+        self.ref_x = self.initial_x
+        self.ref_y = self.initial_y
 
     def receive_image(self):
         return self.comm.receive_image()
@@ -437,21 +770,37 @@ class NextwaveEngine():
         if self.mode_offline==False: # If in offline, don't keep grabbing centroids from C++ engine
             return self.comm.receive_centroids()
 
-    def zero_do(self):
-        self.write_mirrors( np.zeros(97) ) # TODO
-
     def flat_do(self):
-        self.write_mirrors( self.mirror_state_flat )
+        self.comm.flat_do()
 
+    def zero_do(self):
+        self.comm.zero_do()
+
+    def load_mirror_file(self,fname):
+        mirrors = np.loadtxt(fname, skiprows=1)
+        self.comm.write_mirrors( mirrors )
+        
+    def flat_do(self):
+        self.comm.flat_do()
+        
+    def loop_changed(self,is_checked):
+        if is_checked:
+            if self.comm.read_mode() == 4:
+                self.comm.set_mode(4+8)
+        else:
+            if self.comm.read_mode() == 4+8:
+                self.comm.set_mode(4)
+            
     def flat_save(self):
-        self.mirror_state_flat = np.copy(self.mirror_voltages)
+        self.comm.flat_save()
 
     def send_quit(self):
-        self.comm.set_mode(255)
+        self.comm.set_mode(255) # TODO: Get from file
 
     def mode_init(self):
         self.mode=1
         self.init_params(False)
+        self.load_omits()
         self.mode_snap()
         #time.sleep(0.1)
 
@@ -460,30 +809,28 @@ class NextwaveEngine():
             self.offline.offline_centroids()
             return
 
-        self.mode=2
         if reinit:
-            self.init_params()
+            #self.init_params()
             self.update_searchboxes()
+            
+        self.send_params_to_engine()
 
-        val=3 if (self.ui.chkLoop.isChecked() and allow_AO) else 2
-        buf = ByteStream()
-
+        val=(2+8) if (self.ui.chkLoop.isChecked() and allow_AO) else 2
+        self.mode=2 # Different mode?? TODO
         self.comm.set_mode(val)
 
     def mode_run(self, reinit=True, numruns=1):
-        self.mode=3
-        if reinit:
-            self.init_params()
-
-        fields=self.layout[1]
-        buf = ByteStream()
+        #if reinit:
+        #    self.init_params()
+        self.send_params_to_engine()
 
         val= np.array( numruns, dtype='uint64' )
         #val= np.array( self.ui.edit_num_runs.text(), dtype='uint64' )
         #buf.append(val.tobytes())
         self.comm.set_nframes(val)
 
-        val=9 if self.ui.chkLoop.isChecked() else 8
+        val=(4+8) if self.ui.chkLoop.isChecked() else 4
+        self.mode=4 # ?? TODO
         self.comm.set_mode(val)
 
     def mode_stop(self):
@@ -493,7 +840,7 @@ class NextwaveEngine():
         fil = open(centroids_filename,'wt')
 
         fil.writelines( '[image size = %dx%d]\n'%(self.image_bytes.shape[0],self.image_bytes.shape[1]))
-        fil.writelines( '[pupil = %f,%d,%d]\n'%(self.ui.pupil_diam/self.pupil_diam,self.cx,self.cy))
+        fil.writelines( '[pupil = %f,%d,%d]\n'%(self.pupil_diam/self.pupil_mag,self.cx,self.cy)) # (The center is the engine's)
         for nbox in np.arange( len(self.ref_x)):
             # TODO: Valid or invalid
             fil.writelines('%d\t%.12f\t%.12f\t%.12f\t%.12f\t\n'%(
@@ -507,15 +854,17 @@ class NextwaveEngine():
             fil.writelines('%f\n'%val)
         fil.close()
 
-        np.save('dx',self.spot_displace_x)
-        np.save('dy',self.spot_displace_y)
+        np.savetxt('dx',self.spot_displace_x)
+        np.savetxt('dy',self.spot_displace_y)
         np.save('slope',self.slope)
-        np.save('zterms_full',self.zterms_full)
+        np.savetxt('image',self.image_bytes,fmt='%d')
+        #np.save('zterms_full',self.zterms_full)
         #np.save('zterms_inv',self.zterms_inv)
 
         try:
-            np.savetxt('mirror_voltages.txt',self.mirror_voltages)
+            np.savetxt('mirror_voltages.txt',self.comm.mirror_voltages)
+            np.savetxt('slopes_debug.txt',self.comm.slopes_debug)
         except:
             pass
 
-        self.engine.dump_vars()
+        self.dump_vars()

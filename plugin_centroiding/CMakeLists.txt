@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.1...3.27)
 
 project(plugin_centroiding)
 
+set(ArrayFire_DIR "C:\Program Files\ArrayFire\v3\cmake")
 find_package(ArrayFire REQUIRED)
 
 set(CMAKE_CXX_STANDARD 14)
@@ -11,10 +12,9 @@ list(APPEND SOURCES
   VERSION 1.0
   LANGUAGES CXX)
 
-include_directories(../include)
 include_directories(..)
-include_directories(include)
-include_directories(include/boost_1_83_0)
+include_directories(../../nextwave_include)
+include_directories(../../nextwave_include/boost_1_83_0)
 include_directories(${ArrayFire_INCLUDE_DIRS})
 
 if(WIN32)
@@ -30,11 +30,14 @@ endif()
 add_library(plugin_centroiding SHARED plugin_centroiding.cpp ../nextwave_plugin.hpp)
 target_link_libraries(plugin_centroiding ${ArrayFire_Unified_LIBRARIES} )
 if (WIN32)
-  set_target_properties(plugin_centroiding PROPERTIES LIBRARY_OUTPUT_DIRECTORY "c:/nextwave/build"  )
-  set_target_properties(plugin_centroiding PROPERTIES RUNTIME_OUTPUT_DIRECTORY "c:/nextwave/build"  )
+  set_target_properties(plugin_centroiding PROPERTIES RUNTIME_OUTPUT_DIRECTORY ".."  )
 else()
   set_target_properties(plugin_centroiding PROPERTIES
     LIBRARY_OUTPUT_DIRECTORY "../../build"
     RUNTIME_OUTPUT_DIRECTORY "../../build"  )
 endif()
 #target_link_libraries(vectorize_cuda ArrayFire::afcuda)
+
+
+# NOTE: Not running this as standalone library due to problems, maybe AF in a DLL is problematic.
+# So now just statically linking this directly with the runtime. 9/12/2025 DRC

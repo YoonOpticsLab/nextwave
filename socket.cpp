@@ -3,6 +3,7 @@
 //Example follows:
 
 #include <boost/asio.hpp>
+#include <boost/asio/read_until.hpp>
 using boost::asio::ip::tcp;
 
 class Connection {
@@ -17,7 +18,7 @@ public:
   ~Connection();
 
   int available() {return (int) currentSocket->available(); };
-  char* read();
+  char* read(int n_avail);
 };
 
 Connection::Connection(int port)
@@ -34,15 +35,21 @@ Connection::~Connection()
   //currentSocket->disconnect();
 }
 
-char *Connection::read()
+char *Connection::read(int n_avail)
 {
   boost::system::error_code error;
-  size_t length = currentSocket->read_some(boost::asio::buffer(buffer), error);
+  size_t bytes_read = currentSocket->read_some(boost::asio::buffer(buffer, n_avail), error);
+			   
   if (error == boost::asio::error::eof) {
     spdlog::error("SOCKET {} EOF", port);
   } else if (error) {
+	spdlog::error("ERROR");
     throw boost::system::system_error(error); // Some other error
-  }
+  } else {
+//    spdlog::info("Message @{}: {} {}", port, bytes_read, buffer );
+	;
+  };
+
   return (char *)&buffer;
 }
 
@@ -55,13 +62,13 @@ if (theConnection==NULL) {
   //spdlog::info("Before New connection {}", port );
   // This blocks until receiver connects:
   theConnection = new Connection(port);
-  //spdlog::info("Fater New connection {}", port );
+  //spdlog::info("After New connection {}", port );
   return NULL;
  } else {
-  if (theConnection->available()>0 ) {
-    static char *message = theConnection->read();
-    spdlog::info("Message @{}: {}", port, message );
-    return message;
+	 
+  auto avail = theConnection->available();
+  if (avail > 0 ) {
+    return( theConnection->read(avail) );
   } else {
     return NULL;
   }

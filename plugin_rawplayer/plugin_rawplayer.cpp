@@ -10,7 +10,7 @@ using namespace std;
 #include <json.hpp>
 using json=nlohmann::json;
 
-#include "../include/spdlog/spdlog.h"
+#include "spdlog/spdlog.h"
 
 // For NextWave Plugin
 #include "nextwave_plugin.hpp"

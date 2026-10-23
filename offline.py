@@ -46,7 +46,11 @@ os.environ["PATH"] += os.pathsep + current_dir
 # Now import your ffmpeg library
 import ffmpeg 
 
-import ffmpegcv # Read AVI... Better than OpenCV (built-in ffmpeg?)
+try:
+    import ffmpegcv # Read AVI... Better than OpenCV (built-in ffmpeg?)
+except Exception as _e: # (It raises an error on import if ffmpeg isn't installed: then NextWave works, but can't read movies)
+    ffmpegcv = None
+    log.info("Can't read movies (ffmpegcv: %s)" % _e)
 from PIL import Image, ImageSequence, TiffImagePlugin # Needed
 
 from PyQt5.QtCore import QObject, pyqtSignal
@@ -383,6 +387,8 @@ class NextwaveOffline():
             for kind in kinds:
                 try:
                     if kind == 'movie':
+                        if ffmpegcv is None:
+                            raise RuntimeError("can't read movies: ffmpeg isn't installed, or isn't found")
                         with ffmpegcv.VideoCapture(path) as vidin:
                             total = self._frame_count(vidin, avi_limit)
                             for nf, frame in enumerate(vidin):
