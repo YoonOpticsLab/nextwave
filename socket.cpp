@@ -2,6 +2,8 @@
 
 //Example follows:
 
+#include <string>
+#include <cstring>
 #include <boost/asio.hpp>
 #include <boost/asio/read_until.hpp>
 using boost::asio::ip::tcp;
@@ -11,6 +13,8 @@ class Connection {
   std::shared_ptr<boost::asio::ip::tcp::socket> currentSocket;
   bool isConnected;
   char buffer[SOCKET_BUFFER_SIZE];
+  char message[SOCKET_BUFFER_SIZE];
+  std::string pending; // Bytes received but not yet returned as messages
   int port=0;
 
 public:
@@ -19,6 +23,7 @@ public:
 
   int available() {return (int) currentSocket->available(); };
   char* read(int n_avail);
+  char* next_message();
 };
 
 Connection::Connection(int port)
@@ -38,6 +43,8 @@ Connection::~Connection()
 char *Connection::read(int n_avail)
 {
   boost::system::error_code error;
+  if (n_avail > SOCKET_BUFFER_SIZE)
+    n_avail = SOCKET_BUFFER_SIZE; // Rest stays in socket for next call
   size_t bytes_read = currentSocket->read_some(boost::asio::buffer(buffer, n_avail), error);
 			   
   if (error == boost::asio::error::eof) {
@@ -47,10 +54,27 @@ char *Connection::read(int n_avail)
     throw boost::system::system_error(error); // Some other error
   } else {
 //    spdlog::info("Message @{}: {} {}", port, bytes_read, buffer );
-	;
+	pending.append(buffer, bytes_read);
   };
 
-  return (char *)&buffer;
+  return next_message();
+}
+
+// Messages are NUL-terminated, and several can arrive in one read (TCP coalesces
+// quick sends, e.g. at startup). Return one complete message per call.
+char *Connection::next_message()
+{
+  size_t end;
+  while ((end = pending.find('\0')) != std::string::npos) {
+    std::string msg = pending.substr(0, end);
+    pending.erase(0, end+1);
+    if (msg.empty())
+      continue; // Skip empty messages (some senders add an extra NUL)
+    strncpy(message, msg.c_str(), SOCKET_BUFFER_SIZE-1);
+    message[SOCKET_BUFFER_SIZE-1] = 0;
+    return message;
+  }
+  return NULL;
 }
 
 // GLOBAL (in context of includer)
@@ -66,6 +90,10 @@ if (theConnection==NULL) {
   return NULL;
  } else {
 	 
+  char *msg = theConnection->next_message(); // Leftover from an earlier read?
+  if (msg != NULL)
+    return msg;
+
   auto avail = theConnection->available();
   if (avail > 0 ) {
     return( theConnection->read(avail) );

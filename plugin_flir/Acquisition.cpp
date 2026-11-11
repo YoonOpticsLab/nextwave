@@ -585,6 +585,23 @@ int ConfigureExposure(INodeMap& nodeMap, double exposureTimeToSet)
             cout << "Proceeding..." << endl;
             result = 1;
         }
+
+        // Likewise auto gain, so the UI's gain slider can set it
+        CEnumerationPtr ptrGainAuto = nodeMap.GetNode("GainAuto");
+        if (IsReadable(ptrGainAuto) && IsWritable(ptrGainAuto))
+        {
+            CEnumEntryPtr ptrGainAutoOff = ptrGainAuto->GetEntryByName("Off");
+            if (IsReadable(ptrGainAutoOff))
+            {
+                ptrGainAuto->SetIntValue(ptrGainAutoOff->GetValue());
+                cout << "Automatic gain disabled..." << endl;
+            }
+        }
+        else
+        {
+            cout << "Unable to disable automatic gain. Proceeding..." << endl;
+        }
+
         //
         // Set exposure time manually; exposure time recorded in microseconds
         //
@@ -829,18 +846,29 @@ INodeMap& nodeMap = pCam->GetNodeMap();
   char *msg=socket_check(CAMERA_SOCKET);
   if (msg!=NULL) {
     //spdlog::info("RAW: {}",msg);
-    if (msg[0]=='E'){
-        double dVal = atof(msg+2);
-        //spdlog::info("exposure: {}",dVal);
-		CFloatPtr ptrExposureTime = nodeMap.GetNode("ExposureTime");
-        ptrExposureTime->SetValue(dVal);
-      }
+    const char *nodeName = NULL;
+    if (msg[0]=='E')
+      nodeName = "ExposureTime";
+    else if (msg[0]=='G')
+      nodeName = "Gain";
 
-    if (msg[0]=='G'){
+    if (nodeName != NULL) {
+      // Camera rejects out-of-range or non-writable values by throwing: log, don't crash
+      try {
         double dVal = atof(msg+2);
-		CFloatPtr ptrExposureTime = nodeMap.GetNode("Gain");
-        ptrExposureTime->SetValue(dVal);
-      }	  
+        CFloatPtr ptrNode = nodeMap.GetNode(nodeName);
+        if (!IsWritable(ptrNode)) {
+          spdlog::error("{} not writable (auto mode on?)", nodeName);
+        } else {
+          double dClamped = (std::min)((std::max)(dVal, ptrNode->GetMin()), ptrNode->GetMax()); // Parens: Windows.h min/max macros
+          if (dClamped != dVal)
+            spdlog::warn("{}={} out of range, using {}", nodeName, dVal, dClamped);
+          ptrNode->SetValue(dClamped);
+        }
+      } catch (Spinnaker::Exception& e) {
+        spdlog::error("Setting {} failed: {}", nodeName, e.what());
+      }
+    }
 	};
   
 	return 0;

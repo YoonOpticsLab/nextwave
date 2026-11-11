@@ -1,4 +1,4 @@
-import joystickapi
+
 
 from PyQt5.QtWidgets import (QMainWindow, QLabel, QSizePolicy, QApplication, QPushButton,
                              QHBoxLayout, QVBoxLayout, QGridLayout, QScrollArea, QMessageBox,
@@ -31,7 +31,7 @@ import matplotlib.cm as cmap
 from nextwave_code import NextwaveEngine
 from nextwave_ui_create import (createUI as _createUI, QIMAGE_HEIGHT, QIMAGE_WIDTH,
                                MAIN_HEIGHT_WIN, MAIN_WIDTH_WIN,
-                               CAM_EXPO_MIN, CAM_EXPO_MAX, CAM_GAIN_MIN, CAM_GAIN_MAX)
+                               CAM_EXPO_MIN, CAM_EXPO_MAX, CAM_EXPO_STEPS, CAM_GAIN_MIN, CAM_GAIN_MAX)
 from nextwave_sockets import NextwaveSocketComm
 
 from nextwave_widgets import ZernikeDialog, BoxInfoDialog, ActuatorPlot, MyBarWidget, OfflineDialog, IntensityDialogX
@@ -46,7 +46,13 @@ import scipy # For scipy.stats.mode: auto background
 
 import xml.etree.ElementTree as ET
 
+USE_JOYSTICK=False
+if USE_JOYSTICK:
+    import joystickapi
+
 WINDOWS=(os.name == 'nt')
+
+UI_STATE_FILE="./ui_state.json" # Remembered UI values (exposure, etc.)
 
 # TODO: Configurable?
 # These not used anymore:
@@ -131,6 +137,40 @@ class NextWaveMainWindow(QMainWindow):
      # THIS IS NOT WORKING
      print("Global hotkey activated!")    
 
+ def load_ui_state(self):
+    # Runtime values remembered between sessions (separate from hand-edited config.json)
+    try:
+        with open(UI_STATE_FILE) as f:
+            self.ui_state = json.load(f)
+    except (OSError, ValueError):
+        self.ui_state = {}
+
+ def save_ui_state(self, key, val):
+    self.ui_state[key] = val
+    try:
+        with open(UI_STATE_FILE + ".tmp", "w") as f:
+            json.dump(self.ui_state, f, indent=4)
+        os.replace(UI_STATE_FILE + ".tmp", UI_STATE_FILE)
+    except OSError as e:
+        print("Couldn't save UI state: %s" % e)
+
+ def remember_widget(self, widget, key, handler, default=None):
+    # Restore saved value (or default) into a slider/checkbox, apply it, then save on each change
+    is_check = isinstance(widget, QCheckBox)
+    val = self.ui_state.get(key, default)
+    if val is not None:
+        widget.blockSignals(True)
+        if is_check:
+            widget.setChecked(bool(val))
+        else:
+            widget.setValue(val)
+        widget.blockSignals(False)
+        handler() # Explicit: setValue doesn't signal if unchanged
+    if is_check:
+        widget.stateChanged.connect(lambda state: self.save_ui_state(key, widget.isChecked()))
+    else:
+        widget.valueChanged.connect(lambda v: self.save_ui_state(key, v))
+
  def params_json(self):
     f=open("./config.json")
     self.json_data = json.load(f)
@@ -145,16 +185,14 @@ class NextWaveMainWindow(QMainWindow):
         {'name': 'UI', 'type': 'group', 'title':'User interface', 'children': [
             {'name': 'update_rate', 'type': 'int', 'value': 200, 'title':'Display update rate (ms)', 'limits':[50,2000]},
             {'name': 'update_rate_dm', 'type': 'int', 'value': 80, 'title':'DM Display update rate (ms)', 'limits':[50,2000]},
-            {'name': 'show_boxes', 'type': 'bool', 'value': True, 'title':'Show search boxes'}
-        ]},
-        {'name': 'WF Camera', 'type': 'group', 'children': [
-            {'name': 'Offset (%)', 'type': 'int', 'value': 0, 'limits':[0,100]},
-            {'name': 'Binning Mode', 'type': 'list', 'value': 'None', 'limits':['None','2x2','4x4']} ]},
-        {'name': 'Pupil Camera', 'type': 'group', 'children': [
-            {'name': 'offset', 'title': 'Offset (%)', 'type': 'int', 'value': 0, 'limits':[0,100]},
-            {'name': 'gain', 'title':'Gain (%)', 'type': 'int', 'value': 0, 'limits':[0,100]},
-            {'name': 'exposure', 'title':'Exposure time (ms)', 'type': 'int', 'value': 0, 'limits':[1,1000]} ]}
+            {'name': 'show_boxes', 'type': 'bool', 'value': True, 'title':'Show search boxes'},
+            {'name': 'show_arrows', 'type': 'bool', 'value': False, 'title':'Show arrows'},
+            {'name': 'arrow_length', 'type': 'float', 'value': ARROW_MAGNITUDE, 'title':'Arrow vector length (x)', 'limits':[0.1,1000]}
+        ]}
         ]
+    # Saved values (ui_state.json, same names as here) override the defaults above
+    for item in self.params[0]['children']:
+        item['value'] = self.ui_state.get(item['name'], item['value'])
 
     self.params_offline= [
         {'name': 'system', 'type': 'group', 'title':'System Params', 'children': [
@@ -179,6 +217,19 @@ class NextWaveMainWindow(QMainWindow):
  def apply_params(self):
     self.updater.start(self.get_param("UI","update_rate"))
     self.updater_dm.start(self.get_param("UI","update_rate_dm"))
+    self.draw_boxes = self.get_param("UI","show_boxes")
+    self.draw_arrows = self.get_param("UI","show_arrows")
+    self.arrow_length = self.get_param("UI","arrow_length")
+    for name, item in self.params["children"]["UI"]["children"].items():
+        self.save_ui_state(name, item["value"])
+
+ def toggle_ui_param(self, name):
+    # Keyboard toggle of a bool setting: update settings tree too, and remember it
+    val = not self.get_param("UI", name)
+    self.set_param("UI", name, val)
+    self.p.child("UI", name).setValue(val)
+    self.save_ui_state(name, val)
+    return val
 
  def offline_load_image(self):
     ffilt=' Movies (*.avi);; BMP Images (*.bmp);; BMP Directory (*.bmp);; Binary files (*.bin);; files (*.*)'
@@ -212,13 +263,14 @@ class NextWaveMainWindow(QMainWindow):
 
  def update_ui(self):
 
-    ret, info = joystickapi.joyGetPosEx(id)
-    if ret:
-        btns = [(1 << i) & info.dwButtons != 0 for i in range(caps.wNumButtons)]
-        if btns[1]:
-            #chkLoop.setChecked( False )
-            chkActivateMetric.setChecked( False )
-            print("GOT IT")
+    if USE_JOYSTICK:
+        ret, info = joystickapi.joyGetPosEx(id)
+        if ret:
+            btns = [(1 << i) & info.dwButtons != 0 for i in range(caps.wNumButtons)]
+            if btns[1]:
+                #chkLoop.setChecked( False )
+                chkActivateMetric.setChecked( False )
+                print("GOT IT")
 
     image_pixels = self.engine.receive_image()
     self.image_pixels = np.log10(image_pixels) / np.log10(255) * 255
@@ -245,8 +297,8 @@ class NextWaveMainWindow(QMainWindow):
         painter.setPen(pen)
         arrows=[QLineF(self.engine.ref_x[n],
                        self.engine.ref_y[n],
-                       self.engine.ref_x[n] + (self.engine.centroids_x[n]-self.engine.ref_x[n])*ARROW_MAGNITUDE,
-                       self.engine.centroids_y[n] + (self.engine.centroids_y[n]-self.engine.ref_y[n])*ARROW_MAGNITUDE) for n in np.arange(0,self.engine.num_boxes)]
+                       self.engine.ref_x[n] + (self.engine.centroids_x[n]-self.engine.ref_x[n])*self.arrow_length,
+                       self.engine.ref_y[n] + (self.engine.centroids_y[n]-self.engine.ref_y[n])*self.arrow_length) for n in np.arange(0,self.engine.num_boxes)]
         painter.drawLines(arrows)
 
     if self.draw_refs and self.engine.num_boxes>0: # and self.engine.mode>1:
@@ -414,7 +466,7 @@ class NextWaveMainWindow(QMainWindow):
                (self.engine.centroids_y[n]-self.engine.ref_y[n])**2
                ) for n in np.arange(0,self.engine.num_boxes)]
 
-    print( np.nanmean( vectors), np.nanstd(vectors) )
+    #print( np.nanmean( vectors), np.nanstd(vectors) )
     # HTML INFO PAGE
     t='<!DOCTYPE html><html lang="en"><body>\n'
     t += f"Depth:{self.engine.defocus}\n"
@@ -805,9 +857,24 @@ class NextWaveMainWindow(QMainWindow):
      self.threshold_val.setValue(scaled)
 
  def slider_exposure_changed(self):
-     scaled = 10**( float( self.slider_exposure.value())/100.0*np.log10(CAM_EXPO_MAX/CAM_EXPO_MIN)+np.log10(CAM_EXPO_MIN))
+     scaled = 10**( float( self.slider_exposure.value())/CAM_EXPO_STEPS*np.log10(CAM_EXPO_MAX/CAM_EXPO_MIN)+np.log10(CAM_EXPO_MIN))
+     self.exposure.blockSignals(True)
      self.exposure.setValue(scaled)
-     msg=b"E=%f"%(scaled*1000)
+     self.exposure.blockSignals(False)
+     self.exposure_set(scaled)
+
+ def spin_exposure_changed(self):
+     # Typed value is exact; slider just follows (log scale, coarse steps)
+     expo = self.exposure.value()
+     sliderval = round( (np.log10(expo) - np.log10(CAM_EXPO_MIN) ) / (np.log10(CAM_EXPO_MAX) - np.log10(CAM_EXPO_MIN) )  * CAM_EXPO_STEPS )
+     self.slider_exposure.blockSignals(True)
+     self.slider_exposure.setValue(sliderval)
+     self.slider_exposure.blockSignals(False)
+     self.exposure_set(expo)
+
+ def exposure_set(self,expo):
+     self.save_ui_state("exposure_ms", expo)
+     msg=b"E=%f"%(expo*1000)
      self.sockets.camera.send( msg ) # Convert to usec
 
  def slider_gain_changed(self):
@@ -897,11 +964,8 @@ class NextWaveMainWindow(QMainWindow):
          self.m=1
          
  def activate_metric(self):
-    try:
-        self.metric_active = not self.metric_active
-    except:
-        self.metric_active = True
-        
+    self.metric_active = self.chkActivateMetric.isChecked()
+
     # TODO: Don't allow subtract if it hasn't been set once
     if self.metric_active:
         self.sockets.centroiding.send(b"M\x00")
@@ -1036,15 +1100,20 @@ class NextWaveMainWindow(QMainWindow):
     if event.key()==Qt.Key_Control:
         self.key_control = False 
 
+ def do_keyboard_enable(self):
+    for shortcut in self.shortcuts:
+        shortcut.setEnabled(self.chkKeyboard.isChecked())
+
  def keyPressEvent(self, event):
+    if not self.chkKeyboard.isChecked():
+        return
     update_search_boxes=False
     if event.key()==ord('A'):
-        self.draw_arrows = not( self.draw_arrows )
+        self.draw_arrows = self.toggle_ui_param("show_arrows")
     elif event.key()==ord('R'):
         self.draw_refs = not( self.draw_refs )
     elif event.key()==ord('B'):
-        self.draw_boxes = not( self.draw_boxes )
-        self.set_param("UI","show_boxes", not( self.get_param("UI","show_boxes") ) )
+        self.draw_boxes = self.toggle_ui_param("show_boxes")
     elif event.key()==ord('E'):
         self.draw_predicted = not( self.draw_predicted )
     elif event.key()==ord('C'):
@@ -1208,23 +1277,24 @@ def start_backdoor(win):
     t.start()
 
 def main():
-  num = joystickapi.joyGetNumDevs()
-  ret, caps, startinfo = False, None, None
-  for idj in range(num*0):
-    ret, caps = joystickapi.joyGetDevCaps(id)
-    if ret:
-        print("gamepad detected: " + caps.szPname)
-        print("ID: " + idj)
-        ret, startinfo = joystickapi.joyGetPosEx(id)
-        break
-    else:
-      print("no gamepad detected")
+  if USE_JOYSTICK:    
+      num = joystickapi.joyGetNumDevs()
+      ret, caps, startinfo = False, None, None
+      for idj in range(num*0):
+        ret, caps = joystickapi.joyGetDevCaps(id)
+        if ret:
+            print("gamepad detected: " + caps.szPname)
+            print("ID: " + idj)
+            ret, startinfo = joystickapi.joyGetPosEx(id)
+            break
+        else:
+          print("no gamepad detected")
       
-     
   app = QApplication(sys.argv)
   win = NextWaveMainWindow()
   win.app = app
 
+  win.load_ui_state() # Before params_json: settings tree defaults come from it
   win.params_json()
   win.reload_config() # Read from XML file
   win.initEngine()
@@ -1238,12 +1308,19 @@ def main():
         
   # Set defaults: TODO: pull from XML
   win.slider_defocus.setValue(1000)
-  win.slider_aogain.setValue(50)
+  win.remember_widget(win.slider_aogain, "ao_gain", win.slider_aogain_changed, 50)
+  win.remember_widget(win.slider_aorate, "ao_delay", win.slider_aorate_changed)
+  win.remember_widget(win.slider_metric, "metric_threshold", win.slider_metric_changed, 200)
+  win.remember_widget(win.chkActivateMetric, "metric_active", win.activate_metric)
+  win.remember_widget(win.chkKeyboard, "keyboard_enabled", win.do_keyboard_enable, True)
+  win.remember_widget(win.slider_gain, "camera_gain", win.slider_gain_changed)
   win.slider_dmfill.setValue(1000)
   
-  expo=win.get_param_xml("CAMERA1_CameraExposure") 
-  sliderval = int( (np.log10(expo) - np.log10(CAM_EXPO_MIN) ) / (np.log10(CAM_EXPO_MAX) - np.log10(CAM_EXPO_MIN) )  * 100 )
-  win.slider_exposure.setValue(sliderval)
+  expo=win.ui_state.get("exposure_ms", win.get_param_xml("CAMERA1_CameraExposure"))
+  win.exposure.blockSignals(True)
+  win.exposure.setValue(expo)
+  win.exposure.blockSignals(False)
+  win.spin_exposure_changed() # Explicit: setValue doesn't signal if unchanged
 #  print( expo, sliderval )
   
   win.signal_static_set.connect(win.set_static)
