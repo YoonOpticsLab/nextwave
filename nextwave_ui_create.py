@@ -21,6 +21,7 @@ MAIN_WIDTH_WIN = 1800
 
 CAM_EXPO_MIN = 40. / 1000.0
 CAM_EXPO_MAX = (100 * 1000) / 1000.00
+CAM_EXPO_STEPS = 1000 # Slider steps across log range
 CAM_GAIN_MIN = 0
 CAM_GAIN_MAX = 9.83
 
@@ -229,13 +230,15 @@ def createUI(self):
     layout1.addWidget(lbl, y_curr,0)
     self.slider_exposure = QSlider(orientation=Qt.Horizontal)
     self.slider_exposure.setMinimum(0) # TODO: Get from camera
-    self.slider_exposure.setMaximum(100) # TODO: Get from camera
+    self.slider_exposure.setMaximum(CAM_EXPO_STEPS)
     self.slider_exposure.valueChanged.connect(self.slider_exposure_changed)
     layout1.addWidget(self.slider_exposure, y_curr,1)
     self.exposure = QDoubleSpinBox()
     self.exposure.setDecimals(4)
     self.exposure.setMinimum(CAM_EXPO_MIN)
     self.exposure.setMaximum(CAM_EXPO_MAX)
+    self.exposure.setKeyboardTracking(False) # Apply on Enter/focus-out, not every keystroke
+    self.exposure.valueChanged.connect(self.spin_exposure_changed)
     layout1.addWidget(self.exposure, y_curr,2)
     y_curr += 1
 
@@ -416,6 +419,11 @@ def createUI(self):
     self.chkMidi.setChecked(True)
     self.chkMidi.stateChanged.connect(self.do_midi)
     layout1.addWidget(self.chkMidi, y_curr,2)
+
+    self.chkKeyboard = QCheckBox("Keyboard commands")
+    self.chkKeyboard.setChecked(True)
+    self.chkKeyboard.stateChanged.connect(self.do_keyboard_enable)
+    layout1.addWidget(self.chkKeyboard, y_curr,1)
     
     y_curr += 1
     
@@ -568,22 +576,18 @@ def createUI(self):
     menu.addAction('e&Xit', self.close)
 
     pixmap_label.setFocus()
-    self.shortcut = QShortcut(QKeySequence("Ctrl+A"), self)
-    self.shortcut.activated.connect(self.mode_snap)
-    self.shortcut = QShortcut(QKeySequence("Ctrl+S"), self)
-    self.shortcut.activated.connect(self.mode_stop)
-    self.shortcut = QShortcut(QKeySequence("Ctrl+D"), self)
-    self.shortcut.activated.connect(self.mode_run)
-
-    self.shortcut = QShortcut(QKeySequence("Ctrl+1"), self)
-    self.shortcut.activated.connect(self.engine.defocus_minus10)
-    self.shortcut = QShortcut(QKeySequence("Ctrl+2"), self)
-    self.shortcut.activated.connect(self.engine.defocus_minus01)
-
-    self.shortcut = QShortcut(QKeySequence("Ctrl+3"), self)
-    self.shortcut.activated.connect(self.engine.defocus_plus01)
-    self.shortcut = QShortcut(QKeySequence("Ctrl+4"), self)
-    self.shortcut.activated.connect(self.engine.defocus_plus10)
+    # Kept in a list so the "Keyboard commands" checkbox can enable/disable them
+    self.shortcuts = []
+    for keys, func in [("Ctrl+A", self.mode_snap),
+                       ("Ctrl+S", self.mode_stop),
+                       ("Ctrl+D", self.mode_run),
+                       ("Ctrl+1", self.engine.defocus_minus10),
+                       ("Ctrl+2", self.engine.defocus_minus01),
+                       ("Ctrl+3", self.engine.defocus_plus01),
+                       ("Ctrl+4", self.engine.defocus_plus10)]:
+        shortcut = QShortcut(QKeySequence(keys), self)
+        shortcut.activated.connect(func)
+        self.shortcuts.append(shortcut)
 
     self.setGeometry(2,2,MAIN_WIDTH_WIN,MAIN_HEIGHT_WIN)
     self.setWindowFlags(Qt.Window | Qt.WindowTitleHint | Qt.WindowMinimizeButtonHint | Qt.WindowMaximizeButtonHint | Qt.WindowCloseButtonHint)

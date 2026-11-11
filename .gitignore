@@ -1,3 +1,5 @@
 build/*
 include/*
 config.json
+ui_state.json
+ui_state.json.tmp
