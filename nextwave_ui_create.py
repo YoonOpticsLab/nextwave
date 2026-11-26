@@ -4,6 +4,8 @@ from PyQt5.QtWidgets import (QWidget, QLabel, QScrollArea, QVBoxLayout, QHBoxLay
 from PyQt5.QtGui import QPixmap, QImage, QFont, QKeySequence
 from PyQt5.QtCore import Qt
 import PyQt5.QtGui as QtGui
+import PyQt5.QtCore as QtCore
+import PyQt5.QtWidgets as QtWidgets
 
 from PyQt5.QtCore import QTimer
 
@@ -11,18 +13,20 @@ import numpy as np
 
 from pyqtgraph.parametertree import ParameterTree
 
-from nextwave_widgets import ActuatorPlot, MyBarWidget
+from nextwave_widgets import ActuatorPlot, MyBarWidget, FrameGalleryModel, FrameSlider
+import defaults
 
-QIMAGE_HEIGHT = 1024
-QIMAGE_WIDTH = 1024
+# From nextwave_defaults.py if it has them
+QIMAGE_HEIGHT = getattr(defaults, 'QIMAGE_HEIGHT', 1024)
+QIMAGE_WIDTH = getattr(defaults, 'QIMAGE_WIDTH', 1024)
 
-MAIN_HEIGHT_WIN = 1024
-MAIN_WIDTH_WIN = 1800
+MAIN_HEIGHT_WIN = getattr(defaults, 'MAIN_HEIGHT_WIN', 1024)
+MAIN_WIDTH_WIN = getattr(defaults, 'MAIN_WIDTH_WIN', 1800)
 
-CAM_EXPO_MIN = 40. / 1000.0
-CAM_EXPO_MAX = (100 * 1000) / 1000.00
-CAM_GAIN_MIN = 0
-CAM_GAIN_MAX = 9.83
+CAM_EXPO_MIN = getattr(defaults, 'CAM_EXPO_MIN', 40. / 1000.0)
+CAM_EXPO_MAX = getattr(defaults, 'CAM_EXPO_MAX', (100 * 1000) / 1000.00)
+CAM_GAIN_MIN = getattr(defaults, 'CAM_GAIN_MIN', 0)
+CAM_GAIN_MAX = getattr(defaults, 'CAM_GAIN_MAX', 9.83)
 
 
 def createUI(self):
@@ -48,7 +52,10 @@ def createUI(self):
     pixmap = QPixmap(qimage)
     #pixmap = pixmap.scaled(SPOTS_WIDTH_WIN,SPOTS_HEIGHT_WIN, Qt.KeepAspectRatio)
     pixmap_label.setPixmap(pixmap)
-    pixmap_label.mousePressEvent = self.button_clicked
+    pixmap_label.mousePressEvent = self.spot_window_clicked
+    pixmap_label.setMouseTracking(True) # Move events without a button pressed: for the cross section
+    pixmap_label.mouseMoveEvent = self.spot_window_mouse_moved
+    pixmap_label.leaveEvent = self.spot_window_left
 
     #Scroll Area Properties
     self.scroll_central.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
@@ -62,6 +69,7 @@ def createUI(self):
     layout.addWidget(self.bar_plot,5)
     self.widget_centrals.setLayout(layout)
 
+    # The DM display (realtime: it's shown only then, see "Main Widget")
     self.widget_displays = QWidget()
     layout=QVBoxLayout(self.widget_displays)
     layout.addWidget(QGroupBox('Pupil'))
@@ -83,18 +91,26 @@ def createUI(self):
 
     l1 = QHBoxLayout()
 
+    # Operation tab: Pupil and Boxes/Centroids; then Camera/Source and DM (realtime), or Offline (offline_only). In realtime the
+    # Offline controls are in their own tab
     self.widget_op = QWidget()
     layout_op = QVBoxLayout()
     self.ops_pupil = QGroupBox('Pupil')
     self.ops_pupil.setStyleSheet(":title {font-weight: bold}") # Doesn't work
     layout_op.addWidget(self.ops_pupil)
     self.ops_source = QGroupBox('Camera/Source')
-    layout_op.addWidget(self.ops_source)
     self.ops_dm = QGroupBox('DM')
-    layout_op.addWidget(self.ops_dm)
+    self.ops_boxes = QGroupBox('Boxes/Centroids')
+    self.ops_offline = QGroupBox('Offline')
+    layout_op.addWidget(self.ops_boxes)
+    if not self.offline_only:
+        layout_op.addWidget(self.ops_source)
+        layout_op.addWidget(self.ops_dm)
+    else:
+        layout_op.addWidget(self.ops_offline)
     self.widget_op.setLayout(layout_op)
 
-    panel_names = ["Operation", "Settings", "Config", "Offline"]
+    panel_names = ["Operation", "Settings", "Config"] + ([] if self.offline_only else ["Offline"])
     pages = [QWidget(tabs) for nam in panel_names]
     for n, tabnames in enumerate(panel_names):
         tabs.addTab(pages[n], tabnames)
@@ -106,10 +122,10 @@ def createUI(self):
 
     ### Arrows pad + center labels (row 0)
     self.m = 1
-    btnU = QPushButton("\u2191") # u
+    btnU = QPushButton("↑") # u
     btnU.clicked.connect(lambda: self.move_center(0,-1) )
     layout1.addWidget(btnU, y_curr,5)
-    self.chkMoveTipTilt = QCheckBox("TT")
+    self.chkMoveTipTilt = QCheckBox("TT") # (Realtime) The arrows move by tip/tilt, in the centroiding plugin
     layout1.addWidget(self.chkMoveTipTilt, y_curr,6, alignment=Qt.AlignCenter)
     lbl = QLabel("Center X:")
     layout1.addWidget(lbl, y_curr,0)
@@ -119,16 +135,19 @@ def createUI(self):
     self.chkRecord = QCheckBox("Rec")
     self.chkRecord.clicked.connect(self.toggle_record)
     layout1.addWidget(self.chkRecord, y_curr,4, alignment=Qt.AlignCenter)
+    if self.offline_only:
+        self.chkMoveTipTilt.hide() # (Realtime only)
+        self.chkRecord.hide()
     y_curr += 1
 
     ### Arrows pad + center labels (row 1)
-    btnL = QPushButton("\u2190") # l
+    btnL = QPushButton("←") # l
     btnL.clicked.connect(lambda: self.move_center(-1,0) )
     layout1.addWidget(btnL, y_curr,4)
     self.chkMove = QCheckBox("")
-    self.chkMove.clicked.connect(lambda: self.set_m(self.chkMove.isChecked()) )
+    self.chkMove.clicked.connect(lambda: self.set_move_amount(self.chkMove.isChecked()) )
     layout1.addWidget(self.chkMove, y_curr,5, alignment=Qt.AlignCenter)
-    btnR = QPushButton("\u2192") # r
+    btnR = QPushButton("→") # r
     btnR.clicked.connect(lambda: self.move_center(1,0) )
     layout1.addWidget(btnR, y_curr,6)
     lbl = QLabel("Center Y:")
@@ -139,7 +158,7 @@ def createUI(self):
     y_curr += 1
 
     ### Arrows pad + center labels (row 2)
-    btnD = QPushButton("\u2193") # d
+    btnD = QPushButton("↓") # d
     btnD.clicked.connect(lambda: self.move_center(0,1) )
     layout1.addWidget(btnD, y_curr,5)
     lbl = QLabel("Diameter (mm):")
@@ -151,12 +170,16 @@ def createUI(self):
     y_curr += 1
 
     ### Iterative run controls
-    self.it_start = QLineEdit("3.5")
+    self.it_start = QLineEdit(str(defaults.ITERATIVE_PUPIL_START))
     layout1.addWidget(self.it_start, y_curr,0)
-    self.it_step = QLineEdit("0.25")
+    self.it_step = QLineEdit(str(defaults.ITERATIVE_PUPIL_STEP_SIZE))
     layout1.addWidget(self.it_step, y_curr,1)
-    self.it_stop = QLineEdit("6.4")
+    self.it_stop = QLineEdit(str(self.engine.offline.it_stop)) # (Forced value, if any, else the default)
     layout1.addWidget(self.it_stop, y_curr,2)
+    self.it_start.textEdited.connect(self.it_start_edited)
+    self.it_step.textEdited.connect(self.it_step_edited)
+    self.it_stop.textEdited.connect(self.it_stop_edited)
+    self.it_stop.editingFinished.connect(self.it_stop_changed)
     btn = QPushButton("Start")
     btn.clicked.connect(lambda: self.engine.offline.offline_startbox() )
     layout1.addWidget(btn, y_curr,3)
@@ -168,26 +191,6 @@ def createUI(self):
     layout1.addWidget(btn, y_curr,5)
     btn = QPushButton("Reset")
     btn.clicked.connect(lambda: self.iterative_reset() )
-    layout1.addWidget(btn, y_curr,6)
-    y_curr += 1
-
-    ### Frame navigation
-    self.lbl_frame_curr = QLabel()
-    layout1.addWidget(self.lbl_frame_curr, y_curr,0)
-    btn = QPushButton("\u2190") # left
-    btn.clicked.connect(lambda: self.offline_move(-1,True) )
-    layout1.addWidget(btn, y_curr,1)
-    btn = QPushButton("\u2192") # right
-    btn.clicked.connect(lambda: self.offline_move(1,True) )
-    layout1.addWidget(btn, y_curr,2)
-    btn = QPushButton("Dialog")
-    btn.clicked.connect(lambda: self.engine.offline.show_dialog() )
-    layout1.addWidget(btn, y_curr,4)
-    btn = QPushButton("Autoall")
-    btn.clicked.connect(lambda: self.engine.offline.offline_autoall() )
-    layout1.addWidget(btn, y_curr,5)
-    btn = QPushButton("Save")
-    btn.clicked.connect(lambda: self.engine.offline.offline_serialize() )
     layout1.addWidget(btn, y_curr,6)
     y_curr += 1
 
@@ -271,28 +274,10 @@ def createUI(self):
     layout1.addWidget(btn, y_curr,3)
     y_curr += 1
 
-    ### Search box / follow controls
-    btn = QPushButton("Search box shift")
-    btn.clicked.connect(lambda: self.show_zernike_dialog("Shift search boxes", self.engine.shift_search_boxes ) )
-    layout1.addWidget(btn, y_curr,0)
-    btn = QPushButton("Search box RESET")
-    btn.clicked.connect(self.engine.reset_search_boxes)
-    layout1.addWidget(btn, y_curr,1)
+    ### Mirror file / defocus (the search box and reference controls are in Boxes/Centroids)
     btn = QPushButton("Load mirror file")
     btn.clicked.connect(self.load_mirror_file)
-    layout1.addWidget(btn, y_curr,2)
-    self.chkFollow = QCheckBox("Boxes follow centroids")
-    self.chkFollow.stateChanged.connect(lambda: self.set_follow(self.chkFollow.isChecked()))
-    layout1.addWidget(self.chkFollow, y_curr,3)
-    y_curr += 1
-
-    ### Reference controls
-    btn = QPushButton("Reference shift")
-    btn.clicked.connect(lambda: self.show_zernike_dialog("Shift references", self.engine.shift_references ) )
     layout1.addWidget(btn, y_curr,0)
-    btn = QPushButton("Reference RESET")
-    btn.clicked.connect(self.engine.reset_references)
-    layout1.addWidget(btn, y_curr,1)
     btn = QPushButton("-")
     btn.clicked.connect(self.engine.defocus_minus)
     layout1.addWidget(btn, y_curr,2)
@@ -411,24 +396,24 @@ def createUI(self):
     self.chkAOPrecondition.setChecked(True)
     self.chkAOPrecondition.stateChanged.connect(self.do_ao_precondition)
     layout1.addWidget(self.chkAOPrecondition, y_curr,3)
-    
+
     self.chkMidi = QCheckBox("MIDI")
     self.chkMidi.setChecked(True)
     self.chkMidi.stateChanged.connect(self.do_midi)
     layout1.addWidget(self.chkMidi, y_curr,2)
-    
+
     y_curr += 1
-    
+
     btn1 = QPushButton("Set defocus pos0")
     layout1.addWidget(btn1, y_curr,1)
-    btn1.clicked.connect(self.set_defocus_pos0) 
-    
+    btn1.clicked.connect(self.set_defocus_pos0)
+
     btn1 = QPushButton("Set defocus pos1")
     layout1.addWidget(btn1, y_curr,2)
-    btn1.clicked.connect(self.set_defocus_pos1) 
-     
+    btn1.clicked.connect(self.set_defocus_pos1)
+
     y_curr = 0
-    
+
     self.widget_mode_buttons = QWidget()
     layoutStatusButtons = QHBoxLayout(self.widget_mode_buttons)
 
@@ -463,6 +448,9 @@ def createUI(self):
     btn = QPushButton("Reset Counts")
     layoutStatusButtons.addWidget(btn)
     btn.clicked.connect(self.reset_counts)
+    if self.offline_only:
+        self.mode_btn_ao1.hide() # (Realtime only: the C++ engine)
+        btn.hide()
 
     # Config
     layout1 = QGridLayout(pages[2])
@@ -517,36 +505,121 @@ def createUI(self):
     self.text_stats.setReadOnly(True)
     layout.addWidget(self.text_stats)
 
-    # OFFLINE
-    layout1 = QGridLayout(pages[3])
-    y_curr = 0
+    ### Boxes/Centroids
+    layout1 = QGridLayout(self.ops_boxes)
+
+    lbl = QLabel("Box size:")
+    layout1.addWidget(lbl,0,0)
+    self.widget_boxsize = QDoubleSpinBox()
+    layout1.addWidget(self.widget_boxsize,0,1)
+    self.widget_boxsize.setDecimals(2)
+    self.widget_boxsize.valueChanged.connect(self.boxsize_changed)
+
+    btn = QPushButton("Search box shift")
+    btn.clicked.connect(lambda: self.show_zernike_dialog("Shift search boxes", self.engine.shift_search_boxes ) )
+    layout1.addWidget(btn, 1,0 )
+
+    btn = QPushButton("Reference shift")
+    btn.clicked.connect(lambda: self.show_zernike_dialog("Shift references", self.engine.shift_references ) )
+    layout1.addWidget(btn, 2,0 )
+
+    self.chkFollow = QCheckBox("Boxes follow centroids")
+    self.chkFollow.stateChanged.connect(lambda:self.set_follow(self.chkFollow.isChecked()))
+    layout1.addWidget(self.chkFollow, 1,3 )
+
+    btn = QPushButton("Search box RESET")
+    btn.clicked.connect(self.engine.reset_search_boxes )
+    layout1.addWidget(btn, 1,1 )
+
+    btn = QPushButton("Reference RESET")
+    btn.clicked.connect(self.engine.reset_references )
+    layout1.addWidget(btn, 2,1 )
+
+    btn = QPushButton("Shrink+Shift1")
+    layout1.addWidget(btn,0,2)
+    btn.clicked.connect(lambda: self.engine.offline.offline_auto_shrink1() )
+
+    btn = QPushButton("Shrink+Autoshift")
+    layout1.addWidget(btn,0,3)
+    btn.clicked.connect(lambda: self.engine.offline.offline_auto_shrink() )
+
+    ### Offline: in the Operation tab (offline_only), else in the Offline tab
+    if not self.offline_only:
+        QVBoxLayout(pages[3]).addWidget(self.ops_offline)
+    layout1 = QGridLayout(self.ops_offline)
 
     self.btn_off = QPushButton("Load Offline Source")
     self.btn_off.clicked.connect(self.offline_load_image)
-    layout1.addWidget(self.btn_off, y_curr,0)
-    y_curr += 1
+    layout1.addWidget(self.btn_off, 1,0)
 
     self.btn_off_back = QPushButton("Load Offline Background")
     self.btn_off_back.clicked.connect(self.offline_load_background)
-    layout1.addWidget(self.btn_off_back, y_curr,0)
-    y_curr += 1
+    layout1.addWidget(self.btn_off_back, 2,0)
 
-    # Offline scroll image:
-    self.scroll_off = QScrollArea()
-    self.layout_off = QGridLayout()
-    self.scroll_off.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
-    self.scroll_off.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
-    self.scroll_off.setWidgetResizable(True)
-    self.widget_off = QWidget()
-    self.scroll_off.setWidget(self.widget_off)
-    self.widget_off.setLayout(self.layout_off)
-    layout1.addWidget(self.scroll_off, y_curr,0)
-    y_curr += 1
+    # Choose the frame to show. Above the arrows, spanning their three columns
+    self.frame_slider = FrameSlider()
+    self.frame_slider.valueChanged.connect(self.offline_goto)
+    layout1.addWidget(self.frame_slider, 2,1, 1,3)
+
+    # OFfline iteration offline_next prev.
+    btn = QPushButton("←") # left arrow
+    layout1.addWidget(btn,3,1)
+    btn.clicked.connect(lambda: self.offline_move(-1,True) )
+    self.lbl_frame_curr = QLabel()
+    layout1.addWidget(self.lbl_frame_curr,3,2)
+    btn = QPushButton("→") # right arrow
+    layout1.addWidget(btn,3,3)
+    btn.clicked.connect(lambda: self.offline_move (1,True) )
+
+    self.progress_bar = QtWidgets.QProgressBar(self)
+    layout1.addWidget(self.progress_bar,3,0)
+
+    self.btn_processing = QPushButton("Auto process all frames")
+    layout1.addWidget(self.btn_processing,4,0)
+    self.btn_processing.clicked.connect(lambda: self.offline_autoall() )
+
+    btn = QPushButton("Rotate this frame")
+    layout1.addWidget(btn,6,2)
+    btn.clicked.connect(lambda: self.engine.offline.offline_rotation_fix() )
+
+    btn = QPushButton("Process this frame")
+    layout1.addWidget(btn,6,1)
+    btn.clicked.connect(lambda: self.engine.offline.offline_manual1() )
+
+    btn = QPushButton("Save this frame")
+    layout1.addWidget(btn,4,2)
+    btn.clicked.connect(lambda: self.engine.offline.offline_serialize() )
+
+    btn = QPushButton("Dialog all frames")
+    layout1.addWidget(btn,5,0)
+    btn.clicked.connect(lambda: self.engine.offline.show_dialog() )
+
+    # Dumb: Don't expand and shrink. Best for e.g. calibration images
+    btn = QPushButton("Auto simple")
+    layout1.addWidget(btn,6,0)
+    btn.clicked.connect(lambda: self.engine.offline.offline_auto_dumb() )
+
+    # Offline frame gallery: small thumbnails, wrapping across the panel's width. Virtual (a thumbnail is made when it is shown),
+    # since movies can have thousands of frames
+    self.frame_model = FrameGalleryModel(self)
+    self.frame_gallery = QtWidgets.QListView()
+    self.frame_gallery.setModel(self.frame_model)
+    self.frame_gallery.setViewMode(QtWidgets.QListView.IconMode)
+    self.frame_gallery.setResizeMode(QtWidgets.QListView.Adjust) # Re-wrap when the width changes
+    self.frame_gallery.setMovement(QtWidgets.QListView.Static)
+    self.frame_gallery.setUniformItemSizes(True) # (All the same size: much faster with thousands)
+    self.frame_gallery.setIconSize(QtCore.QSize(FrameGalleryModel.THUMB_SIZE, FrameGalleryModel.THUMB_SIZE))
+    self.frame_gallery.setSpacing(3)
+    self.frame_gallery.setSelectionMode(QtWidgets.QAbstractItemView.NoSelection)
+    self.frame_gallery.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
+    self.frame_gallery.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
+    self.frame_gallery.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+
+    layout1.addWidget(self.frame_gallery,7,0, 1,4) # Across all the columns of the panel
 
     self.chkOfflineAlgorithm = QCheckBox("Use offline algorithm")
     self.chkOfflineAlgorithm.stateChanged.connect(self.offline_algorithm)
-    layout1.addWidget(self.chkOfflineAlgorithm, y_curr,0)
-    y_curr += 1
+    layout1.addWidget(self.chkOfflineAlgorithm,8,0)
 
     self.param_tree_offline = ParameterTree()
     self.param_tree_offline.setParameters(self.p_offline, showTop=False)
@@ -555,17 +628,26 @@ def createUI(self):
     self.widget_main = QWidget()
     layoutCentral = QHBoxLayout()
     layoutCentral.addWidget(self.widget_centrals, stretch=3)
-    layoutCentral.addWidget(self.widget_displays, stretch=2)
+    if not self.offline_only:
+        layoutCentral.addWidget(self.widget_displays, stretch=2) # (The DM display)
     layoutCentral.addWidget(self.widget_controls, stretch=1)
     self.widget_main.setLayout(layoutCentral)
 
     self.setCentralWidget(self.widget_main)
 
     menu=self.menuBar().addMenu('&File')
+    menu.addAction('L&oad config file...', self.load_config_json)
+    menu.addSeparator()
     menu.addAction('&Export Centroids + Zernikes', self.export)
     menu.addAction('Export All &Zernikes', self.export_all)
+    menu.addAction('Process &directory of AVIs...', self.process_directory)
+    menu.addAction('Make summary &plot from a directory of CSVs...', self.summary_plot_directory)
+    menu.addAction('Show &Log', self.show_log)
     menu.addAction('Run &Calibration', self.do_calibration)
     menu.addAction('e&Xit', self.close)
+
+    menu=self.menuBar().addMenu('&Help')
+    menu.addAction('&About', self.show_about)
 
     pixmap_label.setFocus()
     self.shortcut = QShortcut(QKeySequence("Ctrl+A"), self)
@@ -584,6 +666,8 @@ def createUI(self):
     self.shortcut.activated.connect(self.engine.defocus_plus01)
     self.shortcut = QShortcut(QKeySequence("Ctrl+4"), self)
     self.shortcut.activated.connect(self.engine.defocus_plus10)
+
+    self.connect_offline_signals()
 
     self.setGeometry(2,2,MAIN_WIDTH_WIN,MAIN_HEIGHT_WIN)
     self.setWindowFlags(Qt.Window | Qt.WindowTitleHint | Qt.WindowMinimizeButtonHint | Qt.WindowMaximizeButtonHint | Qt.WindowCloseButtonHint)

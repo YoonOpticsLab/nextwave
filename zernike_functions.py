@@ -1,3 +1,4 @@
+from nextwave_log import log
 import numpy as np
 
 MAX_ZERNIKES=65 # Absolute max for 10th order: np.sum( np.arange(10+1+1))-1 .first of 11th order is np.sum(np.arange(12)) )
@@ -233,6 +234,15 @@ def zernike_integral_average_from_corners(left,right,upper,lower,pupil_radius,te
           zernike_inty1(right,lower) + zernike_inty1(left,lower))/spacing_x/spacing_y
     return intx/pupil_radius,inty/pupil_radius
 
+def LCA(wavelength):
+    dd=1.7312 - 0.63346 / (wavelength-0.2141)
+    return dd
+    
+def LCA_z4_correction(wavelength,wavelength_ref,pupil_radius):
+    value = LCA(wavelength/1000.0)-LCA(wavelength_ref/1000.0)
+    LCA_um = (value * pupil_radius**2)/(4*np.sqrt(3))
+    log.debug( "LCA_D=",value, "LCA_m=",LCA_um, wavelength, wavelength_ref, pupil_radius)
+    return LCA_um
 from numpy.linalg import svd,lstsq,pinv
 
 def slopes_to_zern(box_centers_norm, box_width_norm,  pupil_radius_mm, box_subset=None,OSA_order=False):

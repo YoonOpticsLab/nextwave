@@ -1,3 +1,4 @@
+from nextwave_log import log
 import numpy as np
 import struct
 
@@ -31,7 +32,7 @@ def get_item(layout,bytes,which_item):
     entry = layout[1][which_item]
     loc=entry['bytenum_current']
     itemsize=numbytes[ entry['type'] ]
-    print(entry['type'], loc, itemsize)
+    log.debug(entry['type'], loc, itemsize)
     data = np.frombuffer(bytes[loc:loc+itemsize], pytpe(entry['type']), count=1)[0]
     return data
 

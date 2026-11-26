@@ -1,4 +1,10 @@
-import joystickapi
+from nextwave_log import log
+import nextwave_log
+import re
+try:
+    import joystickapi # (Realtime: a gamepad. Optional: not installed everywhere)
+except ImportError:
+    joystickapi = None
 
 from PyQt5.QtWidgets import (QMainWindow, QLabel, QSizePolicy, QApplication, QPushButton,
                              QHBoxLayout, QVBoxLayout, QGridLayout, QScrollArea, QMessageBox,
@@ -10,21 +16,25 @@ from PyQt5.QtWidgets import QShortcut
 
 from PyQt5.QtGui import QPixmap, QImage, QPainter, QPen, QFont
 from PyQt5.QtCore import Qt, QTimer, QEvent, QLineF, QPointF, QPoint, pyqtSignal, pyqtSlot
-
+from PyQt5.QtCore import QSettings
+import PyQt5.QtWidgets as QtWidgets
 import PyQt5.QtGui as QtGui
 import PyQt5.QtCore as QtCore
-
 from PyQt5.QtWidgets import QApplication
-from PyQt5.QtCore import Qt
+
 
 import pyqtgraph as pg
 from pyqtgraph.parametertree import Parameter, ParameterTree
-from pyqtkeybind import keybinder
+try:
+    from pyqtkeybind import keybinder # (Realtime: a global hotkey. Optional: not installed everywhere)
+except ImportError:
+    keybinder = None
 
 import numpy as np
 import sys
 import os
 import json
+import traceback
 
 import matplotlib.cm as cmap
 
@@ -33,10 +43,18 @@ from nextwave_ui_create import (createUI as _createUI, QIMAGE_HEIGHT, QIMAGE_WID
                                MAIN_HEIGHT_WIN, MAIN_WIDTH_WIN,
                                CAM_EXPO_MIN, CAM_EXPO_MAX, CAM_GAIN_MIN, CAM_GAIN_MAX)
 from nextwave_sockets import NextwaveSocketComm
+import defaults
+import offline_parallel
+import offline as offline_module # (Its file types and helpers. "offline" is a common name here)
 
-from nextwave_widgets import ZernikeDialog, BoxInfoDialog, ActuatorPlot, MyBarWidget, OfflineDialog, IntensityDialogX
+from nextwave_widgets import draw_profiles, ZernikeDialog, BoxInfoDialog, ActuatorPlot, MyBarWidget, OfflineDialog, FrameGalleryModel, FrameSlider, LogViewer, IntensityDialogX
 
-from nextwave_midi import nextwave_midi
+from nextwave_build import build_message
+try:
+    from nextwave_midi import nextwave_midi # (Realtime: a MIDI controller. Optional: needs the midi module, not installed everywhere)
+except Exception as _e:
+    nextwave_midi = None
+    log.info("No MIDI (%s)" % _e)
 
 from threading import Thread
 
@@ -45,6 +63,8 @@ from zernike_functions import calc_rms
 import scipy # For scipy.stats.mode: auto background
 
 import xml.etree.ElementTree as ET
+import glob
+import zernike_plot
 
 WINDOWS=(os.name == 'nt')
 
@@ -64,6 +84,77 @@ def clear_widget_list(layout1,nkeep=0):
    idx -= 1
    widget1 = layout1.itemAt(idx).widget()
    widget1.setParent(None) # Removes the widget
+
+
+class OfflineWorker(QtCore.QObject):
+    finished = QtCore.pyqtSignal()
+    progress = QtCore.pyqtSignal(int)
+    
+    def __init__(self,ui_parent):
+        super().__init__(parent=None)
+        self.ui = ui_parent
+        self.running = False
+        self.cancel = False
+        self.error_text = None
+
+    def do_finished(self):
+        # Move ourselves back to the main thread (main will delete on finished signal handler)
+        mainThread = self.ui.app.instance().thread()
+        self.moveToThread(mainThread)
+        self.finished.emit() 
+
+    def do_auto(self):
+        self.running = True
+        self.completed = False # Set when it has done every frame (not cancelled, and no error)
+        self.error_text = None # Set on failure, so the UI can show it (not just the log file)
+        self.engine = self.ui.engine
+
+        try:
+            n_workers = offline_parallel.default_workers(self.engine.offline.max_frame)
+            if n_workers > 1:
+                completed = offline_parallel.run_parallel(self.engine, n_workers,
+                    progress=self.progress.emit, cancelled=lambda: self.cancel)
+            else:
+                completed = self.do_auto_serial()
+            if completed:
+                self.engine.offline.saver.serialize()
+                self.completed = True
+        except Exception as e:
+            log.exception('Auto process failed') # Report it, but always finish below, or the UI would stay stuck in "processing"
+            self.error_text = str(e) or type(e).__name__
+        finally:
+            self.do_finished()
+
+    def do_auto_serial(self):
+        """ One frame at a time, in this process. Returns False if cancelled. """
+        self.engine.offline.update_frame_classes()
+        self.engine.offline.prepare_occupancy_template()
+        for nframe in np.arange(self.engine.offline.max_frame):
+            self.progress.emit( nframe )
+            if self.cancel:
+                return False
+            self.engine.offline.offline_auto1(nframe)
+            self.engine.offline.center_dirty=False # Only true for first frame
+        return True
+        
+class LoadWorker(QtCore.QObject):
+    """ Runs the slow part of loading a movie, func(files), in a QThread. It must not touch any widgets. Emits done, or failed
+        with the traceback text. """
+    done = QtCore.pyqtSignal()
+    failed = QtCore.pyqtSignal(str)
+
+    def __init__(self, func, files):
+        super().__init__(parent=None)
+        self.func = func
+        self.files = files
+
+    def run(self):
+        try:
+            self.func(self.files)
+        except Exception:
+            self.failed.emit(traceback.format_exc())
+            return
+        self.done.emit()
 
 class NextWaveMainWindow(QMainWindow):
  signal_static_set = pyqtSignal(int, float)
@@ -87,22 +178,28 @@ class NextWaveMainWindow(QMainWindow):
     self.updater_dm = QTimer(self);
     self.updater_dm.timeout.connect(self.update_ui_dm)
 
-    self.midi1 = nextwave_midi(self)
+    self.midi1 = None # (Realtime: a MIDI controller, if the midi module is installed and one is connected)
+    if nextwave_midi is not None:
+        try:
+            self.midi1 = nextwave_midi(self)
+        except Exception as e:
+            log.info("No MIDI controller: %s" % e)
 
     self.draw_refs = False
     self.draw_boxes = True
     self.draw_centroids = True
     self.draw_arrows = False
+    self.draw_zonal_arrows = False
     self.draw_crosshair = True
     self.iterative_first=True
     self.draw_pupil=False
     self.draw_predicted=False
+    self.draw_cross_section=False # Settings->UI "Show cross section"
+    self.cursor_pixel=None # (x,y) image pixel under the mouse in the spot image, or None when it's outside
+    self.normalize_contrast=True
     self.box_info = -1
     self.box_info_dlg = BoxInfoDialog("HiINFO",self)
 
-    self.mode_offline = False
-
-    self.offline_curr=0
     self.chkLoop = QCheckBox("Close AO Loop") # This is needed for engine.mode_init, called in our init. Will be replaced by chkbox widget in our InitUI
 
     self.offline_dialog = OfflineDialog(self)
@@ -120,32 +217,54 @@ class NextWaveMainWindow(QMainWindow):
     self.scale_num=2
     self.scales=[512,768,1024,1536,2048]
 
-    self.image_pixels = np.zeros( (10,10))
-    
-    keybinder.init()
-    keybinder.register_hotkey(self.winId(), "F7", self.on_hotkey_pressed)
+    self.image_pixels = np.zeros( (10,10)) # Display copy of current image, updated by offline frame_loaded signal
 
+    self.batch = None # While a directory of movies is being processed (see process_directory)
+    self.log_viewer = None
+    self.summary_dialogs = [] # Keeps the summary-plot windows alive
+    self.loading = False # A movie is being loaded in a worker thread (see start_loading)
+    self.load_kind = 'movie' # or 'background'
+    self.load_thread = None
+    self.load_worker = None
+    self.load_saved_enabled = {}
+    self.load_button_text = ""
 
-    
+    self.worker = OfflineWorker(self)
+    self.worker_connected = False # Its signals are connected (see offline_autoall)
+
+    if keybinder is not None:
+        keybinder.init()
+        keybinder.register_hotkey(self.winId(), "F7", self.on_hotkey_pressed)
+
  def on_hotkey_pressed(self):
      # THIS IS NOT WORKING
-     print("Global hotkey activated!")    
+     log.info("Global hotkey activated!")
+
+ def read_config_json(self, filename="./config.json"):
+    with open(filename) as f:
+        json_data = json.load(f)
+
+    # A relative file named in the config is relative to the current directory (as always), or else to the config's directory
+    config_dir = os.path.dirname(os.path.abspath(filename))
+    for key in ("xml_file", "influence_file"):
+        name = json_data["params"].get(key)
+        if name and not os.path.isabs(name) and not os.path.exists(name) and os.path.exists(os.path.join(config_dir, name)):
+            json_data["params"][key] = os.path.join(config_dir, name)
+
+    self.json_data = json_data
+    self.config_filename = filename
+    self.pupil_diam=self.json_data["params"]["pupil_diam"]
 
  def params_json(self):
-    f=open("./config.json")
-    self.json_data = json.load(f)
-    f.close()
-
-    self.cx=self.json_data["params"]["cx"]
-    self.cy=self.json_data["params"]["cy"]
-    self.pupil_diam=self.json_data["params"]["pupil_diam"]
+    self.read_config_json()
     self.offline_only=self.json_data["params"]["offline_only"]
 
     self.params = [
         {'name': 'UI', 'type': 'group', 'title':'User interface', 'children': [
             {'name': 'update_rate', 'type': 'int', 'value': 200, 'title':'Display update rate (ms)', 'limits':[50,2000]},
             {'name': 'update_rate_dm', 'type': 'int', 'value': 80, 'title':'DM Display update rate (ms)', 'limits':[50,2000]},
-            {'name': 'show_boxes', 'type': 'bool', 'value': True, 'title':'Show search boxes'}
+            {'name': 'show_boxes', 'type': 'bool', 'value': True, 'title':'Show search boxes'},
+            {'name': 'show_cross_section', 'type': 'bool', 'value': False, 'title':'Show cross section'}
         ]},
         {'name': 'WF Camera', 'type': 'group', 'children': [
             {'name': 'Offset (%)', 'type': 'int', 'value': 0, 'limits':[0,100]},
@@ -171,34 +290,356 @@ class NextWaveMainWindow(QMainWindow):
     self.p = Parameter.create(name='params', type='group', children=self.params)
     self.params = self.p.saveState()
     self.apply_params()
+    # Takes effect when ticked (no need for Apply)
+    self.p.child('UI','show_cross_section').sigValueChanged.connect(lambda param, val: setattr(self, 'draw_cross_section', bool(val)))
 
     self.p_offline = Parameter.create(name='params_offline', type='group', children=self.params_offline)
     self.params_offline = self.p_offline.saveState()
 
+    self.settings = QSettings("UHCO","NextWave")
+    self.save_setting("ui/folder",".", False) # Default only, don't overwrite
+    self.save_setting("ui/folder_save",".", False) # Default only, don't overwrite
+    self.save_setting("ui/folder_background",".", False) # Default only, don't overwrite
 
+ # Function to save a setting with a default value
+ def save_setting(self, key, value, override=True):
+    if override or (not self.settings.contains(key)):
+        self.settings.setValue(key, value)
+ def load_setting(self, key, default=""):
+    return self.settings.value(key)
+ 
  def apply_params(self):
     self.updater.start(self.get_param("UI","update_rate"))
     self.updater_dm.start(self.get_param("UI","update_rate_dm"))
 
- def offline_load_image(self):
-    ffilt=' Movies (*.avi);; BMP Images (*.bmp);; BMP Directory (*.bmp);; Binary files (*.bin);; files (*.*)'
-    thedir = QFileDialog.getOpenFileNames(self, "Choose file",
-                ".", ffilt );
+ def choose_offline_files(self, caption, folder_key, filters, default_filter):
+    """ Open-files dialog. default_filter (a wildcard from nextwave_defaults.py) is the one selected; if it isn't
+        already one of the choices, it's added. Returns what QFileDialog does: (list of files, selected filter). """
+    filters = list(filters)
+    default_filter = str(default_filter or filters[0]).strip()
+    if default_filter not in filters:
+        filters.insert(0, default_filter)
+    return QFileDialog.getOpenFileNames(self, caption, self.load_setting(folder_key), ";;".join(filters), default_filter)
 
-    if len(thedir)>0:
-        print( thedir , thedir[0])
+ def offline_load_image(self):
+    filters=[offline_module.LOAD_FILTER, 'All files (*)'] # A movie, or images (several: one sequence, in name order)
+    thedir = self.choose_offline_files("Choose a movie, or images", "ui/folder", filters,
+                getattr(defaults, 'OFFLINE_LOAD_FILTER', filters[0]) )
+
+    if len(thedir[0])>0: # (Empty if cancelled)
+        dirname = os.path.dirname(thedir[0][0])
+        self.save_setting("ui/folder",dirname)
+        
         self.btn_off.setText(thedir[0][0])
-        self.engine.offline.load_offline(thedir)
-        self.mode_offline = True
+        self.start_loading('movie', self.engine.offline.load_offline_data, thedir)
+
+ def offline_finished(self):
+    cancelled, completed = self.worker.cancel, self.worker.completed
+    error_text = self.worker.error_text
+    self.worker.running = False
+    self.worker.cancel = False
+
+    self.thread.quit() # New thread for next time
+
+    self.btn_processing.setText("Auto process all frames")
+    self.btn_processing.setStyleSheet("background-color: none;")
+    self.btn_processing.setEnabled(True)
+
+    self.progress_bar.setValue( 0 )
+    if error_text:
+        self.statusBar().showMessage("Auto process FAILED: " + error_text)
+    elif cancelled:
+        self.statusBar().showMessage("Auto process cancelled")
+    elif completed:
+        self.statusBar().showMessage("Auto process done: %d frames" % self.engine.offline.max_frame)
+    self.offline_move(0) # Updates UI
+    if self.batch:
+        self.batch_processed(cancelled, completed)
+               
+ def connect_offline_signals(self):
+    # Offline routines (possibly in the worker thread) emit these rather than touching widgets.
+    # The slots are methods of this window, so Qt queues them onto the main thread.
+    signals = self.engine.offline.signals
+    signals.pupil_diam_changed.connect(self.show_pupil_diam)
+    signals.pupil_stop_changed.connect(self.show_pupil_stop)
+    signals.box_size_changed.connect(self.show_box_size)
+    signals.frame_loaded.connect(self.show_frame)
+    signals.load_progress.connect(self.show_load_progress)
+    signals.first_frame.connect(self.show_first_frame)
+
+ # Loading a movie: the slow part (reading and checking the frames, and the saved results) runs in a worker thread, so the window
+ # stays alive. Only the quick part, which makes widgets, is done here afterwards (see NextwaveOffline.finish_load).
+ # The worker only emits load_progress; it's shown in the progress bar, and as the load button's text. The offline controls
+ # are off until it's done, since they'd use a movie that's half loaded.
+ def set_offline_controls_enabled(self, enabled):
+    if not enabled:
+        widgets = self.ops_offline.findChildren(QtWidgets.QAbstractButton) + [self.frame_slider, self.frame_gallery]
+        self.load_saved_enabled = {w: w.isEnabled() for w in widgets}
+        for w in widgets:
+            w.setEnabled(False)
+    else:
+        for w, was in self.load_saved_enabled.items():
+            w.setEnabled(was)
+        self.load_saved_enabled = {}
+
+ def start_loading(self, kind, func, files):
+    if self.loading or self.worker.running: # (The buttons are off then, but be sure)
+        return
+    self.loading = True
+    self.load_kind = kind
+    button = self.btn_off if kind == 'movie' else self.btn_off_back
+    self.load_button_text = button.text()
+    self.set_offline_controls_enabled(False)
+    self.progress_bar.setRange(0, 0) # Busy, until the first count comes
+
+    self.load_thread = QtCore.QThread()
+    self.load_worker = LoadWorker(func, files)
+    self.load_worker.moveToThread(self.load_thread)
+    self.load_thread.started.connect(self.load_worker.run)
+    self.load_worker.done.connect(self.offline_load_done)
+    self.load_worker.failed.connect(self.offline_load_failed)
+    self.load_worker.done.connect(self.load_thread.quit)
+    self.load_worker.failed.connect(self.load_thread.quit)
+    self.load_thread.start()
+
+ def end_loading(self):
+    self.loading = False
+    self.set_offline_controls_enabled(True)
+    (self.btn_off if self.load_kind == 'movie' else self.btn_off_back).setText(self.load_button_text)
+    self.progress_bar.setRange(0, 100)
+    self.progress_bar.setValue(0)
+
+ def offline_load_done(self):
+    self.end_loading()
+    offline = self.engine.offline
+    if self.load_kind == 'movie':
+        offline.finish_load(restore=True) # (Quick, and makes widgets: so here, not in the worker)
+        self.engine.mode_offline = True
         self.chkOfflineAlgorithm.setChecked(True)
+        offline.center_dirty = False
+
+        self.offline_move(0) # Updates UI, etc.
+        self.btn_off_back.setText("Load Offline Background") # Reset this
+        if self.batch:
+            QTimer.singleShot(0, self.offline_autoall) # (See batch_processed for what comes next)
+    else:
+        offline.finish_load(restore=False)
+        self.offline_move(0)
+
+ def offline_load_failed(self, error_text):
+    self.end_loading()
+    log.error(error_text, flush=True)
+    if self.batch:
+        self.batch['failed'].append(os.path.basename(self.batch['movies'][self.batch['index']]))
+        QTimer.singleShot(0, self.batch_next) # Next movie
+        return
+    message = error_text.strip().splitlines()[-1]
+    message = re.sub(r'^[\w.]+(Error|Exception|Mismatch): ', '', message) # (Without the error's type, e.g. "ValueError: ")
+    QMessageBox.warning(self, "Couldn't load", "Loading failed:\n\n" + message)
+
+ @QtCore.pyqtSlot(object)
+ def show_first_frame(self, image):
+    """ Show the first frame of the movie being loaded straight away (the rest of it is still coming) """
+    if not self.loading or self.load_kind != 'movie':
+        return
+    self.image_pixels = image
+    self.engine.comm.write_image(np.array(image.shape, dtype='uint16'), image)
+
+ @QtCore.pyqtSlot(str, int, int)
+ def show_load_progress(self, stage, done, total):
+    if not self.loading: # (Not loading through the UI)
+        return
+    self.progress_bar.setRange(0, total) # 0: busy indicator, for the steps with no count
+    self.progress_bar.setValue(min(done, total))
+    button = self.btn_off if self.load_kind == 'movie' else self.btn_off_back
+    button.setText(stage + ("   %d / %d" % (min(done, total), total) if total > 0 else " ..."))
+
+ # These only display what the algorithm reports. They must not change algorithm state.
+ @QtCore.pyqtSlot(float)
+ def show_pupil_diam(self, val):
+    self.line_pupil_diam.setText('%2.2f'%val)
+
+ @QtCore.pyqtSlot(float)
+ def show_pupil_stop(self, val):
+    self.it_stop.setText('%2.2f'%val)
+
+ @QtCore.pyqtSlot(float)
+ def show_box_size(self, val):
+    # Signals blocked: this is display only, and shouldn't fire boxsize_changed (which re-inits the engine)
+    self.widget_boxsize.blockSignals(True)
+    self.widget_boxsize.setValue(val)
+    self.widget_boxsize.blockSignals(False)
+
+ @QtCore.pyqtSlot(object)
+ def show_frame(self, image):
+    self.image_pixels = image
+
+ def update_progress(self, value):
+    total = self.engine.offline.max_frame
+    self.progress_bar.setValue(int(value/total * 100))
+    self.btn_processing.setText("Processing: %d/%d done (Click to CANCEL)"%(value, total) );
+    self.btn_processing.setStyleSheet("background-color: green;")
+    self.statusBar().showMessage("Auto processing frame %d/%d..." % (value, total))
+
+ def offline_autoall(self):
+    if self.worker.running:
+        self.worker.cancel = True # This will start a shutdown of current auto at next frame
+
+        self.btn_processing.setText("CANCELING..");
+        self.btn_processing.setStyleSheet("background-color: yellow;")
+        self.btn_processing.setEnabled(False)
+        self.statusBar().showMessage("Cancelling auto process...")
+        return
+
+    self.statusBar().showMessage("Auto processing frame 0/%d..." % self.engine.offline.max_frame)
+    self.thread = QtCore.QThread()
+    self.worker.moveToThread(self.thread)
+
+    self.thread.started.connect(self.worker.do_auto)
+    if not self.worker_connected: # (The worker is the same one every time: connect its signals once, or each run would call them once more)
+        self.worker.finished.connect(self.offline_finished)
+        self.worker.progress.connect(self.update_progress)
+        self.worker_connected = True
+    #self.worker.finished.connect(self.thread.quit)
+    #self.worker.finished.connect(self.worker.deleteLater) # Worker stays alive forever
+    self.thread.finished.connect(self.thread.deleteLater)
+    
+    self.progress_bar.setValue(0)
+    self.thread.start() # Will start the OfflineWorker & call do_auto
+
+ # ---- Process a directory of AVIs: for each movie, load it, process all its frames and export its Zernikes as a CSV (the same
+ # steps as the buttons, one movie after another, each shown on screen as it goes). Then make the summary plot from the CSVs.
+ # The CSVs and the plot go in a subdirectory of the movies' directory (BATCH_OUTPUT_DIR in the defaults). A movie that fails is
+ # logged and skipped. Cancelling the processing (its button) stops the batch.
+ def process_directory(self):
+    if self.batch or self.loading or self.worker.running:
+        QMessageBox.information(self, "Busy", "Wait for the current loading or processing to finish first.")
+        return
+    start = self.load_setting("ui/folder_batch") or self.load_setting("ui/folder") or "."
+    folder = QFileDialog.getExistingDirectory(self, "Directory of AVI movies to process", start, QFileDialog.ShowDirsOnly)
+    if folder:
+        self.save_setting("ui/folder_batch", folder)
+        self.start_batch(folder)
+
+ def start_batch(self, folder, confirm=True):
+    movies = sorted(glob.glob(os.path.join(folder, "*.avi")))
+    if not movies:
+        QMessageBox.information(self, "No movies", "There are no .avi files in " + folder)
+        return
+    out_dir = os.path.join(folder, str(getattr(defaults, 'BATCH_OUTPUT_DIR', 'zernikes')))
+    if confirm and QMessageBox.question(self, "Process directory", "Process all %d movies in\n%s\n\nEach one is processed (every frame) and "
+            "its Zernikes saved as a CSV in\n%s\nthen a summary plot is made there. This can take a long time." % (len(movies), folder, out_dir)
+            ) != QMessageBox.Yes:
+        return
+    self.batch = dict(movies=movies, index=-1, out_dir=out_dir, csvs=[], failed=[], folder=folder)
+    log.info("Batch: %d movies in %s; results to %s" % (len(movies), folder, out_dir))
+    self.batch_next()
+
+ def batch_next(self):
+    b = self.batch
+    b['index'] += 1
+    if b['index'] >= len(b['movies']):
+        self.batch_finish()
+        return
+    path = b['movies'][b['index']]
+    text = "Batch %d/%d: %s" % (b['index'] + 1, len(b['movies']), os.path.basename(path))
+    log.info(text)
+    self.statusBar().showMessage(text)
+    self.btn_off.setText(path)
+    self.start_loading('movie', self.engine.offline.load_offline_data, ([path], 'Movies (*.avi)'))
+
+ def batch_processed(self, cancelled, completed):
+    """ The movie's frames are done (or the processing was cancelled, or it failed): export it, and go on to the next """
+    b = self.batch
+    name = os.path.basename(b['movies'][b['index']])
+    if cancelled:
+        log.warning("Batch cancelled during " + name)
+        self.batch = None
+        self.statusBar().showMessage("Batch cancelled")
+        return
+    if completed:
+        try:
+            b['csvs'].append(self.engine.offline.export_all_zernikes(b['out_dir'], overwrite=True))
+        except Exception:
+            log.exception("Couldn't export " + name)
+            b['failed'].append(name)
+    else:
+        log.error("Processing " + name + " didn't finish")
+        b['failed'].append(name)
+    QTimer.singleShot(0, self.batch_next)
+
+ def batch_finish(self):
+    b, self.batch = self.batch, None
+    name = os.path.basename(os.path.normpath(b['folder']))
+    pngs = self.make_summary_plots(b['csvs'], b['out_dir'], name) if b['csvs'] else []
+    text = "Batch done: %d of %d movies processed" % (len(b['movies']) - len(b['failed']), len(b['movies']))
+    if pngs:
+        text += "; summary plots " + ", ".join(pngs)
+    log.info(text)
+    self.statusBar().showMessage(text)
+    if b['failed']:
+        QMessageBox.warning(self, "Some movies failed", "These movies could not be processed (see the log):\n" + "\n".join(b['failed']))
+
+ def summary_plot_directory(self):
+    """ Ask which directory of exported CSVs (native1.csv, native2.csv...) to make the summary plots from, and make them there """
+    start = self.load_setting("ui/folder_summary") or self.load_setting("ui/folder_batch") or "."
+    folder = QFileDialog.getExistingDirectory(self, "Directory of Zernike CSVs for the summary plot", start, QFileDialog.ShowDirsOnly)
+    if folder:
+        self.save_setting("ui/folder_summary", folder)
+        csvs = sorted(glob.glob(os.path.join(folder, "*.csv")))
+        name = os.path.basename(os.path.normpath(folder))
+        if not self.make_summary_plots(csvs, folder, name):
+            QMessageBox.information(self, "Summary plot", "There are no CSVs in " + folder + " named like native1.csv (condition, then number).")
+
+ def make_summary_plots(self, csvs, out_dir, name):
+    """ Both summary plots (each run, and the mean +/- 1 SD) of csvs, saved in out_dir as <name>.png and <name>_mean.png, and
+        shown. Returns the paths saved (empty, and nothing shown, if there was nothing to plot: see zernike_plot). """
+    pngs = []
+    for mean, suffix in ((False, ""), (True, "_mean")):
+        png = os.path.join(out_dir, name + suffix + ".png")
+        try:
+            plotted = zernike_plot.make_summary_plot(csvs, png, mean=mean)
+        except Exception:
+            log.exception("Summary plot failed (%s)" % png)
+            continue
+        if not plotted:
+            continue
+        log.info("Summary plot of %d CSVs: %s" % (len(csvs), png))
+        self.show_summary_plot(png)
+        pngs.append(png)
+    return pngs
+
+ def show_summary_plot(self, png):
+    dialog = QDialog(self)
+    dialog.setWindowTitle(png)
+    label = QLabel()
+    pixmap = QPixmap(png)
+    label.setPixmap(pixmap)
+    scroll = QScrollArea()
+    scroll.setWidget(label)
+    layout = QVBoxLayout(dialog)
+    layout.addWidget(scroll)
+    dialog.resize(min(pixmap.width() + 30, 1300), min(pixmap.height() + 30, 900))
+    dialog.show()
+    self.summary_dialogs.append(dialog) # (Keeps it alive)
+
+ def show_log(self):
+    if self.log_viewer is None:
+        self.log_viewer = LogViewer(self)
+    self.log_viewer.show()
+    self.log_viewer.raise_()
+    self.log_viewer.activateWindow()
 
  def offline_load_background(self):
-    ffilt='Movies (*.avi);; Binary files (*.bin);; BMP Images (*.bmp);; files (*.*)'
-    thedir = QFileDialog.getOpenFileNames(self, "Choose background file", ".", ffilt );
-    if len(thedir)>0:
-        print( thedir , thedir[0])
+    filters=[offline_module.LOAD_FILTER, 'All files (*)']
+    thedir = self.choose_offline_files("Choose the background: a movie, or images", "ui/folder_background", filters,
+                getattr(defaults, 'OFFLINE_BACKGROUND_FILTER', filters[0]) )
+    if len(thedir[0])>0: # (Empty if cancelled)
+        dirname = os.path.dirname(thedir[0][0])
+        self.save_setting("ui/folder_background",dirname)
+
         self.btn_off_back.setText(thedir[0][0])
-        self.engine.offline.load_offline_background(thedir)
+        self.start_loading('background', self.engine.offline.load_offline_background_data, thedir)
 
  def offline_config(self):
     ffilt='XML config files (*.xml);; JSON config files (*.json);; All files (*.*)'
@@ -206,35 +647,84 @@ class NextWaveMainWindow(QMainWindow):
                 ".", ffilt );
 
     if len(thedir)>0:
-        print( thedir )
+        log.debug( thedir )
 
     return
 
- def update_ui(self):
+ def normalize_contrast(self,im):
+    cuml=np.zeros(256)
+    cuml[0] = np.sum(im1==0)
+    for nval in np.arange(1,256):
+        cuml[nval] = np.sum(im1==nval) + cuml[nval-1]
 
-    ret, info = joystickapi.joyGetPosEx(id)
-    if ret:
-        btns = [(1 << i) & info.dwButtons != 0 for i in range(caps.wNumButtons)]
-        if btns[1]:
-            #chkLoop.setChecked( False )
-            chkActivateMetric.setChecked( False )
-            print("GOT IT")
+    cuml -= cuml.min()
+    cuml /= cuml.max()
+    cut=np.interp(0.95,cuml,np.arange(256))
+    im[im<cut]=0
+
+ def draw_cross_sections(self, painter, image, x, y):
+    """ Profiles of the pixel values through (x,y) (see draw_profiles). The pixmap is drawn full size, then shrunk/enlarged for display """
+    shown = self.scales[self.scale_num] / max(image.shape[:2]) # Display pixels per image pixel
+    draw_profiles(painter, image, x, y, full=getattr(defaults, 'ui_cross_section_height', 150), shown=shown, label_px=32)
+
+ def spot_window_mouse_moved(self, event):
+    """ Remember which image pixel is under the cursor (for the cross section) """
+    pixmap = self.pixmap_label.pixmap()
+    if pixmap is None or pixmap.isNull() or not hasattr(self, 'image'): # (Nothing drawn yet)
+        self.cursor_pixel = None
+        return
+    # The (scaled) pixmap is centered in the label
+    off_x = (self.pixmap_label.width() - pixmap.width()) / 2.0
+    off_y = (self.pixmap_label.height() - pixmap.height()) / 2.0
+    height, width = self.image.height(), self.image.width() # Full size image (before scaling for display)
+    x = int((event.pos().x() - off_x) * width / pixmap.width())
+    y = int((event.pos().y() - off_y) * height / pixmap.height())
+    self.cursor_pixel = (x, y) if (0 <= x < width and 0 <= y < height) else None
+
+ def spot_window_left(self, event):
+    self.cursor_pixel = None
+
+ def update_ui(self):
+    if joystickapi is not None: # (Realtime: the gamepad)
+        ret, info = joystickapi.joyGetPosEx(id)
+        if ret:
+            btns = [(1 << i) & info.dwButtons != 0 for i in range(caps.wNumButtons)]
+            if btns[1]:
+                #chkLoop.setChecked( False )
+                chkActivateMetric.setChecked( False )
+                print("GOT IT")
 
     image_pixels = self.engine.receive_image()
-    self.image_pixels = np.log10(image_pixels) / np.log10(255) * 255
-    
-    if not self.mode_offline and not self.offline_only: # TODO: Put offline intelligence into engine itself
+
+    if not (self.engine.mode_offline or self.offline_only): # (Realtime) A log-scaled copy
+      with np.errstate(divide='ignore'): # (log of 0)
+        self.image_pixels = np.log10(image_pixels) / np.log10(255) * 255
+
+    if not (self.engine.mode_offline or self.offline_only): # TODO: Put offline intelligence into engine itself
       self.engine.receive_centroids()
       self.engine.compute_zernikes()
 
-    qimage = QImage(image_pixels, image_pixels.shape[1], image_pixels.shape[0],
+    image_pixels_draw = image_pixels.copy()
+    if self.normalize_contrast:
+      try:
+        thresh=self.engine.offline.thresh_lower
+        image_pixels_draw[image_pixels_draw<thresh] = 0
+      except:
+        thresh=1
+      image_pixels_draw[image_pixels_draw>defaults.ui_normalize_max]=defaults.ui_normalize_max
+      #image_pixels_draw -= (thresh-1)
+      image_pixels_draw = image_pixels_draw * (255//(defaults.ui_normalize_max) )
+
+    qimage = QImage(image_pixels_draw, image_pixels_draw.shape[1], image_pixels_draw.shape[0],
                  QImage.Format_Grayscale8)
     pixmap = QPixmap(qimage)
     self.image = pixmap
 
     painter = QPainter()
     painter.begin(pixmap)
+    
 
+    ARROW_MAGNITUDE=10
     if self.draw_arrows:
         #conicalGradient gradient;
 		#gradient.setCenter(rect().center());
@@ -243,11 +733,27 @@ class NextWaveMainWindow(QMainWindow):
 		#gradient.setColorAt(0.0, palette().background().color());
         pen = QPen(Qt.green, 2)
         painter.setPen(pen)
+
         arrows=[QLineF(self.engine.ref_x[n],
                        self.engine.ref_y[n],
                        self.engine.ref_x[n] + (self.engine.centroids_x[n]-self.engine.ref_x[n])*ARROW_MAGNITUDE,
                        self.engine.centroids_y[n] + (self.engine.centroids_y[n]-self.engine.ref_y[n])*ARROW_MAGNITUDE) for n in np.arange(0,self.engine.num_boxes)]
         painter.drawLines(arrows)
+        
+    if self.draw_zonal_arrows:
+        #conicalGradient gradient;
+		#gradient.setCenter(rect().center());
+		#gradient.setAngle(90);
+		#gradient.setColorAt(1.0, Qt::black);
+		#gradient.setColorAt(0.0, palette().background().color());
+        pen = QPen(Qt.green, 2)
+        painter.setPen(pen)
+        arrows=[QLineF(self.engine.box_x[n],
+                       self.engine.box_y[n],
+                       self.engine.centroids_x[n],
+                       self.engine.centroids_y[n]) for n in np.arange(0,self.engine.num_boxes)]
+        painter.drawLines(arrows)
+
 
     if self.draw_refs and self.engine.num_boxes>0: # and self.engine.mode>1:
         pen = QPen(Qt.green, 2.0)
@@ -258,11 +764,11 @@ class NextWaveMainWindow(QMainWindow):
     if self.draw_boxes and self.engine.num_boxes>0: # and self.engine.mode>1:
     #if self.get_param("UI","show_boxes"):
 
-        dark_blue = QtGui.QColor.fromRgb(0,0,200)
-
-        pen = QPen(dark_blue, 1.00, Qt.DotLine)
+        searchbox_color = QtGui.QColor.fromRgb( *defaults.ui_searchbox_color)
+        pen = QPen(searchbox_color, defaults.ui_searchbox_width, Qt.DotLine)
         painter.setPen(pen)
         BOX_BORDER=2
+        
         box_size_pixel = self.engine.box_size_pixel
         boxes1=[QLineF(self.engine.box_x[n]-box_size_pixel//2+BOX_BORDER, # top
                        self.engine.box_y[n]-box_size_pixel//2+BOX_BORDER,
@@ -286,9 +792,13 @@ class NextWaveMainWindow(QMainWindow):
                        self.engine.box_y[n]+box_size_pixel//2-BOX_BORDER) for n in np.arange(self.engine.box_x.shape[0])]
         painter.drawLines(boxes1)
 
-        idx_bads=np.where(np.any(
-            (np.isnan(self.engine.centroids_x),
-            self.engine.centroid_valid==0),0) )[0]
+        valid = getattr(self.engine, 'centroid_valid', None) # (Realtime: from the C++ engine. Offline: only NaN centroids are bad)
+        if valid is None or len(valid) != len(self.engine.centroids_x):
+            idx_bads=np.where(np.isnan(self.engine.centroids_x))[0]
+        else:
+            idx_bads=np.where(np.any(
+                (np.isnan(self.engine.centroids_x),
+                np.array(valid)==0),0) )[0]
         pen = QPen(Qt.red, 1.00, Qt.SolidLine)
         painter.setPen(pen)
         #print( idx_bads, end='')        
@@ -296,7 +806,7 @@ class NextWaveMainWindow(QMainWindow):
                        self.engine.box_y[n]-box_size_pixel//2+BOX_BORDER,
                        self.engine.box_x[n]+box_size_pixel//2-BOX_BORDER,
                        self.engine.box_y[n]+box_size_pixel//2-BOX_BORDER) for n in idx_bads]
-        painter.drawLines(bad_boxes)
+        painter.drawLines(bad_boxes)        
         bad_boxes=[QLineF(self.engine.box_x[n]-box_size_pixel//2-BOX_BORDER,
                        self.engine.box_y[n]+box_size_pixel//2+BOX_BORDER,
                        self.engine.box_x[n]+box_size_pixel//2-BOX_BORDER,
@@ -329,14 +839,43 @@ class NextWaveMainWindow(QMainWindow):
                        self.engine.box_x[n]+box_size_pixel//2-BOX_BORDER,
                        self.engine.box_y[n]+box_size_pixel//2-BOX_BORDER) for n in [self.box_info] ]
         painter.drawLines(boxes1)
+        
+    # if self.box_info>=0 and self.engine.num_boxes>0:
+        # try:
+        # desired=self.offline.desired
+            # pen = QPen(Qt.yellow, 1.00, Qt.SolidLine)
+            # painter.setPen(pen)
+            # BOX_BORDER=2
+            # box_size_pixel = self.engine.box_size_pixel
+            # # Do as a list comprehension just for consistency with above
+            # boxes1=[QLineF(self.engine.box_x[n]-box_size_pixel//2+BOX_BORDER, # top
+                           # self.engine.box_y[n]-box_size_pixel//2+BOX_BORDER,
+                           # self.engine.box_x[n]+box_size_pixel//2-BOX_BORDER,
+                           # self.engine.box_y[n]-box_size_pixel//2+BOX_BORDER) for n in [self.box_info] ]
+            # painter.drawLines(boxes1)
+            # boxes1=[QLineF(self.engine.box_x[n]-box_size_pixel//2+BOX_BORDER,
+                           # self.engine.box_y[n]+box_size_pixel//2-BOX_BORDER,
+                           # self.engine.box_x[n]+box_size_pixel//2-BOX_BORDER,
+                           # self.engine.box_y[n]+box_size_pixel//2-BOX_BORDER) for n in [self.box_info] ]
+            # painter.drawLines(boxes1)
+            # boxes1=[QLineF(self.engine.box_x[n]-box_size_pixel//2+BOX_BORDER,
+                           # self.engine.box_y[n]-box_size_pixel//2+BOX_BORDER,
+                           # self.engine.box_x[n]-box_size_pixel//2+BOX_BORDER,
+                           # self.engine.box_y[n]+box_size_pixel//2-BOX_BORDER) for n in [self.box_info] ]
+            # painter.drawLines(boxes1)
+            # boxes1=[QLineF(self.engine.box_x[n]+box_size_pixel//2-BOX_BORDER,
+                           # self.engine.box_y[n]-box_size_pixel//2+BOX_BORDER,
+                           # self.engine.box_x[n]+box_size_pixel//2-BOX_BORDER,
+                           # self.engine.box_y[n]+box_size_pixel//2-BOX_BORDER) for n in [self.box_info] ]
+            # painter.drawLines(boxes1)        
 
     # Centroids:
     if self.draw_centroids and self.engine.num_boxes>0: #and self.engine.mode>1:
         #for ncen,cen in enumerate(self.centroids_x):
             #if np.isnan(cen):
                 #print(ncen,end=' ')
-
-        pen = QPen(Qt.red, 1.0)
+        centroid_color = QtGui.QColor.fromRgb( *defaults.ui_centroid_color)
+        pen = QPen(centroid_color, defaults.ui_centroid_size)
         painter.setPen(pen)
         points_centroids=[QPointF(self.engine.centroids_x[n],self.engine.centroids_y[n]) for n in np.arange(self.engine.num_boxes)]
         painter.drawPoints(points_centroids)
@@ -345,18 +884,22 @@ class NextWaveMainWindow(QMainWindow):
         pen = QPen(Qt.red, 1.5)
         painter.setPen(pen)
         CROSSHAIR_SIZE=30
-        xlines=[QLineF(self.cx+0, # right
-                       self.cy-CROSSHAIR_SIZE,
-                       self.cx-0, # right
-                       self.cy+CROSSHAIR_SIZE),
-                QLineF(self.cx+CROSSHAIR_SIZE, # right
-                       self.cy+0,
-                       self.cx-CROSSHAIR_SIZE, # right
-                       self.cy-0)
+        cx = self.engine.cx
+        cy = self.engine.cy
+        xlines=[QLineF(cx+0, # right
+                       cy-CROSSHAIR_SIZE,
+                       cx-0, # right
+                       cy+CROSSHAIR_SIZE),
+                QLineF(cx+CROSSHAIR_SIZE, # right
+                       cy+0,
+                       cx-CROSSHAIR_SIZE, # right
+                       cy-0)
                 ]
 
         painter.drawLines(xlines)
 
+    if self.draw_cross_section and self.cursor_pixel is not None:
+        self.draw_cross_sections(painter, image_pixels, *self.cursor_pixel)
     # OFFLINE:
     if self.draw_predicted: # and self.engine.mode>1:
          pen = QPen(Qt.green, 1.0)
@@ -410,20 +953,21 @@ class NextWaveMainWindow(QMainWindow):
     if not(self.engine.defocus==0):
         painter.drawText( QPoint(10, 350), "%0.3f"%( self.engine.defocus) );
 
-    vectors=[np.sqrt( (self.engine.centroids_x[n]-self.engine.ref_x[n])**2 + 
-               (self.engine.centroids_y[n]-self.engine.ref_y[n])**2
-               ) for n in np.arange(0,self.engine.num_boxes)]
+    if not (self.engine.mode_offline or self.offline_only): # (Realtime: the info page, and its numbers on the console)
+        vectors=[np.sqrt( (self.engine.centroids_x[n]-self.engine.ref_x[n])**2 +
+                   (self.engine.centroids_y[n]-self.engine.ref_y[n])**2
+                   ) for n in np.arange(0,self.engine.num_boxes)]
 
-    print( np.nanmean( vectors), np.nanstd(vectors) )
-    # HTML INFO PAGE
-    t='<!DOCTYPE html><html lang="en"><body>\n'
-    t += f"Depth:{self.engine.defocus}\n"
-    t += f"RMS:{np.nanmean(vectors)}\n"
-    t += f"do_record:{int(self.command_record)}\n"
-    t += "</body></html>"
-    fil=open("index.html","wt")
-    fil.writelines(t)
-    fil.close()
+        print( np.nanmean( vectors), np.nanstd(vectors) )
+        # HTML INFO PAGE
+        t='<!DOCTYPE html><html lang="en"><body>\n'
+        t += f"Depth:{self.engine.defocus}\n"
+        t += f"RMS:{np.nanmean(vectors)}\n"
+        t += f"do_record:{int(self.command_record)}\n"
+        t += "</body></html>"
+        fil=open("index.html","wt")
+        fil.writelines(t)
+        fil.close()
 
     #im_buf=self.shmem_data.read(width*height)
     #bytez =np.frombuffer(im_buf, dtype='uint8', count=width*height )
@@ -452,10 +996,10 @@ class NextWaveMainWindow(QMainWindow):
         self.box_info_dlg.hide()
 
     pixmap = pixmap.scaled(self.scales[self.scale_num], self.scales[self.scale_num], Qt.KeepAspectRatio)
-    self.widget_centrals.setMinimumWidth(SPOTS_WIDTH_WIN_MINIMUM)
+    self.widget_centrals.setMinimumWidth(defaults.SPOTS_WIDTH_WIN_MINIMUM)
     self.pixmap_label.setPixmap(pixmap)
     #print ('%0.2f'%bytez.mean(),end=' ', flush=True);
-
+    
     #s=""
     #for n in np.arange(13):
         #s += 'Z%2d=%+0.4f\n'%(n+1,self.engine.zernikes[n])
@@ -471,18 +1015,22 @@ class NextWaveMainWindow(QMainWindow):
         #str_stats+=f"{'Cylinder':<15}= {cylinder:3.2f}\n"
         #str_stats+=f"{'Axis(-cyl)':<15}= {axis:3.2f}\n"
         
-        str_stats += f"Mean (x,y): {self.engine.mean_displacements[0]:4.2f},{self.engine.mean_displacements[1]:4.2f}\n" 
+        try:
+            str_stats += f"Mean (x,y): {self.engine.mean_displacements[0]:4.2f},{self.engine.mean_displacements[1]:4.2f}\n" 
+        except:
+            pass
+            
         str_stats += f" Zs: {self.engine.zernikes[0]:4.3f},{self.engine.zernikes[1]:4.3f}" 
         
         self.text_stats.setText(str_stats)
         #self.text_stats.setHtml(str_stats) # TODO: To get other colors, can embed <font color="red">TEXT</font><br>, etc.
 
     if not self.line_centerx.isModified():
-      self.line_centerx.setText(str(self.cx) )
+      self.line_centerx.setText(str(self.engine.cx) )
     if not self.line_centery.isModified():
-      self.line_centery.setText(str(self.cy) )
+      self.line_centery.setText(str(self.engine.cy) )
     if not self.line_pupil_diam.isModified():
-      self.line_pupil_diam.setText(str(self.engine.pupil_diam) )
+      self.line_pupil_diam.setText(str(self.engine.pupil_diam / self.engine.pupil_mag) )
 
     if not self.offline_only:
       if self.engine.fps0!=0:
@@ -505,7 +1053,8 @@ class NextWaveMainWindow(QMainWindow):
         else:
           s="Ready."
 
-    s+=" command:" + str(self.engine.influence_inv.shape)
+    if hasattr(self.engine, 'influence_inv'): # (Realtime: once the influence matrix is loaded)
+        s+=" command:" + str(self.engine.influence_inv.shape)
     self.label_status0.setText(s)
     self.label_status0.setStyleSheet("color: rgb(0, 255, 0); background-color: rgb(0,0,0);")
 
@@ -530,12 +1079,25 @@ class NextWaveMainWindow(QMainWindow):
     # TODO: Perhaps move all this code into the bar_plot object itself??
     self.bar_plot.clear()
 
+    num_zern_orders_from_boxes=2
+    first_term=np.sum( np.arange(2, num_zern_orders_from_boxes)+1 )
+    while len(self.engine.zernikes) >= first_term:
+        first_term=np.sum( np.arange(2, num_zern_orders_from_boxes)+1 )
+        num_zern_orders_from_boxes += 1
+    num_zern_orders_from_boxes -= 2
+    #print("Found Box order= %d"%num_zern_orders_from_boxes)
+            
     if self.bar_plot.terms_expanded:
-        orders_list=np.arange(2,11)
+        order_limit=11
     else:
-        orders_list=np.arange(2,5)
+        order_limit=5
+        
+    if num_zern_orders_from_boxes < order_limit:
+        order_limit = num_zern_orders_from_boxes
 
-    first_term=np.sum(orders_list[0]+1) # First time is sum of orders - 1
+    orders_list=np.arange(2,order_limit)
+    first_term=np.sum(orders_list[0]+1) # First term is sum of orders - 1
+
     nterms=orders_list[0]+1 # Nterms in first order
     last_term= first_term+nterms+1
 
@@ -549,15 +1111,22 @@ class NextWaveMainWindow(QMainWindow):
         colrx=order_colors[norder]
         zterms1=np.arange(first_term,first_term+nterms)
         xr=zterms1
-        bgx = pg.BarGraphItem(x=zterms1+1, height=self.engine.zernikes[zterms1], width=1.0, brush=colrx)
-        first_term += nterms #=first_termzterms1[-1]+1
-        nterms += 1
-        self.bar_plot.addItem(bgx)
+        try:
+            bgx = pg.BarGraphItem(x=zterms1+1, height=self.engine.zernikes[zterms1], width=1.0, brush=colrx)
+            first_term += nterms #=first_termzterms1[-1]+1
+            nterms += 1
+            self.bar_plot.addItem(bgx)
+        except:
+            log.error("ERROR on BarGraph %d,%d"%(norder,order) )
 
     #print( self.bar_plot.getViewBox().state['limits'] )
     # First_term will now be the first of the next order
-    maxval=np.max( self.engine.zernikes[5:first_term-1] )
-    minval=np.min( self.engine.zernikes[5:first_term-1] )
+    if len(self.engine.zernikes)>5:
+        maxval=np.max( self.engine.zernikes[5:first_term-1] )
+        minval=np.min( self.engine.zernikes[5:first_term-1] )
+    else:
+        maxval=1 # TODO
+        minval=-1
 
     if False: # TODO: indicate 3-5 out of range
     #for ntrunc in np.arange(3,6):
@@ -586,9 +1155,11 @@ class NextWaveMainWindow(QMainWindow):
 
  def update_ui_dm(self):
      
-    self.midi1.check_and_process()
+    if self.midi1 is not None:
+        self.midi1.check_and_process()
     
-    self.actuator_plot.paintEvent_manual()
+    if not self.offline_only and hasattr(self.engine.comm, 'mirror_voltages'): # (Realtime: the voltages come from the C++ engine)
+        self.actuator_plot.paintEvent_manual()
 
     # New method is to send the command somewhere else
     if False:
@@ -613,7 +1184,7 @@ class NextWaveMainWindow(QMainWindow):
  def get_paramX(self,name_parent,name,level=None):
     if level==None:
         level=self.params['children'] # start at top
-    print( level )
+    log.debug( level )
     for node in level:
         if node['name']==name_parent:
             return( self.get_param("",name,node["children"]) )
@@ -636,7 +1207,7 @@ class NextWaveMainWindow(QMainWindow):
      if name=="pupil_diam":
          try:
              val=float( self.line_pupil_diam.text() )
-             print("From UI: %s"%val)
+             log.debug("From UI: %s"%val)
              if val>0:
                  return val
          except:
@@ -653,9 +1224,30 @@ class NextWaveMainWindow(QMainWindow):
     else:
         self.params["children"][name_parent]["children"][name]["value"] = newval
 
+ def it_stop_changed(self):
+     self.engine.offline.it_stop_dirty=True
+
+ # User edits of the iteration sizes. Hand them to the algorithm (which never reads the widgets).
+ # textEdited (not textChanged): only fires for the user, not for our own setText below.
+ def it_start_edited(self, text):
+     self.set_offline_param('it_start', text)
+ def it_step_edited(self, text):
+     self.set_offline_param('it_step', text)
+ def it_stop_edited(self, text):
+     self.set_offline_param('it_stop', text)
+
+ def set_offline_param(self, name, text):
+     try:
+         setattr(self.engine.offline, name, float(text))
+     except ValueError:
+         pass # Perhaps in the midst of typing. Keep the last valid value
+ 
  def pupil_changed(self):
-   return # require init
-     #val=float( self.line_pupil_diam.text() )
+   try:
+       val=float( self.line_pupil_diam.text() )
+   except ValueError:
+       pass # Perhaps in the midst of changing it. Ignore until it's valid
+       
      #print("From UI: %s"%val)
      #self.engine.init_params() # will read from UI
      #self.engine.make_searchboxes(self.cx,self.cy)
@@ -675,10 +1267,49 @@ class NextWaveMainWindow(QMainWindow):
     except:
      return # cancel
 
-    clear_widget_list(self.layout_config)
+    self.show_xml_config(filename)
+
+ def show_xml_config(self, filename):
+    """ Read the XML file and show its parameters in the Config tab, replacing the ones shown """
+    self.xml_param_tree.setParent(None) # Remove the old tree from the tab
     self.reload_config(filename)
+    self.init_config_ui()
     self.edit_xml_filename.setText(filename)
 
+ def load_config_json(self):
+    """ File menu: use another config.json (instead of the one read at startup from the current directory) """
+    if self.batch or self.loading or self.worker.running:
+        QMessageBox.information(self, "Busy", "Wait for the current loading or processing to finish first.")
+        return
+    start = self.load_setting("ui/folder_config") or "."
+    filename, _ = QFileDialog.getOpenFileName(self, "Load config file", start, "Config files (*.json);;All files (*)")
+    if not filename:
+        return # cancel
+
+    old_json = self.json_data
+    old_filename = self.config_filename
+    try:
+        self.read_config_json(filename)
+        self.show_xml_config(self.json_data["params"]["xml_file"])
+    except Exception as e:
+        log.error("Couldn't load config %s: %s" % (filename, e))
+        QMessageBox.warning(self, "Load config", "Couldn't load %s:\n%s" % (filename, e))
+        self.json_data = old_json
+        self.config_filename = old_filename
+        self.pupil_diam = self.json_data["params"]["pupil_diam"]
+        return
+    self.save_setting("ui/folder_config", os.path.dirname(filename))
+
+    if self.json_data["params"]["offline_only"] != self.offline_only:
+        QMessageBox.information(self, "Load config", "offline_only differs in this config. That change takes effect only "
+                                "when NextWave is started with this config (as config.json in its directory).")
+
+    # The engine reads its optics from the XML params (see init_params): rebuild the search boxes at the config's center
+    self.engine.cx = self.json_data["params"]["cx"]
+    self.engine.cy = self.json_data["params"]["cy"]
+    self.line_pupil_diam.setText(str(self.get_param_xml("OPTICS_PupilDiameter")))
+    self.mode_init()
+    log.info("Loaded config %s (XML: %s)" % (filename, self.json_data["params"]["xml_file"]))
  def load_mirror_file(self):
     ffilt='Mirror file (*.mir);;'
     thedir = QFileDialog.getOpenFileNames(self, "Choose file", ".", ffilt );
@@ -720,7 +1351,7 @@ class NextWaveMainWindow(QMainWindow):
      self.xml_param_tree = ParameterTree()
      self.xml_param_tree.setParameters(self.xml_p, showTop=False)
 
-     pupil_diam =self.get_param_xml("OPTICS_PupilDiameter")
+     #pupil_diam =self.get_param_xml("OPTICS_PupilDiameter")
      #self.line_pupil_diam.setText(str(pupil_diam ) )
 
      #print (self.xml_params['OPTICS_PupilDiameter'])
@@ -739,19 +1370,31 @@ class NextWaveMainWindow(QMainWindow):
      #self.param_tree.setParameters(self.p, showTop=False)
 
  def offline_move(self,n,restore_mode=False):
-  self.offline_curr += n
-  if self.offline_curr < 0:
-   self.offline_curr = 0
-  if self.offline_curr >= self.offline_nframes:
-   self.offline_curr = self.offline_nframes-1
+  offline = self.engine.offline
+  if not n==0:
+      offline.center_dirty = False
 
-  #print("Offline move %d, curr=%d:"%(n,self.offline_curr) )
-  self.engine.offline_frame(self.offline_curr)
+  offline.offline_curr += n
+  if offline.offline_curr < 0:
+   offline.offline_curr = 0
+  if offline.offline_curr >= self.offline_nframes:
+   offline.offline_curr = self.offline_nframes-1
 
-  self.lbl_frame_curr.setText("%d/%d"%(self.offline_curr,self.offline_nframes) )
+  #print("Offline move %d, curr=%d:/%d"%(n,offline.offline_curr,self.offline_nframes) )
+  self.engine.offline_frame(offline.offline_curr)
+
+  self.lbl_frame_curr.setText("Frame %d/%d"%(offline.offline_curr+1,self.offline_nframes) )
+
+  self.frame_slider.blockSignals(True) # (It's what moved us if we were called by it)
+  self.frame_slider.setValue(offline.offline_curr+1)
+  self.frame_slider.blockSignals(False)
 
   if restore_mode:
    self.engine.offline.offline_navigate()
+
+ def offline_goto(self, frame_number):
+  """ Show the frame with this number, as displayed on screen (1..N), with its saved results if there are any. """
+  self.offline_move((int(frame_number) - 1) - self.engine.offline.offline_curr, True)
 
  def offline_goodbox(self):
   return
@@ -759,11 +1402,10 @@ class NextWaveMainWindow(QMainWindow):
 
  # PANELS/layouts, etc.
  def initUI(self):
-     _createUI(self)
-    
-    
+     _createUI(self) # (See nextwave_ui_create.py)
+
  def calibration_status(self,s):
-    print( s )
+    log.info( s )
     #  self.label_status0.setText(s)
     
  def do_calibration(self):
@@ -777,6 +1419,10 @@ class NextWaveMainWindow(QMainWindow):
     #msgBox.repaint()
     #msgBox.update()
     self.engine.do_calibration(self.calibration_status)
+
+ def boxsize_changed(self):
+    self.engine.init_params( {'box_size_pixel': self.widget_boxsize.value(), 'pupil_diam':None })
+    #self.engine.make_searchboxes() #cx,cy,pupil_radius_pixel=self.size/2.0*1000/self.ccd_pixel)
  
  def slider_metric_changed(self):
     val=self.slider_metric.value()/1000.0
@@ -805,7 +1451,8 @@ class NextWaveMainWindow(QMainWindow):
      self.threshold_val.setValue(scaled)
 
  def slider_exposure_changed(self):
-     scaled = 10**( float( self.slider_exposure.value())/100.0*np.log10(CAM_EXPO_MAX/CAM_EXPO_MIN)+np.log10(CAM_EXPO_MIN))
+     scaled = 10**( float( self.slider_exposure.value())/100.0
+        *np.log10(defaults.CAM_EXPO_MAX/defaults.CAM_EXPO_MIN)+np.log10(defaults.CAM_EXPO_MIN))
      self.exposure.setValue(scaled)
      msg=b"E=%f"%(scaled*1000)
      self.sockets.camera.send( msg ) # Convert to usec
@@ -870,7 +1517,7 @@ class NextWaveMainWindow(QMainWindow):
     self.static12=0
 
  def offline_algorithm(self):
-    self.mode_offline = self.chkOfflineAlgorithm.isChecked()
+  self.engine.mode_offline = self.chkOfflineAlgorithm.isChecked()
 
  def iterative_reset(self):
      self.engine.offline.offline_reset()
@@ -887,12 +1534,9 @@ class NextWaveMainWindow(QMainWindow):
  def toggle_record(self):
     self.engine.comm.do_record_toggle( self.chkRecord.isChecked() )
 
- def toggle_record(self):
-    self.engine.comm.do_record_toggle( self.chkRecord.isChecked() )
-
- def set_m(self, doit):
+ def set_move_amount(self, doit):
      if doit:
-         self.m = round( self.engine.box_size_pixel )
+         self.m = round( self.engine.lenslet_size_pixel )
      else:
          self.m=1
          
@@ -966,8 +1610,7 @@ class NextWaveMainWindow(QMainWindow):
         self.sockets.centroiding.send(b"t\x00")
 
  def move_center(self, dx, dy, m=1, do_update=True):
-     
-    if ( self.chkMoveTipTilt.isChecked() ):
+    if not self.offline_only and self.chkMoveTipTilt.isChecked(): # (Realtime) Move by tip/tilt, in the centroiding plugin
         if (dx<0):
             self.sockets.centroiding.send(b"x-0.01\x00");
         if (dx>0):
@@ -977,18 +1620,19 @@ class NextWaveMainWindow(QMainWindow):
         if (dy>0):
             self.sockets.centroiding.send(b"y+0.01\x00");
         return;
-            
+
+    self.engine.offline.center_dirty = True
     m = self.m
-    self.cx += (dx * m)
-    self.cy += (dy * m)
+    self.engine.cx += (dx * m)
+    self.engine.cy += (dy * m)
     if do_update:
         self.engine.move_searchboxes(dx*m, dy*m)
 
  def move_center_abs(self,x,y):
-    self.cx = x
-    self.cy = y
+    self.engine.cx = x
+    self.engine.cy = y
 
- def button_clicked(self, event):
+ def spot_window_clicked(self, event):
     # Get the geometry of the spot window
     geometry = self.pixmap_label.geometry()
 
@@ -1001,11 +1645,10 @@ class NextWaveMainWindow(QMainWindow):
     # print("clicked:", event.pos() )
     x_scaled = event.pos().x() / width * self.image_pixels.shape[1]
     y_scaled = event.pos().y() / height * self.image_pixels.shape[0]
-    print("scaled: x,y ", x_scaled, y_scaled, self.image_pixels.shape)
+    # print("scaled: x,y ", x_scaled, y_scaled)
 
-
-    if QApplication.keyboardModifiers() & Qt.ControlModifier:
-        # Ctrl key is currently pressed
+    if QApplication.keyboardModifiers() & Qt.ControlModifier and not self.offline_only:
+        # Ctrl key is currently pressed: (realtime) tell the centroiding plugin
         self.sockets.centroiding.send(b"E%04d\n%04d"%(x_scaled,y_scaled) )
         return
 
@@ -1025,9 +1668,9 @@ class NextWaveMainWindow(QMainWindow):
             self.box_info=which_box[0]
             self.box_info_loc = (event.pos().x(), event.pos().y() )
     elif which_box.size>1:
-        print( "Too many matches" )
+        log.debug( "Too many matches" )
     else :
-        print( "No matches")
+        log.debug( "No matches")
         self.box_info = -1
 
     return 
@@ -1040,6 +1683,8 @@ class NextWaveMainWindow(QMainWindow):
     update_search_boxes=False
     if event.key()==ord('A'):
         self.draw_arrows = not( self.draw_arrows )
+    if event.key()==ord('Z'):
+        self.draw_zonal_arrows = not( self.draw_zonal_arrows )
     elif event.key()==ord('R'):
         self.draw_refs = not( self.draw_refs )
     elif event.key()==ord('B'):
@@ -1049,6 +1694,8 @@ class NextWaveMainWindow(QMainWindow):
         self.draw_predicted = not( self.draw_predicted )
     elif event.key()==ord('C'):
         self.draw_centroids = not( self.draw_centroids )
+    elif event.key()==ord('N'):
+        self.normalize_contrast = not( self.normalize_contrast)
     elif event.key()==ord('X'):
         self.draw_crosshair = not( self.draw_crosshair )
     elif event.key()==ord('P'):
@@ -1072,10 +1719,10 @@ class NextWaveMainWindow(QMainWindow):
     elif event.key()==Qt.Key_Right:
         self.move_center( 1,0,self.key_control)
     elif event.key()==Qt.Key_Up:
-        self.cy -= 1 + 10 * self.key_control
+        self.engine.cy -= 1 + 10 * self.key_control
         update_search_boxes=True
     elif event.key()==Qt.Key_Down:
-        self.cy += 1 + 10 * self.key_control
+        self.engine.cy += 1 + 10 * self.key_control
         update_search_boxes=True
         
     elif event.key()==Qt.Key_7:
@@ -1086,18 +1733,20 @@ class NextWaveMainWindow(QMainWindow):
         self.engine.mode_snap()
         
     else:
-        print( "Uknown Key:", event.key() )
+        log.debug( "Uknown Key:", event.key() )
 
     if update_search_boxes:
-        self.engine.make_searchboxes(self.cx,self.cy)
+        self.engine.make_searchboxes(self.engine.cx,self.engine.cy)
 
         #if event.key() == QtCore.Qt.Key_Q:
         #elif event.key() == QtCore.Qt.Key_Enter:
 
  def mode_init(self):
+    # TODO: USe mag.. TODO: Should this be in the UI?!?!
     pupil_diam = float(self.line_pupil_diam.text() )
     self.engine.init_params( {'pupil_diam': pupil_diam})
     self.engine.make_searchboxes() #cx,cy,pupil_radius_pixel=self.size/2.0*1000/self.ccd_pixel)
+    self.widget_boxsize.setValue(self.engine.box_size_pixel)
 
     ##if self.sockets is None:
         #self.sockets = NextwaveSocketComm(self)
@@ -1127,7 +1776,13 @@ class NextWaveMainWindow(QMainWindow):
       self.engine.export_centroids(filename)
 
  def export_all(self):
-    self.engine.offline.export_all_zernikes()
+    dir1 = QFileDialog.getExistingDirectory(self, str("Open Directory"),
+       self.load_setting("ui/folder_save","."),
+       QFileDialog.ShowDirsOnly
+       | QFileDialog.DontResolveSymlinks)
+
+    self.save_setting("ui/folder_save",dir1)
+    self.engine.offline.export_all_zernikes(dir1)
 
  def close(self):
     if not( self.midi1 is None):
@@ -1142,7 +1797,7 @@ class NextWaveMainWindow(QMainWindow):
  def initEngine(self):
     self.engine.init()
     if not self.offline_only:
-       self.engine.make_searchboxes(self.cx,self.cy)
+       self.engine.make_searchboxes(self.engine.cx,self.engine.cy)
        self.sockets = NextwaveSocketComm(self)
        self.engine.mode_init() # Needed to let the C engine run
 
@@ -1152,6 +1807,9 @@ class NextWaveMainWindow(QMainWindow):
     #self.sockets.init() #Later
 
 
+ def show_about(self):
+    QMessageBox.about(self, "About NextWave", build_message )
+            
  """def offline_image_click(*arg, **kwargs):
    ui=arg[0]
    #print("Bar", arg, kwargs)
@@ -1163,32 +1821,17 @@ class NextWaveMainWindow(QMainWindow):
 
  def add_offline(self,buf_movie):
   self.offline_nframes = buf_movie.shape[0]
-  self.offline_labels = [QLabel("Frame %02d"%n) for n in range(buf_movie.shape[0])]
-  self.offline_checks = [QCheckBox() for n in range(buf_movie.shape[0])]
 
-  # Clear current list (better in UI?)
-  clear_widget_list(self.layout_off)
+  # Replaces the whole list. (Thumbnails are made later, as rows are shown, so this is quick.)
+  self.engine.offline.signals.report("Building the frame list")
+  self.frame_model.set_movie(buf_movie)
+  self.frame_gallery.setIconSize(QtCore.QSize(*self.frame_model.thumb_size))
+  self.frame_gallery.scrollToTop()
+  self.frame_slider.set_frames(self.offline_nframes)
+  self.frame_slider.set_flash_frames(self.engine.offline.flash_frames) # (Found while loading; empty if detection is off)
 
-  for nf,frame in enumerate(buf_movie):
-                pixmap_l = QLabel()
-                #f1=np.array( np.log10(frame)/np.log10(255) * 255, dtype='uint8' )
-                f1=frame
-                qimage = QImage( f1, frame.shape[1], frame.shape[0], QImage.Format_Grayscale8)
-                pixmap = QPixmap(qimage)
-                pixmap = pixmap.scaled(200,200 , Qt.KeepAspectRatio) # TODO: Get size of widget
-                pixmap_l.setPixmap(pixmap)
-
-                if nf%4==0:
-                 self.offline_checks[nf].setChecked(True)
-
-                self.layout_off.addWidget(self.offline_labels[nf], nf, 0)
-                self.layout_off.addWidget(self.offline_checks[nf], nf, 1)
-                self.layout_off.addWidget(pixmap_l, nf, 2)
-
-                #pixmap_l.mousePressEvent = self.offline_image_click 
-
-  self.offline_curr=0
-  self.engine.offline_frame(self.offline_curr)
+  self.engine.offline.offline_curr=0
+  self.engine.offline_frame(self.engine.offline.offline_curr)
 
 # rpyc servic definition
 # Doesn't let you access member variables, so seems kind of pointless
@@ -1208,19 +1851,21 @@ def start_backdoor(win):
     t.start()
 
 def main():
-  num = joystickapi.joyGetNumDevs()
-  ret, caps, startinfo = False, None, None
-  for idj in range(num*0):
-    ret, caps = joystickapi.joyGetDevCaps(id)
-    if ret:
-        print("gamepad detected: " + caps.szPname)
-        print("ID: " + idj)
-        ret, startinfo = joystickapi.joyGetPosEx(id)
-        break
-    else:
-      print("no gamepad detected")
-      
-     
+  nextwave_log.setup()
+  log.info('NextWave started. ' + build_message.replace('\n', ' | '))
+  if joystickapi is not None:
+    num = joystickapi.joyGetNumDevs()
+    ret, caps, startinfo = False, None, None
+    for idj in range(num*0):
+      ret, caps = joystickapi.joyGetDevCaps(id)
+      if ret:
+          print("gamepad detected: " + caps.szPname)
+          print("ID: " + idj)
+          ret, startinfo = joystickapi.joyGetPosEx(id)
+          break
+      else:
+        print("no gamepad detected")
+
   app = QApplication(sys.argv)
   win = NextWaveMainWindow()
   win.app = app
@@ -1236,14 +1881,15 @@ def main():
   if not win.offline_only:
       win.sockets.init()
         
-  # Set defaults: TODO: pull from XML
-  win.slider_defocus.setValue(1000)
-  win.slider_aogain.setValue(50)
-  win.slider_dmfill.setValue(1000)
-  
-  expo=win.get_param_xml("CAMERA1_CameraExposure") 
-  sliderval = int( (np.log10(expo) - np.log10(CAM_EXPO_MIN) ) / (np.log10(CAM_EXPO_MAX) - np.log10(CAM_EXPO_MIN) )  * 100 )
-  win.slider_exposure.setValue(sliderval)
+  if not win.offline_only: # (Realtime: these talk to the C++ engine and the camera)
+    # Set defaults: TODO: pull from XML
+    win.slider_defocus.setValue(1000)
+    win.slider_aogain.setValue(50)
+    win.slider_dmfill.setValue(1000)
+
+    expo=win.get_param_xml("CAMERA1_CameraExposure")
+    sliderval = int( (np.log10(expo) - np.log10(CAM_EXPO_MIN) ) / (np.log10(CAM_EXPO_MAX) - np.log10(CAM_EXPO_MIN) )  * 100 )
+    win.slider_exposure.setValue(sliderval)
 #  print( expo, sliderval )
   
   win.signal_static_set.connect(win.set_static)
@@ -1252,8 +1898,25 @@ def main():
   win.signal_command_record.connect(win.do_command_record)
   start_backdoor(win)
 
+  import traceback
+
+  def my_exception_hook(exctype, value, tb):
+    # Print the exception and traceback
+    log.error("Uncaught exception:\n" + "".join(traceback.format_exception(exctype, value, tb)).rstrip())
+    sys._excepthook(exctype, value, tb)
+    sys.exit(1)
+
+  # Back up the default exception hook and replace it
+  sys._excepthook = sys.excepthook
+  sys.excepthook = my_exception_hook
+  
+  import faulthandler
+  faulthandler.enable()
+
   sys.exit(app.exec_())
 
 
 if __name__=="__main__":
+  import multiprocessing
+  multiprocessing.freeze_support() # Needed for the frozen .exe: the parallel offline workers are spawned copies of it
   main()

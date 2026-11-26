@@ -1,8 +1,12 @@
+import nextwave_log
+import defaults
+from nextwave_log import log
 from PyQt5.QtWidgets import (QMainWindow, QLabel, QSizePolicy, QApplication, QPushButton,
                              QHBoxLayout, QVBoxLayout, QGridLayout, QScrollArea,
                              QWidget, QGroupBox, QTabWidget, QTextEdit, QSpinBox, QDoubleSpinBox, QSlider,
-                             QFileDialog, QCheckBox, QDialog, QFormLayout, QDialogButtonBox, QLineEdit)
-from PyQt5.QtGui import QPixmap, QImage, QPainter, QPen, QFont
+                             QFileDialog, QCheckBox, QDialog, QFormLayout, QDialogButtonBox, QLineEdit,
+                             QToolTip, QPlainTextEdit, QComboBox)
+from PyQt5.QtGui import QPixmap, QImage, QPainter, QPen, QFont, QColor, QBrush, QPolygonF, QPalette
 from PyQt5.QtCore import Qt, QTimer, QEvent, QLineF, QPointF, pyqtSignal 
 import PyQt5.QtGui as QtGui
 import PyQt5.QtCore as QtCore
@@ -19,6 +23,7 @@ import numpy as np
 import sys
 import os
 import json
+from collections import OrderedDict
 
 import matplotlib.cm as cmap
 
@@ -31,13 +36,255 @@ import xml.etree.ElementTree as ET
 
 NUM_ZERN_DIALOG=20 # TODO
 
+class FrameGalleryModel(QtCore.QAbstractListModel):
+    """ The frames of an offline movie, as a gallery of small thumbnails, each captioned with its frame number (1..N, as
+        shown on screen). A movie can have thousands of frames, so this is a virtual list: the view only asks for the ones it
+        is showing, and a thumbnail is made when it is first shown (the most recent ones are kept).
+        Thumbnails keep the brightest pixel of each block of the frame, not an average or a sample: the frames are mostly black
+        with small bright spots, which a plain shrink would lose. """
+    THUMB_SIZE = 100 # Longest side of a thumbnail, pixels
+    MAX_CACHED = 1500
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.movie = None
+        self.thumbs = OrderedDict() # row -> QPixmap, least recently used first
+        self.shrink = 1 # Each thumbnail pixel is the brightest of shrink x shrink frame pixels
+        self.thumb_size = (self.THUMB_SIZE, self.THUMB_SIZE) # (width, height) of a thumbnail
+
+    def set_movie(self, movie):
+        """ movie: (frames, height, width) uint8 array. Not copied, so don't change it under us. """
+        self.beginResetModel()
+        self.movie = movie
+        self.thumbs.clear()
+        height, width = movie.shape[1], movie.shape[2]
+        self.shrink = max(1, -(-max(height, width) // self.THUMB_SIZE)) # (Rounded up, so it fits in THUMB_SIZE)
+        self.thumb_size = (width // self.shrink, height // self.shrink)
+        self.endResetModel()
+
+    def rowCount(self, parent=QtCore.QModelIndex()):
+        return 0 if (self.movie is None or parent.isValid()) else self.movie.shape[0]
+
+    def flags(self, index):
+        return Qt.ItemIsEnabled
+
+    def data(self, index, role=Qt.DisplayRole):
+        if role == Qt.DecorationRole:
+            return self.thumbnail(index.row())
+        if role == Qt.DisplayRole:
+            return str(index.row() + 1)
+        if role == Qt.TextAlignmentRole:
+            return int(Qt.AlignHCenter | Qt.AlignVCenter)
+        return None
+
+    def thumbnail(self, row):
+        pixmap = self.thumbs.get(row)
+        if pixmap is None:
+            frame, k = np.asarray(self.movie[row]), self.shrink
+            h, w = frame.shape[0] // k * k, frame.shape[1] // k * k
+            small = np.ascontiguousarray(frame[:h, :w].reshape(h // k, k, w // k, k).max(axis=(1, 3)))
+            qimage = QImage(small.data, small.shape[1], small.shape[0], small.shape[1], QImage.Format_Grayscale8)
+            pixmap = QPixmap(qimage) # (Copies the data, so `small` can go)
+            self.thumbs[row] = pixmap
+            if len(self.thumbs) > self.MAX_CACHED:
+                self.thumbs.popitem(last=False)
+        else:
+            self.thumbs.move_to_end(row)
+        return pixmap
+
+class FrameSlider(QSlider):
+    """ Horizontal slider for choosing a frame. Its values are the frame numbers as shown on screen (1..N).
+        It draws everything itself (track, handle, ticks, markers), at fixed positions, and handles the mouse itself, so that
+        it looks and works the same in every Qt style. (The styles disagree about where a slider's groove is: in the Windows
+        ones it fills the whole height of the widget, which left no room for markers or ticks.)
+        Top to bottom: the flash markers (a triangle pointing down at each flash, set_flash_frames, with a tooltip saying
+        which frames), the track with its handle, then the ticks.
+        Ticks are drawn at the finest spacing that stays legible: every frame if there's room for them (at least MIN_TICK_PX
+        apart), otherwise every 2, 5, 10, 20, 50, ... frames, at multiples of that number, with a taller tick at every 10th of
+        them and at the first and last frame. Clicking anywhere on the track jumps straight there, and it can then be dragged
+        (the arrow keys step 1 frame, Page Up/Down step 10). """
+    MIN_TICK_PX = 4
+    TICK_MINOR, TICK_MAJOR = 2, 5 # Pixels
+    MARK_HEIGHT, MARK_HALF_WIDTH = 8, 4 # Pixels: the triangle that marks a flash
+    MARK_COLOR = QColor(230, 90, 20)
+    MARGIN = 4 # Pixels, either side of the handle at its extremes
+    HANDLE_W, HANDLE_H = 11, 18
+    Y_TIP = MARK_HEIGHT + 1 # The markers' tips
+    Y_HANDLE = Y_TIP + 2 # Top of the handle
+    Y_TICKS = Y_HANDLE + HANDLE_H + 3 # Top of the ticks
+    HEIGHT = Y_TICKS + TICK_MAJOR + 3
+
+    def __init__(self, parent=None):
+        super().__init__(Qt.Horizontal, parent)
+        self.setTickPosition(QSlider.NoTicks)
+        self.setMinimumHeight(self.HEIGHT)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.setToolTip("Frame number. Click or drag; arrow keys step 1 frame, Page Up/Down 10")
+        self._flashes = [] # (first, last) slider values of each flash
+        self.set_frames(0)
+
+    def sizeHint(self):
+        return QtCore.QSize(200, self.HEIGHT)
+
+    def minimumSizeHint(self):
+        return QtCore.QSize(60, self.HEIGHT)
+
+    def set_frames(self, n_frames):
+        """ Set up for a movie of n_frames frames (0: no movie) """
+        self.blockSignals(True)
+        self.setRange(1, max(1, n_frames))
+        self.setValue(1)
+        self.setSingleStep(1)
+        self.setPageStep(10)
+        self.blockSignals(False)
+        self.setEnabled(n_frames > 1)
+        self.set_flash_frames([]) # (Also updates)
+
+    def set_flash_frames(self, frames):
+        """ Mark where the flashes are. frames: 0-based numbers of the flash frames; those within 2 frames of each other are one
+            flash. (Slider values, and the numbers in the tooltip, are 1-based like the frame numbers on screen.) """
+        events = []
+        for f in sorted(int(n) + 1 for n in frames):
+            if events and f - events[-1][1] <= 2:
+                events[-1][1] = f
+            else:
+                events.append([f, f])
+        self._flashes = [(a, b) for a, b in events]
+        self.update()
+
+    def flash_events(self):
+        """ [(first, last)] slider values of each flash """
+        return list(self._flashes)
+
+    # --- where things are on screen
+    def _x_range(self):
+        """ (x of the handle's center at the minimum, at the maximum) """
+        return self.MARGIN + self.HANDLE_W / 2.0, self.width() - self.MARGIN - self.HANDLE_W / 2.0
+
+    def x_of(self, value):
+        """ x (pixels) of the center of the handle when the slider has this value """
+        left, right = self._x_range()
+        n = self.maximum() - self.minimum()
+        return left if n <= 0 else left + (right - left) * (value - self.minimum()) / float(n)
+
+    def value_at(self, x):
+        """ The value whose handle is centered nearest x """
+        left, right = self._x_range()
+        n = self.maximum() - self.minimum()
+        if right <= left or n <= 0:
+            return self.minimum()
+        return int(min(self.maximum(), max(self.minimum(), self.minimum() + round((x - left) / (right - left) * n))))
+
+    def tick_step(self):
+        """ Frames between ticks: the smallest of 1, 2, 5, 10, 20, 50, ... that keeps them MIN_TICK_PX apart """
+        n = self.maximum() - self.minimum()
+        if n <= 0:
+            return 1
+        left, right = self._x_range()
+        px_per_frame = max(1.0, right - left) / float(n)
+        step = 1
+        while step * px_per_frame < self.MIN_TICK_PX and step < n:
+            step *= 2 if str(step)[0] in "15" else 2.5   # 1 -> 2 -> 5 -> 10 -> 20 -> 50 ...
+            step = int(round(step))
+        return step
+
+    def tick_values(self):
+        """ (frame number, is it a major tick) for every tick """
+        lo, hi, step = self.minimum(), self.maximum(), self.tick_step()
+        ticks = {lo: True, hi: True} # The first and last frame always
+        x_lo, x_hi = self.x_of(lo), self.x_of(hi)
+        first = ((lo + step - 1) // step) * step # Multiples of the step
+        for v in range(first, hi + 1, step):
+            x = self.x_of(v)
+            if v in ticks or abs(x - x_lo) < self.MIN_TICK_PX or abs(x - x_hi) < self.MIN_TICK_PX:
+                continue # (Not one squeezed up against an end tick)
+            ticks[v] = (v % (10 * step) == 0)
+        return sorted(ticks.items())
+
+    # --- drawing
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        group = QPalette.Active if self.isEnabled() else QPalette.Disabled
+        color = lambda role: self.palette().color(group, role)
+        y_c = self.Y_HANDLE + self.HANDLE_H / 2.0
+        x_handle = self.x_of(self.value())
+
+        # The track, filled up to the handle
+        left, right = self._x_range()
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QBrush(color(QPalette.Mid)))
+        painter.drawRoundedRect(QtCore.QRectF(left, y_c - 2, right - left, 4), 2, 2)
+        if self.maximum() > self.minimum():
+            painter.setBrush(QBrush(color(QPalette.Highlight)))
+            painter.drawRoundedRect(QtCore.QRectF(left, y_c - 2, x_handle - left, 4), 2, 2)
+
+        # The handle
+        border = color(QPalette.Highlight) if self.hasFocus() else color(QPalette.Dark)
+        painter.setPen(QPen(border, 2 if self.hasFocus() else 1))
+        painter.setBrush(QBrush(color(QPalette.Midlight) if self.isSliderDown() else color(QPalette.Button)))
+        painter.drawRoundedRect(QtCore.QRectF(x_handle - self.HANDLE_W / 2.0 + 0.5, self.Y_HANDLE + 0.5, self.HANDLE_W - 1, self.HANDLE_H - 1), 3, 3)
+
+        # The ticks
+        if self.maximum() > self.minimum():
+            tick_color = color(QPalette.WindowText)
+            tick_color.setAlpha(170)
+            painter.setPen(QPen(tick_color, 1))
+            for value, major in self.tick_values():
+                x = int(round(self.x_of(value)))
+                painter.drawLine(x, self.Y_TICKS, x, self.Y_TICKS + (self.TICK_MAJOR if major else self.TICK_MINOR))
+
+        # The flashes: a triangle pointing down at each
+        mark = QColor(self.MARK_COLOR)
+        mark.setAlpha(255 if self.isEnabled() else 110)
+        painter.setPen(QPen(mark, 1))
+        painter.setBrush(QBrush(mark))
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        for first, last in self._flashes:
+            x = (self.x_of(first) + self.x_of(last)) / 2.0
+            half = max(self.MARK_HALF_WIDTH, (self.x_of(last) - self.x_of(first)) / 2.0 + 1)
+            painter.drawPolygon(QPolygonF([QPointF(x - half, self.Y_TIP - self.MARK_HEIGHT), QPointF(x + half, self.Y_TIP - self.MARK_HEIGHT), QPointF(x, self.Y_TIP)]))
+        painter.end()
+
+    def event(self, e):
+        if e.type() == QEvent.ToolTip and self._flashes: # Hovering over a flash marker says which frames it is
+            for k, (first, last) in enumerate(self._flashes, 1):
+                x0, x1 = self.x_of(first), self.x_of(last)
+                if x0 - self.MARK_HALF_WIDTH <= e.pos().x() <= x1 + self.MARK_HALF_WIDTH and e.pos().y() <= self.Y_HANDLE:
+                    QToolTip.showText(e.globalPos(), "Flash %d: %s" % (k, "frame %d" % first if first == last else "frames %d-%d" % (first, last)), self)
+                    return True
+        return super().event(e)
+
+    # --- the mouse: click anywhere to jump there, and drag
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton and self.isEnabled():
+            self.setSliderDown(True)
+            self.setValue(self.value_at(event.pos().x()))
+            event.accept()
+        else:
+            super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self.isSliderDown():
+            self.setValue(self.value_at(event.pos().x()))
+            event.accept()
+        else:
+            super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.LeftButton and self.isSliderDown():
+            self.setSliderDown(False)
+            event.accept()
+        else:
+            super().mouseReleaseEvent(event)
+
 class ZernikeDialog(QDialog):
     def createFormGroupBox(self,titl):
         formGroupBox = QGroupBox(titl)
         #layout = QFormLayout()
         layout = QGridLayout()
-        self.lines = [QLineEdit() for n in np.arange(NUM_ZERN_DIALOG)]
-        self.chks = [QCheckBox() for n in np.arange(NUM_ZERN_DIALOG)]
+        num_zs = np.min( (NUM_ZERN_DIALOG,len(self.ui_parent.engine.zernikes) ) )
+        self.lines = [QLineEdit() for n in np.arange(num_zs)]
+        self.chks = [QCheckBox() for n in np.arange(num_zs)]
         self.chk0 = QCheckBox()
         self.chk0.stateChanged.connect(self.chk0_changed)
         self.chk0.setChecked(True)
@@ -76,7 +323,7 @@ class ZernikeDialog(QDialog):
             le.setText("")
 
     def chk0_changed(self):
-        print(self.ui_parent.engine.zernikes[4] )
+        log.debug(self.ui_parent.engine.zernikes[4] )
 
     def mycall(self):
         zs = [str( l1.text()) for l1 in self.lines]
@@ -103,6 +350,71 @@ class ZernikeDialog(QDialog):
         self.setLayout(mainLayout)
 
         # ZOOM box
+
+def draw_profiles(painter, image, x, y, zoom=1.0, full=150, shown=1.0, label_px=32, color=Qt.red):
+    """ Profiles of image's pixel values through pixel (x,y): the row drawn upward from row y, the column drawn rightward
+    from column x, each where the brightest value would go off the image the other way. With scales of the values on the
+    top and left edges. The painter draws the image zoom times its size; full: the drawn height (painter pixels) of the
+    image's brightest value. shown: screen pixels per painter pixel (if the result is resized for display), so that the
+    labels are label_px tall on the screen. color: of the lines and labels """
+    height, width = image.shape[:2]
+    if not (0 <= x < width and 0 <= y < height):
+        return
+    w, h = width * zoom, height * zoom
+    px, py = (x + 0.5) * zoom, (y + 0.5) * zoom # The pixel's center
+    vmax = max(float(image.max()), 1.0)
+    scale = full / vmax
+    dir_x = 1 if px + full < w else -1 # Column profile: right, else left
+    dir_y = -1 if py - full >= 0 else 1 # Row profile: up, else down
+    row = image[y, :].astype(float) * scale
+    col = image[:, x].astype(float) * scale
+
+    faint = QColor(color); faint.setAlpha(90)
+    painter.setPen(QPen(faint, 1.0, Qt.DashLine)) # The baselines: row y and column x
+    painter.drawLines([QLineF(0, py, w, py), QLineF(px, 0, px, h)])
+
+    painter.setPen(QPen(color, getattr(defaults, 'ui_cross_section_width', 1.5)))
+    painter.drawPolyline(QPolygonF([QPointF((i + 0.5) * zoom, py + dir_y * row[i]) for i in range(width)]))
+    painter.drawPolyline(QPolygonF([QPointF(px + dir_x * col[j], (j + 0.5) * zoom) for j in range(height)]))
+
+    # Scales (pixel values): along the top for the column profile, down the left side for the row profile
+    font = QFont(painter.font())
+    font.setPixelSize(max(int(label_px / shown), 1))
+    painter.setFont(font)
+    tick = 8 / shown
+    # A round step (1, 2 or 5 x 10^n) giving at most 5 ticks above 0, and far enough apart that the labels don't overlap
+    metrics = QtGui.QFontMetricsF(font)
+    min_gap = max(metrics.width('%g' % vmax), metrics.height()) + 4 / shown
+    step = 10 ** np.floor(np.log10(vmax / 4))
+    mults = (1, 2, 5)
+    n = 0
+    while vmax / step > 5 or step * scale < min_gap:
+        step = step / mults[n % 3] * mults[(n + 1) % 3] * (10 if n % 3 == 2 else 1)
+        n += 1
+    for v in np.arange(0, vmax + step / 2, step):
+        label = '%g' % v
+        tx = px + dir_x * v * scale
+        if 0 <= tx < w:
+            painter.drawLine(QLineF(tx, 0, tx, tick))
+            painter.drawText(QPointF(tx + 2 / shown, tick + font.pixelSize()), label)
+        ty = py + dir_y * v * scale
+        if 0 <= ty < h:
+            painter.drawLine(QLineF(0, ty, tick, ty))
+            painter.drawText(QPointF(tick + 2 / shown, ty + font.pixelSize() / 2.5), label)
+
+ZOOM_SIZE = 200 # The zoom popup's image (screen pixels)
+ZOOM_COLORMAP = 'Spectral_r' # The zoom popup's "Colormap": blue (low) through yellow to red (high). ('Spectral' is the other way round)
+ZOOM_COLORBAR_WIDTH = 60
+
+def nice_step(span, max_ticks=5):
+    """ A round step (1, 2 or 5 x 10^n) giving at most max_ticks ticks across span """
+    span = max(float(span), 1e-9)
+    step = 10 ** np.floor(np.log10(span / max_ticks))
+    for mult in (1, 2, 5, 10):
+        if span / (step * mult) <= max_ticks:
+            return step * mult
+    return step * 10
+
 class BoxInfoDialog(QDialog):
     def __init__(self,titl,ui_parent):
         super().__init__(ui_parent)
@@ -121,33 +433,77 @@ class BoxInfoDialog(QDialog):
         image_label = QLabel()
         image_label.setAlignment(Qt.AlignCenter)
         self.image_label=image_label
-        layout.addWidget(self.image_label)
+        self.colorbar_label = QLabel() # Intensity scale for "Colormap"
+        self.colorbar_label.setFixedWidth(ZOOM_COLORBAR_WIDTH)
+        self.colorbar_label.hide()
+        layout_image = QHBoxLayout()
+        layout_image.addWidget(self.image_label)
+        layout_image.addWidget(self.colorbar_label)
+        layout.addLayout(layout_image)
+        self.chk_profile = QCheckBox("Show profile")
+        layout.addWidget(self.chk_profile)
+        self.chk_colormap = QCheckBox("Colormap (box's min to max)")
+        self.chk_colormap.toggled.connect(self.colorbar_label.setVisible)
+        layout.addWidget(self.chk_colormap)
         self.setLayout(layout)
+
+        import matplotlib
+        self.colormap_lut = (matplotlib.colormaps[ZOOM_COLORMAP](np.linspace(0, 1, 256))[:, :3] * 255).astype(np.uint8)
+
+        # The profile goes through the pixel under the cursor (else through the centroid)
+        self.cursor_pixel = None
+        image_label.setMouseTracking(True)
+        image_label.mouseMoveEvent = self.image_mouse_moved
+        image_label.leaveEvent = self.image_mouse_left
+
+    def image_mouse_moved(self, event):
+        pixmap = self.image_label.pixmap()
+        if pixmap is None or pixmap.isNull() or getattr(self, 'box_pix', None) is None:
+            self.cursor_pixel = None
+            return
+        off_x = (self.image_label.width() - pixmap.width()) / 2.0 # (The image is centered in the label)
+        off_y = (self.image_label.height() - pixmap.height()) / 2.0
+        height, width = self.box_pix.shape[:2]
+        x = int((event.pos().x() - off_x) * width / pixmap.width())
+        y = int((event.pos().y() - off_y) * height / pixmap.height())
+        self.cursor_pixel = (x, y) if (0 <= x < width and 0 <= y < height) else None
+
+    def image_mouse_left(self, event):
+        self.cursor_pixel = None
 
     def set_box(self,n,box_pix, cent_x, cent_y, centroid_x_abs,centroid_y_abs, box_x,box_y):
         line1="n=%d"%n
         try:
-            line1 += "(%f)"%self.ui_parent.engine.box_metrics[n]
+            line1 += "(%f)"%self.ui_parent.engine.offline.box_metrics[n]
         except:
-            pass
+            line1 += "(NONE)"
+        line1 += "(%dx%d)" % (self.ui_parent.engine.box_size_pixel,
+            self.ui_parent.engine.box_size_pixel)
         try:
-            
             line1 += "(V=%f) (M=%f)"%(
                 self.ui_parent.engine.centroid_valid[n],self.ui_parent.engine.centroid_metric[n] )
         except:
             pass
+
         self.text_num.setText(line1)
         self.text_box.setText("box center=(%0.3f,%0.3f)"%(box_x,box_y))
-        self.text_centroid.setText("centroid=(%0.3f,%0.3f)\n{%+0.3f,%+0.3f}\ndx,dy={%+0.3f,%+0.3f}dif={%+0.3f,%+0.3f}"%(
-            centroid_x_abs,centroid_y_abs,
-            centroid_x_abs - self.engine.ref_x[n], centroid_y_abs - self.engine.ref_y[n],
-            self.engine.centroids_delta_x[n], self.engine.centroids_delta_y[n],
-            centroid_x_abs - self.engine.ref_x[n]-self.engine.centroids_delta_x[n],
-            centroid_y_abs - self.engine.ref_y[n]-self.engine.centroids_delta_y[n]
-            ))
+        if hasattr(self.engine, 'centroids_delta_x'): # (Realtime: the deltas come from the C++ engine)
+            self.text_centroid.setText("centroid=(%0.3f,%0.3f)\n{%+0.3f,%+0.3f}\ndx,dy={%+0.3f,%+0.3f}dif={%+0.3f,%+0.3f}"%(
+                centroid_x_abs,centroid_y_abs,
+                centroid_x_abs - self.engine.ref_x[n], centroid_y_abs - self.engine.ref_y[n],
+                self.engine.centroids_delta_x[n], self.engine.centroids_delta_y[n],
+                centroid_x_abs - self.engine.ref_x[n]-self.engine.centroids_delta_x[n],
+                centroid_y_abs - self.engine.ref_y[n]-self.engine.centroids_delta_y[n]
+                ))
+        else:
+            self.text_centroid.setText("centroid=(%0.3f,%0.3f)\n{%+0.3f,%+0.3f}"%(
+                centroid_x_abs,centroid_y_abs,
+                centroid_x_abs - self.engine.ref_x[n], centroid_y_abs - self.engine.ref_y[n]))
         self.box_pix=box_pix
         self.cent_x=cent_x
         self.cent_y=cent_y
+        self.box_x=box_x
+        self.box_y=box_y
         self.nbox = n
 
     def update_ui(self):
@@ -157,37 +513,99 @@ class BoxInfoDialog(QDialog):
         width=bits.shape[1]
         height=bits.shape[0]
         bytesPerLine = int(totalBytes/height)
-        qimage = QImage(bits,width,height,bytesPerLine,QImage.Format_Indexed8)
+        use_colormap = self.chk_colormap.isChecked() and bits.size > 0
+        if use_colormap:
+            # The box's own range, so that every level in it is seen
+            vmin, vmax = float(bits.min()), float(bits.max())
+            idx = np.clip((bits.astype(float) - vmin) / max(vmax - vmin, 1e-9) * 255, 0, 255).astype(np.uint8)
+            rgb = np.ascontiguousarray(self.colormap_lut[idx])
+            qimage = QImage(rgb.data, width, height, 3*width, QImage.Format_RGB888)
+        else:
+            qimage = QImage(bits,width,height,bytesPerLine,QImage.Format_Indexed8)
 
-        pixmap = QPixmap(qimage)
+        pixmap = QPixmap(qimage) # (A copy: rgb can go)
 
-        painter = QPainter()
-        painter.begin(pixmap)
+        overlay = Qt.black if use_colormap else Qt.red # (The colormap has red in it)
+        pixmap = pixmap.scaled(ZOOM_SIZE,ZOOM_SIZE,Qt.KeepAspectRatio)
+        zoom = pixmap.width() / width
+        if self.chk_profile.isChecked() and min(bits.shape[:2]) > 0:
+            # Drawn on the enlarged image, so the lines and numbers are sharp
+            if self.cursor_pixel is not None:
+                xy = self.cursor_pixel
+            elif np.isfinite(self.cent_x) and np.isfinite(self.cent_y):
+                xy = (int(round(self.cent_x)), int(round(self.cent_y))) # The pixel the centroid is in
+            else:
+                xy = None # (No centroid: a profile only under the cursor)
+            if xy is not None:
+                painter = QPainter(pixmap)
+                draw_profiles(painter, bits, *xy, zoom=zoom, full=0.4 * ZOOM_SIZE, label_px=13, color=overlay)
+                painter.end()
 
-        pen = QPen(Qt.red, 1.0)
-        painter.setPen(pen)
-        points=[QPointF(self.cent_x,self.cent_y)]
-        painter.drawPoints(points)
-        
-        if self.ui_parent.draw_refs and self.ui_parent.engine.num_boxes>0: # and self.engine.mode>1:
-            pen = QPen(Qt.green, 1.0)
-            painter.setPen(pen)
-            points_ref=[QPointF(self.ui_parent.engine.ref_x[n],
-                self.ui_parent.engine.ref_y[n]) for n in [self.nbox] ]
-            painter.drawPoints(points_ref)
-            
-        if self.ui_parent.draw_predicted: 
-            pen2 = QPen(Qt.green, 1.0)
-            painter.setPen(pen2)
-            points_centroids=[QPointF(
-                self.ui_parent.engine.offline.est_x[n],
-                self.ui_parent.engine.offline.est_y[n])
-                              for n in np.arange(self.ui_parent.engine.num_boxes)]
-            painter.drawPoints(points_centroids)
+        # Markers, drawn on the enlarged image. Box coordinates are pixel indices (pixel i's center is i), so its center on screen is (i+0.5)*zoom
+        to_screen = lambda x, y: QPointF((x + 0.5) * zoom, (y + 0.5) * zoom)
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.Antialiasing)
+        radius = max(zoom * 0.3, 2.5)
+        if np.isfinite(self.cent_x) and np.isfinite(self.cent_y):
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QColor(overlay))
+            painter.drawEllipse(to_screen(self.cent_x, self.cent_y), radius, radius)
 
+        if self.ui_parent.draw_refs and self.ui_parent.engine.num_boxes>0:
+            # This box's reference position (whole-image coordinates: the box's upper left is as in the main window). A cross
+            try:
+                bs = self.ui_parent.engine.box_size_pixel
+                ref = to_screen(self.ui_parent.engine.ref_x[self.nbox] - int(self.box_x - bs//2),
+                                self.ui_parent.engine.ref_y[self.nbox] - int(self.box_y - bs//2))
+                painter.setPen(QPen(Qt.green, 1.5))
+                painter.drawLine(QLineF(ref.x() - radius - 2, ref.y(), ref.x() + radius + 2, ref.y()))
+                painter.drawLine(QLineF(ref.x(), ref.y() - radius - 2, ref.x(), ref.y() + radius + 2))
+            except (AttributeError, IndexError):
+                pass # No references yet
+
+        if self.ui_parent.draw_predicted:
+            # This box's spot position estimated from the Zernikes (whole-image coordinates: the box's upper left is as in the main window)
+            try:
+                bs = self.ui_parent.engine.box_size_pixel
+                est_x = self.ui_parent.engine.offline.est_x[self.nbox] - int(self.box_x - bs//2)
+                est_y = self.ui_parent.engine.offline.est_y[self.nbox] - int(self.box_y - bs//2)
+                if np.isfinite(est_x) and np.isfinite(est_y):
+                    painter.setPen(QPen(Qt.green, 1.5))
+                    painter.setBrush(Qt.NoBrush)
+                    painter.drawEllipse(to_screen(est_x, est_y), radius + 1.5, radius + 1.5)
+            except (AttributeError, IndexError):
+                pass # Nothing estimated yet
         painter.end()
-        pixmap = pixmap.scaled(200,200,Qt.KeepAspectRatio)
+
         self.image_label.setPixmap(pixmap)
+        if use_colormap:
+            self.colorbar_label.setPixmap(self.make_colorbar(vmin, vmax, pixmap.height()))
+
+    def make_colorbar(self, vmin, vmax, height):
+        """ The colormap from vmin (bottom) to vmax (top), with intensity values """
+        bar = QPixmap(ZOOM_COLORBAR_WIDTH, height)
+        bar.fill(self.palette().color(QPalette.Window))
+        painter = QPainter(bar)
+        bar_x, bar_w = 2, 14
+        for row in range(height): # Top row is the max
+            r, g, b = self.colormap_lut[int(round((height - 1 - row) / max(height - 1, 1) * 255))]
+            painter.setPen(QColor(int(r), int(g), int(b)))
+            painter.drawLine(bar_x, row, bar_x + bar_w - 1, row)
+
+        font = QFont(painter.font())
+        font.setPixelSize(11)
+        painter.setFont(font)
+        painter.setPen(self.palette().color(QPalette.WindowText))
+        span = max(vmax - vmin, 1e-9)
+        step = nice_step(span, 5)
+        y_of = lambda v: (height - 1) * (1 - (v - vmin) / span)
+        ticks = list(np.arange(np.ceil(vmin / step) * step, vmax + step * 1e-6, step))
+        for v in ticks:
+            y = y_of(v)
+            painter.drawLine(QLineF(bar_x + bar_w, y, bar_x + bar_w + 4, y))
+            painter.drawText(QPointF(bar_x + bar_w + 7, min(max(y + 4, 10), height - 1)), '%g' % v)
+        painter.end()
+        return bar
 
     def closeEvent(self, event):
         self.ui_parent.box_info = -1
@@ -195,7 +613,7 @@ class BoxInfoDialog(QDialog):
     def event(self, event): 
         if event.type() == QtCore.QEvent.EnterWhatsThisMode:
             self.ui_parent.engine.omits[self.nbox] = not ( self.ui_parent.engine.omits[self.nbox] )
-            print( "Omit: %d",self.nbox);
+            log.debug( "Omit: %d",self.nbox);
             return True
         return QDialog.event(self, event)
     
@@ -232,23 +650,21 @@ class ActuatorPlot(QLabel):
         #https://het.as.utexas.edu/HET/Software/html/qimage.html#image-transformations
         #https://stackoverflow.com/questions/35382088/qimage-custom-indexed-colors-using-setcolortable
         [widg.setColor(n, self.act_colors[n]) for n in np.arange(256)]
+        
+    def actuator_window_clicked(self, event):
+        # Get the geometry of the spot window
+        geometry = self.pixmap1.geometry()
 
-    ''' Didn't work: not sure why
-        def button_clicked(self, event):
-            print("clicked:", event.pos() )
-            # Get the geometry of the spot window
-            geometry = self.pixmap1.geometry()
-
-            # Access position and size attributes
-            x = geometry.x()
-            y = geometry.y()
-            width = geometry.width()
-            height = geometry.height()
-         
-            x_scaled = event.pos().x() / width #* self.image_pixels.shape[1]
-            y_scaled = event.pos().y() / height #* self.image_pixels.shape[0]
-            print("scaled: x,y ", x_scaled, y_scaled)
-'''        
+        # Access position and size attributes
+        x = geometry.x()
+        y = geometry.y()
+        width = geometry.width()
+        height = geometry.height()
+     
+        # print("clicked:", event.pos() )
+        x_scaled = event.pos().x() / width #* self.image_pixels.shape[1]
+        y_scaled = event.pos().y() / height #* self.image_pixels.shape[0]
+        log.debug("scaled: x,y ", x_scaled, y_scaled)
         
     def paintEvent_manual(self): #, p, *args):
         #mirror_vals=np.array(np.random.normal(size=(97)) )
@@ -303,8 +719,8 @@ class MyBarWidget(pg.PlotWidget):
     def mousePressEvent(self, ev):
         super().mousePressEvent(ev)
         self.sigMouseClicked.emit(ev)
-        print(ev, ev.pos() )
-        print( self.getViewBox().viewRange() )
+        log.debug(ev, ev.pos() )
+        log.debug( self.getViewBox().viewRange() )
         if ev.button()==Qt.LeftButton:
             if (self.getViewBox().boundingRect().right() - self.getViewBox().mapFromScene(ev.pos()).x())<20:
                 self.terms_expanded = not( self.terms_expanded )
@@ -313,8 +729,11 @@ class MyBarWidget(pg.PlotWidget):
         if event.type() == QEvent.ToolTip:
             pos_plot = self.getViewBox().mapSceneToView(event.pos())
             bar_which = round(pos_plot.x())
-            zernike_val = self.app.engine.zernikes[bar_which-1]
-            self.setToolTip("Z%d=%+0.3f"%(bar_which,zernike_val) )
+            try:
+                zernike_val = self.app.engine.zernikes[bar_which-1]
+                self.setToolTip("Z%d=%+0.3f"%(bar_which,zernike_val) )
+            except (IndexError, TypeError):
+                pass # Ok, bad position, or no zernikes computed yet
 
         return super(MyBarWidget, self).eventFilter(obj, event)
 
@@ -355,6 +774,122 @@ class OfflineDialog(QDialog):
 
         # Set the layout for the dialog
         self.setLayout(layout)
+
+
+class LogViewer(QWidget):
+    """ A window that shows the log file (see nextwave_log.py) and follows it as it grows: the last part of the file when it
+        opens, then whatever is added, checked twice a second while the window is open. "Follow" keeps the newest line in view
+        (untick it to scroll back and read). The level box changes what is logged from now on (DEBUG is a lot). """
+    TAIL_BYTES = 200 * 1024 # How much of the end of the file to show at first
+    POLL_MS = 500
+
+    def __init__(self, parent=None):
+        super().__init__(parent, Qt.Window)
+        self.setWindowTitle("Log")
+        self.resize(1000, 500)
+        self.path = None
+        self.pos = 0 # How far into the file has been shown
+
+        self.text = QPlainTextEdit()
+        self.text.setReadOnly(True)
+        self.text.setLineWrapMode(QPlainTextEdit.NoWrap)
+        self.text.setMaximumBlockCount(20000)
+        font = QFont("Consolas" if os.name == 'nt' else "Monospace")
+        font.setStyleHint(QFont.Monospace)
+        self.text.setFont(font)
+
+        self.label_path = QLabel()
+        self.chk_follow = QCheckBox("Follow")
+        self.chk_follow.setChecked(True)
+        self.combo_level = QComboBox()
+        self.combo_level.addItems(nextwave_log.LEVELS)
+        self.combo_level.currentTextChanged.connect(self.level_changed)
+        btn_clear = QPushButton("Clear")
+        btn_clear.setToolTip("Clears this window, not the file")
+        btn_clear.clicked.connect(self.text.clear)
+
+        top = QHBoxLayout()
+        top.addWidget(self.label_path, 1)
+        top.addWidget(QLabel("Level:"))
+        top.addWidget(self.combo_level)
+        top.addWidget(self.chk_follow)
+        top.addWidget(btn_clear)
+        layout = QVBoxLayout()
+        layout.addLayout(top)
+        layout.addWidget(self.text)
+        self.setLayout(layout)
+
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self.poll)
+
+    def level_changed(self, level):
+        nextwave_log.set_level(level)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self.combo_level.blockSignals(True)
+        self.combo_level.setCurrentText(nextwave_log.get_level())
+        self.combo_level.blockSignals(False)
+        self.reload()
+        self.timer.start(self.POLL_MS)
+
+    def hideEvent(self, event):
+        self.timer.stop()
+        super().hideEvent(event)
+
+    def reload(self):
+        """ Show the end of the log file again from scratch """
+        self.text.clear()
+        self.path = nextwave_log.log_path()
+        self.pos = 0
+        if not self.path:
+            self.label_path.setText("Not logging to a file (LOG_FILE is empty in nextwave_defaults.py)")
+            return
+        self.label_path.setText(self.path)
+        try:
+            size = os.path.getsize(self.path)
+            with open(self.path, 'rb') as f:
+                start = max(0, size - self.TAIL_BYTES)
+                f.seek(start)
+                data = f.read()
+            if start > 0: # (Began in the middle of a line: leave that out)
+                data = data.split(bytes([10]), 1)[-1] # (Split at the first newline)
+            self.pos = size
+        except OSError:
+            return
+        self.append(data.decode('utf-8', errors='replace'))
+
+    def poll(self):
+        if not self.path:
+            return
+        try:
+            size = os.path.getsize(self.path)
+        except OSError:
+            return
+        if size < self.pos: # The log was rotated (or cleared): start again on the new file
+            self.reload()
+            return
+        if size == self.pos:
+            return
+        try:
+            with open(self.path, 'rb') as f:
+                f.seek(self.pos)
+                data = f.read(size - self.pos)
+        except OSError:
+            return
+        self.pos = size
+        self.append(data.decode('utf-8', errors='replace'))
+
+    def append(self, chunk):
+        bar = self.text.verticalScrollBar()
+        keep = bar.value()
+        self.text.moveCursor(QtGui.QTextCursor.End)
+        self.text.insertPlainText(chunk)
+        if self.chk_follow.isChecked():
+            bar.setValue(bar.maximum())
+        else:
+            bar.setValue(keep)
+
 
 class IntensityDialogX(QDialog):
     def __init__(self,parent):

@@ -1,3 +1,4 @@
+from nextwave_log import log
 import numpy as np
 import sys
 import os
@@ -22,6 +23,7 @@ import functions_grid
 
 from nextwave_comm import NextwaveEngineComm
 from offline import NextwaveOffline
+import defaults
 
 #import ffmpegcv # Read AVI... Better than OpenCV (built-in ffmpeg?)
 
@@ -30,15 +32,7 @@ from PIL import Image, TiffImagePlugin
 WINDOWS=(os.name == 'nt')
 
 
-NACT_PER_NZERN=0.5
-
-GAUSS_SD=3
-BOX_THRESH=2.5
-
-OFFLINE_ITERATIVE_START=3.0
-OFFLINE_ITERATIVE_STEP=0.25
-
-
+# TODO: Get this from the .h file
 MEM_LEN=512
 MEM_LEN_DATA=2048*2048*4
 
@@ -47,9 +41,10 @@ class ByteStream(bytearray):
         self.extend(struct.pack(fmt, v))
 
 class OpticsParams():
-    def __init__(self,ccd_pixel,pupil_diam,box_um,focal):
+    def __init__(self,ccd_pixel,pupil_diam,pupil_mag,box_um,focal):
         self.ccd_pixel = ccd_pixel
         self.pupil_diam = pupil_diam
+        self.pupil_mag = pupil_mag
         self.box_um = box_um
         self.focal = focal
 
@@ -69,6 +64,9 @@ class NextwaveEngine():
         # TODO:
         self.ui = ui
         self.mode = 0
+        self.cx = 0 # Center of the pupil (pixels): from the config, in init (the window makes us before reading the config)
+        self.cy = 0
+        self.mode_offline = False # True: process images offline, don't get centroids from the C++ engine
         self.comm = NextwaveEngineComm(self)
         self.offline = NextwaveOffline(self)
         self.num_boxes = 0
@@ -88,6 +86,8 @@ class NextwaveEngine():
         self.ao_precondition = True # Fancy Tikhonov preconditioning
         
     def init(self):
+        self.cx = self.ui.json_data["params"]["cx"] # The starting center
+        self.cy = self.ui.json_data["params"]["cy"]
         if not self.ui.offline_only:
             self.comm.init()
             self.comm.set_mode(0)
@@ -109,21 +109,27 @@ class NextwaveEngine():
 
         if overrides:
             self.pupil_diam=overrides.get('pupil_diam',self.pupil_diam)
+            if self.pupil_diam == None: # SEt to None sometimes (e.g. box size change)
+                val=float( self.ui.line_pupil_diam.text() )
+                self.pupil_diam = val            
 
         # New method, not used much yet:
-        self.params = OpticsParams(self.ccd_pixel, self.pupil_diam, self.box_um, self.focal)
+        self.params = OpticsParams(self.ccd_pixel, self.pupil_diam, self.pupil_mag, self.box_um, self.focal)
 
+        # Internally, "pupil_diam" is the size of the pupil on the *sensor*, which needs to be accounted for.
+        # Whenever showing to the user (or outputing to a file), or computing Zernikes, do pupil_diam/pupil_mag
         self.pupil_diam = self.pupil_diam * self.pupil_mag
 
         self.pupil_radius_mm=self.pupil_diam / 2.0
         self.pupil_radius_pixel=self.pupil_radius_mm * 1000 / self.ccd_pixel
         self.box_size_pixel=self.box_um / self.ccd_pixel
+        self.lenslet_size_pixel=self.box_um / self.ccd_pixel # Never overridden: for UI move!
 
         if overrides:
             self.box_size_pixel=overrides.get('box_size_pixel',self.box_size_pixel)
 
         self.ri_ratio = self.pupil_radius_pixel / self.box_size_pixel
-        #print( "Init:", self.box_size_pixel, self.pupil_radius_pixel, self.ri_ratio )
+        #print( "Init:", self.pupil_diam, self.box_size_pixel, self.pupil_radius_pixel, self.ri_ratio )
 
         bytez =np.array([self.ccd_pixel, self.box_um, self.pupil_radius_mm], dtype='double').tobytes() 
 
@@ -153,7 +159,9 @@ class NextwaveEngine():
     def make_searchboxes(self,cx=None,cy=None,aperture=1.0,pupil_radius_pixel=None, box_spacing_pixel=None):
         """
         Like the MATLAB code to make equally spaced boxes, but doesn't use loops.
-        Instead builds and filters arrays
+        Instead builds and filters arrays.
+        
+        radius_pixels should be radius ON THE SENSOR
 
         #"Loopy" code looks like the following:
         for y in np.arange(limit, -limit-1, -1):
@@ -168,9 +176,9 @@ class NextwaveEngine():
 
         """
         if cx is None:
-            cx=self.ui.cx
+            cx=self.cx
         if cy is None:
-            cy=self.ui.cy
+            cy=self.cy
 
         if pupil_radius_pixel is None:
             pupil_radius_pixel=self.pupil_radius_pixel
@@ -234,7 +242,7 @@ class NextwaveEngine():
         
         self.update_zernike_svd() # Precompute
 
-        print( "Make SB ",pupil_radius_pixel, box_size_pixel, box_spacing_pixel, ri_ratio, num_boxes, self.zterms_full.shape )
+        log.debug( "Make SB ",pupil_radius_pixel, box_size_pixel, box_spacing_pixel, ri_ratio, num_boxes, self.zterms_full.shape )
 
         # Determine neighbors (for nan interpolation)
         self.neighbors = np.zeros( (self.num_boxes, 4), dtype='int32')
@@ -328,16 +336,29 @@ class NextwaveEngine():
         lenslet_dy = lenslet_dy[1:,:]
 
         # TODO: Dumb to make loop, making into function would be better
+        # first iteration gets the full matrix, second one gets the 20term matrix 
         for nsubset in [0,1]:
-            nmax_from_boxes=int(self.num_boxes/NACT_PER_NZERN)
-            nmax_from_boxes= np.min( (nmax_from_boxes,zernike_functions.MAX_ZERNIKES))
-            orders_max=np.cumsum(np.arange(zernike_functions.MAX_ORDER+2)) - 1 # Last index in each order
-            valid_max = orders_max[nmax_from_boxes<=orders_max][0]
+            nmax_from_boxes=int(self.num_boxes/defaults.MIN_BOXES_PER_NZERN)
+            
+            # New heuristics from GYY 2/3/2025
+            #if self.pupil_radius_mm*2 /self.pupil_mag<=3:
+            #    nmax_from_boxes = 9
+            #elif self.pupil_radius_mm*2 /self.pupil_mag>=5:
+            #    nmax_from_boxes = 27
+            #else: #3<x<5
+            #    nmax_from_boxes = 20
+                
+            nmax_from_boxes= np.min( (nmax_from_boxes,defaults.MAX_ZERNIKES))
+            orders_max=np.cumsum(np.arange(defaults.MAX_ORDER+2)) - 1 # Last index in each order
+            #print( orders_max )
+            valid_max = orders_max[nmax_from_boxes>=orders_max][-1]
+            #print( 'MAX', nmax_from_boxes, valid_max)
+            
             if nsubset==0:
                 nvalid = valid_max
-                #print("Est. max zs:%d, Max Z (order):%d"%(nmax_from_boxes, valid_max) )
+               #print("Est. max zs:%d, Max Z (order):%d"%(nmax_from_boxes, valid_max, orders_max) )
             if nsubset==1: #
-                nvalid = np.min( (20, nmax_from_boxes) )
+                nvalid = np.min( (20, valid_max) )
 
             dx_subset=lenslet_dx[0:nvalid,:]
             dy_subset=lenslet_dy[0:nvalid,:]
@@ -374,13 +395,14 @@ class NextwaveEngine():
         # DBG:
         self.lenslet_dx=lenslet_dx # Debugging
         self.lenslet_dy=lenslet_dy
-        print(f"Resave zterms. shape={self.zterms_full.shape}")
-        np.save('zterms_full.npy',self.zterms_full)
-        np.save('zterms_full_inv.npy',self.zterms_full_inv)
-        np.save('zterms_20.npy',self.zterms_20)
-        np.save('zterms_20_inv.npy',self.zterms_20_inv)
-        np.save('zpoly_20.npy',zpoly_20)
-        np.save('zpoly_full.npy',zpoly_full)
+        if not (self.ui.offline_only or self.mode_offline): # (Debugging files, realtime only: offline, frames are processed in parallel)
+            print(f"Resave zterms. shape={self.zterms_full.shape}")
+            np.save('zterms_full.npy',self.zterms_full)
+            np.save('zterms_full_inv.npy',self.zterms_full_inv)
+            np.save('zterms_20.npy',self.zterms_20)
+            np.save('zterms_20_inv.npy',self.zterms_20_inv)
+            np.save('zpoly_20.npy',zpoly_20)
+            np.save('zpoly_full.npy',zpoly_full)
 
     def apply_zernikes(self,zs,from_dialog=True):
         #print( zs )
@@ -515,8 +537,10 @@ class NextwaveEngine():
 
         # Not sure whether should do this:
         # DRC: I am restoring this on 2026/03/06 (!) Breaking?
-        spot_displace_x -= np.nanmean( spot_displace_x )
-        spot_displace_y -= np.nanmean( spot_displace_y )
+        # Realtime only: offline, tip/tilt is measured (and moves the search boxes between steps), so it's kept
+        if not (self.mode_offline or self.ui.offline_only):
+            spot_displace_x -= np.nanmean( spot_displace_x )
+            spot_displace_y -= np.nanmean( spot_displace_y )
         
         spot_displace_y = -spot_displace_y;
         
@@ -524,18 +548,26 @@ class NextwaveEngine():
         self.mean_displacements = [np.nanmean(spot_displace_x), np.nanmean(spot_displace_y) ]
 
         self.spot_displace_interpolated = np.zeros( self.num_boxes )
+        
+        # Determine neighbors (for nan interpolation)
+        self.neighbors = np.zeros( (self.num_boxes, 4), dtype='int32')
+        for nidx in np.arange(self.num_boxes):
+            distances = (self.box_x - self.box_x[nidx])**2 + (self.box_y - self.box_y[nidx])**2
+            self.neighbors[nidx]=np.argsort( distances)[1:5] # Take 4 nearest, excluding self (which will be 0)
 
         for nidx in np.arange(self.num_boxes):
             if np.isnan(spot_displace_x[nidx]) or np.isnan(spot_displace_y[nidx]):
                 spot_displace_x[nidx] = np.nanmean( spot_displace_x[self.neighbors[nidx]] )
                 spot_displace_y[nidx] = np.nanmean( spot_displace_y[self.neighbors[nidx]] )
                 self.spot_displace_interpolated[nidx] = 1
+               # print("Good interp: %d %f %f"%(nidx,spot_displace_x[nidx], spot_displace_y[nidx]  ) )
 
             if np.isnan(spot_displace_x[nidx]) or np.isnan(spot_displace_y[nidx]):
                 #print( "Still nan", nidx, self.neighbors[nidx])
                 spot_displace_x[nidx]=0
                 spot_displace_y[nidx]=0
                 self.spot_displace_interpolated[nidx] = 2
+                log.debug("BAD interp: %d %f %f"%(nidx,spot_displace_x[nidx], spot_displace_y[nidx]  ) )
 
         # DRC: x and y were switched here 2025/05/29. Hmm, Not so sure 9/14/25
         slope = np.concatenate( (spot_displace_y, spot_displace_x)) * (self.ccd_pixel/self.focal);
@@ -579,13 +611,20 @@ class NextwaveEngine():
 
     def get_deltas(self,zs,from_dialog,full=True):
         zs=np.array(zs)
+        if len(zs)<20:
+            zs_temp=np.zeros(20)
+            zs_temp[0:len(zs)]=zs
+            zs=zs_temp
+            
         if len(zs)==20:
             mat1=self.zterms_20_inv
+            valid_idxs=np.arange(0,mat1.shape[1] )
         else:
             mat1=self.zterms_full_inv
+            valid_idxs=np.arange(0,mat1.shape[1] )
 
-        valid_idxs=np.arange(0,mat1.shape[1] )
         idxs_remap  = zernike_functions.OSA_to_CVS_map[valid_idxs]
+        #print(len(zs), len(idxs_remap), len(valid_idxs), idxs_remap)
         zern_new=zs[valid_idxs] [idxs_remap ]
         #zern_new[0:2]=0 # Remove tip/tilt TODO: Need to move the pupil center?
         #zern_new[0:2] = [-0.5,0.2] #
@@ -600,8 +639,9 @@ class NextwaveEngine():
         self.zern_new = zern_new
         self.zs = zs
 
-        np.savetxt('zs_delta_x.txt',delta_x );
-        np.savetxt('zs_delta_y.txt',delta_y );
+        if not (self.ui.offline_only or self.mode_offline): # (Debugging files, realtime only)
+            np.savetxt('zs_delta_x.txt',delta_x );
+            np.savetxt('zs_delta_y.txt',delta_y );
         
         return delta_x,delta_y
 
@@ -727,7 +767,7 @@ class NextwaveEngine():
     def receive_image(self):
         return self.comm.receive_image()
     def receive_centroids(self):
-        if self.ui.mode_offline==False: # If in offline, don't keep grabbing centroids from C++ engine
+        if self.mode_offline==False: # If in offline, don't keep grabbing centroids from C++ engine
             return self.comm.receive_centroids()
 
     def flat_do(self):
@@ -765,7 +805,7 @@ class NextwaveEngine():
         #time.sleep(0.1)
 
     def mode_snap(self, reinit=True, allow_AO=True):
-        if self.ui.mode_offline:
+        if self.mode_offline:
             self.offline.offline_centroids()
             return
 
@@ -800,7 +840,7 @@ class NextwaveEngine():
         fil = open(centroids_filename,'wt')
 
         fil.writelines( '[image size = %dx%d]\n'%(self.image_bytes.shape[0],self.image_bytes.shape[1]))
-        fil.writelines( '[pupil = %f,%d,%d]\n'%(self.pupil_diam/self.pupil_mag,self.ui.cx,self.ui.cy))
+        fil.writelines( '[pupil = %f,%d,%d]\n'%(self.pupil_diam/self.pupil_mag,self.cx,self.cy)) # (The center is the engine's)
         for nbox in np.arange( len(self.ref_x)):
             # TODO: Valid or invalid
             fil.writelines('%d\t%.12f\t%.12f\t%.12f\t%.12f\t\n'%(

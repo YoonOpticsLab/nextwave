@@ -1,3 +1,4 @@
+from nextwave_log import log
 import numpy as np
 import sys
 import os
@@ -176,7 +177,7 @@ class NextwaveEngineComm():
         shmem_boxes.flush()
 
     def receive_image(self):
-        if self.parent.ui.mode_offline or self.parent.ui.offline_only:
+        if self.parent.mode_offline or self.parent.ui.offline_only:
             # Assume it's already been written directly into image_bytes by offline processes
             try:
                 return self.parent.image_bytes
@@ -310,16 +311,16 @@ class NextwaveEngineComm():
 
         DEBUGGING=False
         if DEBUGGING:
-            print (num_boxes, np.min(self.centroids_x), np.max(self.centroids_x)  )
+            log.debug (num_boxes, np.min(self.centroids_x), np.max(self.centroids_x)  )
             for n in np.arange(num_boxes):
                 if np.isnan(self.centroids_x[n]):
-                    print( n, end=' ')
-                    print (num_boxes, self.centroids_x[100], self.centroids_y[100]  )
+                    log.debug( n, end=' ')
+                    log.debug (num_boxes, self.centroids_x[100], self.centroids_y[100]  )
 
     def set_mode(self, val):
         if not self.ui.offline_only:
             buf = ByteStream()
-            buf.append(val) # TODO: MODE_CENTROIDING
+            buf.append(val) # TODO: MODE_
             self.shmem_hdr.seek(2) #TODO: get address
             self.shmem_hdr.write(buf)
             self.shmem_hdr.flush()
