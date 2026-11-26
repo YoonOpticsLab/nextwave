@@ -1015,7 +1015,11 @@ class NextWaveMainWindow(QMainWindow):
         #str_stats+=f"{'Cylinder':<15}= {cylinder:3.2f}\n"
         #str_stats+=f"{'Axis(-cyl)':<15}= {axis:3.2f}\n"
         
-        str_stats += f"Mean (x,y): {self.engine.mean_displacements[0]:4.2f},{self.engine.mean_displacements[1]:4.2f}\n" 
+        try:
+            str_stats += f"Mean (x,y): {self.engine.mean_displacements[0]:4.2f},{self.engine.mean_displacements[1]:4.2f}\n" 
+        except:
+            pass
+            
         str_stats += f" Zs: {self.engine.zernikes[0]:4.3f},{self.engine.zernikes[1]:4.3f}" 
         
         self.text_stats.setText(str_stats)
